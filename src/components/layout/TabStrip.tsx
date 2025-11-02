@@ -7,6 +7,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Plus } from 'lucide-react';
 import { ipc } from '../../lib/ipc-typed';
 import { useTabsStore } from '../../state/tabsStore';
+import { TabHoverCard } from '../TopNav/TabHoverCard';
+import { TabContextMenu } from './TabContextMenu';
 
 interface Tab {
   id: string;
@@ -19,6 +21,7 @@ interface Tab {
 export function TabStrip() {
   const { tabs: storeTabs, setAll: setAllTabs, setActive: setActiveTab, remove: removeTab } = useTabsStore();
   const [tabs, setTabs] = useState<Tab[]>([]);
+  const [contextMenu, setContextMenu] = useState<{ tabId: string; url: string; x: number; y: number } | null>(null);
 
   // Load tabs on mount and listen for updates
   useEffect(() => {
@@ -147,23 +150,28 @@ export function TabStrip() {
       <div className="flex items-center gap-2 min-w-0 flex-1">
         <AnimatePresence mode="popLayout">
           {tabs.map((tab) => (
-            <motion.div
-              key={tab.id}
-              layout
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.8 }}
-              className={`
-                relative flex items-center gap-2 px-4 py-2 rounded-lg
-                min-w-[100px] max-w-[220px] cursor-pointer group
-                transition-all duration-200
-                ${tab.active
-                  ? 'bg-purple-600/20 border border-purple-500/40'
-                  : 'bg-gray-800/30 hover:bg-gray-800/50 border border-transparent'
-                }
-              `}
-              onClick={() => activateTab(tab.id)}
-            >
+            <TabHoverCard key={tab.id} tabId={tab.id}>
+              <motion.div
+                layout
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.8 }}
+                className={`
+                  relative flex items-center gap-2 px-4 py-2 rounded-lg
+                  min-w-[100px] max-w-[220px] cursor-pointer group
+                  transition-all duration-200
+                  ${tab.active
+                    ? 'bg-purple-600/20 border border-purple-500/40 shadow-lg shadow-purple-500/20'
+                    : 'bg-gray-800/30 hover:bg-gray-800/50 border border-transparent'
+                  }
+                `}
+                onClick={() => activateTab(tab.id)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  (window as any).__lastContextMenuPos = { x: e.clientX, y: e.clientY };
+                  setContextMenu({ tabId: tab.id, url: tab.url, x: e.clientX, y: e.clientY });
+                }}
+              >
               {/* Favicon */}
               <div className="flex-shrink-0 w-4 h-4 bg-gray-600 rounded-full flex items-center justify-center">
                 {tab.favicon ? (
@@ -190,7 +198,8 @@ export function TabStrip() {
               >
                 <X size={14} className="text-gray-400" />
               </motion.button>
-            </motion.div>
+              </motion.div>
+            </TabHoverCard>
           ))}
         </AnimatePresence>
 
@@ -205,6 +214,15 @@ export function TabStrip() {
           <Plus size={18} />
         </motion.button>
       </div>
+
+      {/* Context Menu */}
+      {contextMenu && (
+        <TabContextMenu
+          tabId={contextMenu.tabId}
+          url={contextMenu.url}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   );
 }

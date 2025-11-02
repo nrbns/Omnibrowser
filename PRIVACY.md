@@ -1,79 +1,76 @@
 # Privacy Policy
 
-OmniBrowser is designed with privacy-first principles.
+**OmniBrowser** is designed with privacy as a core principle. This document explains how we handle your data.
 
 ## Data Collection
 
-**OmniBrowser does NOT collect or transmit any user data by default.**
+### What We Don't Collect
 
-### Local Storage
-- Browsing history stored locally only
-- Cookies stored per-profile/session
-- No telemetry or analytics by default
+- **Browsing History**: Stored locally only, never transmitted
+- **Passwords**: Handled by your system keychain/browser password manager
+- **Personal Data**: No telemetry, analytics, or tracking
+- **Cookies/Storage**: Managed per-profile/partition, isolated from other sessions
 
-### Consent Ledger
-- All sensitive operations require explicit user consent
-- Consent records stored locally (SHA-256 hashed)
-- User can review consent history
+### What We Store Locally
+
+- **Browser Settings**: Preferences, extensions, profiles
+- **Download History**: Local records with checksums (optional)
+- **Session Data**: Workspaces, tabs, notes (stored locally)
+- **Agent Tasks**: Research logs, consent ledger (local only)
 
 ## Privacy Features
 
-### Private Mode
-- **No persistence**: All data cleared on window close
-- **In-memory only**: No disk storage
-- **Content protection**: Screen recording protection (macOS)
+### 1. Private/Incognito Mode
+- **Ephemeral Partitions**: Each private window uses a temporary, in-memory session
+- **Auto-Cleanup**: All data cleared on window close
+- **Content Protection**: macOS screen recording prevention
+- **Fingerprint Protection**: Canvas/audio noise, WebRTC blocking
 
-### Ghost Tabs
-- Enhanced fingerprint protection
-- Canvas/audio noise injection
-- WebRTC blocking
-- Stable random traits
+### 2. Ghost Mode
+- **Isolated Tabs**: Ghost tabs use separate partitions
+- **No Persistence**: Cookies, storage, cache cleared on close
+- **Timer-Based Auto-Close**: Optional automatic cleanup
 
-### Burn Tab
-- Instant data clearing
-- Clears cookies, cache, storage
-- No trace left behind
+### 3. Shields
+- **Ad/Tracker Blocking**: Local filters, no external requests
+- **HTTPS-Only Mode**: Force secure connections
+- **3rd-Party Cookie Blocking**: Per-site configuration
+- **Fingerprint Protection**: Canvas noise, audio randomization
+- **WebRTC Leak Prevention**: Block unauthorized peer connections
 
-### Panic Wipe
-- Emergency data clearing
-- Clears all tabs, sessions, partitions
-- Forensic cleanse option (deep cache clear)
+### 4. Network Privacy
+- **DNS-over-HTTPS (DoH)**: Encrypted DNS queries
+- **Tor Integration**: Route traffic through Tor network
+- **Proxy Support**: Per-tab/proxy routing
+- **IPv6 Leak Protection**: Disable IPv6 to prevent leaks
 
-## Network Privacy
+### 5. Consent Ledger
+- **Explicit Approvals**: All sensitive operations require user consent
+- **Audit Trail**: SHA-256 hashed ledger of all consent actions
+- **No Auto-Approval**: Nothing happens without your permission
 
-### Tor Integration
-- Route traffic through Tor network
-- New identity button for fresh circuit
-- Circuit status monitoring
+## Data Sharing
 
-### DNS-over-HTTPS (DoH)
-- Encrypted DNS queries
-- Prevents DNS leaks
-- Multiple provider options
+**We do not share your data with anyone.** All data stays on your device unless you explicitly:
+- Export workspaces/research notes
+- Share via system clipboard
+- Use cloud sync (if enabled in settings)
 
-### VPN Detection
-- Detects system VPN connections
-- Per-tab proxy routing
-- Split tunneling support
+## Updates & Telemetry
 
-## Settings & Control
+- **Auto-Updates**: Optional, checks GitHub Releases only
+- **No Telemetry**: Zero analytics or usage tracking
+- **No Crash Reports**: Crashes logged locally only
 
-Users have full control over:
-- Privacy settings per-site
-- Shields configuration (ads, trackers, cookies)
-- Network routing (Tor, VPN, proxy)
-- Data retention policies
-- Consent preferences
+## Your Rights
 
-## Telemetry
+- **Delete All Data**: Use "Panic Wipe" or "Forensic Cleanse"
+- **Export Data**: Export workspaces, notes, history
+- **Audit Trail**: View consent ledger anytime
+- **Source Code**: Fully open-source, inspectable
 
-**Telemetry is disabled by default.**
+## Contact
 
-If enabled (opt-in only):
-- Error reports only
-- No browsing data
-- No personal information
-- Anonymized crash reports
+For privacy concerns: Open an issue on [GitHub](https://github.com/nrbns/Omnibrowser).
 
-To disable: Settings → Privacy → Telemetry
-
+**Last Updated**: 2024-12

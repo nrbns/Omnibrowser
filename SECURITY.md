@@ -5,52 +5,123 @@
 | Version | Supported          |
 | ------- | ------------------ |
 | Latest  | :white_check_mark: |
-| < Latest | :x:                |
+| < 1.0   | :x:                |
 
-## Reporting a Vulnerability
+## Security Features
 
-If you discover a security vulnerability, please report it privately:
+### 1. **Sandboxing**
+- **Renderer Isolation**: Each tab runs in isolated BrowserView
+- **Context Isolation**: `contextIsolation: true` prevents node access
+- **Sandbox Mode**: Enabled where possible
+- **Preload Scripts**: Minimal API exposure via `contextBridge`
 
-1. **Do NOT** open a public issue
-2. Email security concerns to: [security@omnibrowser.dev] (placeholder)
-3. Include:
+### 2. **Content Security Policy (CSP)**
+- Strict CSP headers for internal pages
+- No inline scripts in production
+- Restricted resource loading
+
+### 3. **IPC Security**
+- **Typed IPC**: Zod validation for all IPC requests
+- **Versioned Channels**: `ob://ipc/v1/*` with schema validation
+- **Request Validation**: All handlers validate input
+- **Error Handling**: No sensitive data in error messages
+
+### 4. **Network Security**
+- **HTTPS-Only Mode**: Force secure connections
+- **Certificate Validation**: Standard Electron cert pinning
+- **DNS-over-HTTPS**: Encrypted DNS queries
+- **Tor Support**: Route traffic through Tor network
+- **Proxy Validation**: Verify proxy endpoints
+
+### 5. **Data Protection**
+- **Encrypted Storage**: Use system keychain/safeStorage for secrets
+- **Partition Isolation**: Separate sessions per profile/tab
+- **Secure Deletion**: Overwrite on "Burn Tab" / "Forensic Cleanse"
+- **Checksum Verification**: SHA-256 for downloads
+
+### 6. **Permission System**
+- **Granular Permissions**: Camera, mic, filesystem, notifications
+- **Per-Origin TTL**: Permissions expire after set time
+- **Explicit Consent**: No auto-approval for sensitive operations
+- **Consent Ledger**: Audit trail of all approvals
+
+### 7. **Fingerprint Protection**
+- **Canvas Noise**: Randomize canvas fingerprinting
+- **Audio Fingerprinting**: Add noise to audio context
+- **WebGL Spoofing**: Standardized GPU strings
+- **User-Agent Randomization**: Per-tab UA strings
+- **Screen Resolution**: Normalize screen metrics
+
+### 8. **Update Security**
+- **Signed Releases**: GitHub Releases with checksums
+- **Auto-Update Verification**: Verify signatures before install
+- **No Telemetry**: Updates check GitHub only, no tracking
+
+## Reporting Security Issues
+
+**DO NOT** open a public issue for security vulnerabilities.
+
+### How to Report
+
+1. **Email**: Open a private security advisory on GitHub
+2. **Include**:
    - Description of the vulnerability
    - Steps to reproduce
    - Potential impact
    - Suggested fix (if any)
 
-We will respond within 48 hours and work with you to resolve the issue.
+### Response Timeline
 
-## Security Features
+- **Initial Response**: Within 48 hours
+- **Fix Timeline**: Depends on severity
+  - **Critical**: < 7 days
+  - **High**: < 14 days
+  - **Medium**: < 30 days
+  - **Low**: Next release cycle
 
-### Privacy & Data Protection
-- **Private Mode**: In-memory partitions, no data persistence
-- **Burn Tab**: Instant data clearing per tab
-- **Panic Wipe**: Emergency data clearing
-- **Forensic Cleanse**: Deep cache clearing
+### Disclosure Policy
 
-### Consent & Permissions
-- **Consent Ledger**: All sensitive operations require explicit consent
-- **Permission Prompts**: Camera, microphone, filesystem access
-- **Download Consent**: Gated downloads with user approval
+- We will disclose after a fix is available
+- Credit will be given (if desired)
+- We will coordinate with you on timing
 
-### Network Security
-- **Tor Integration**: Anonymous routing
-- **Shields**: Ad/tracker blocking, HTTPS upgrades
-- **DNS-over-HTTPS**: Encrypted DNS queries
-- **WebRTC Leak Protection**: Blocks WebRTC IP leaks
+## Known Limitations
 
-### Code Security
-- **Context Isolation**: Renderer process isolation
-- **Sandboxing**: BrowserViews run in sandbox
-- **Content Security Policy**: CSP headers enforced
-- **Input Validation**: All IPC requests validated with Zod schemas
+1. **Electron Base**: Inherits Electron security considerations
+   - Keep Electron updated
+   - Use latest Chromium version
+   
+2. **Native Modules**: Some features require native code
+   - Tor client (optional)
+   - Adblocker engines (optional)
 
-## Best Practices
+3. **System Integration**: Requires OS permissions for:
+   - Keychain access (macOS)
+   - Screen recording prevention (macOS)
+   - File system access (downloads)
 
-1. Always validate user input
-2. Use typed IPC handlers (never raw `ipcMain.handle`)
-3. Never store sensitive data in plain text
-4. Use secure storage for secrets (keytar)
-5. Clear sensitive data when no longer needed
+## Best Practices for Users
 
+1. **Keep Updated**: Always use latest version
+2. **Enable Shields**: Use privacy shields by default
+3. **Use Private Mode**: For sensitive browsing
+4. **Verify Downloads**: Check SHA-256 checksums
+5. **Review Permissions**: Audit consent ledger regularly
+6. **Use DoH/Tor**: For maximum privacy
+
+## Security Checklist
+
+Before each release:
+- [ ] Update Electron to latest stable
+- [ ] Update all dependencies (`npm audit`)
+- [ ] Review IPC handlers for validation
+- [ ] Test sandboxing in all modes
+- [ ] Verify CSP headers
+- [ ] Test permission flows
+- [ ] Review consent ledger integrity
+- [ ] Sign release artifacts
+- [ ] Publish security notes if needed
+
+---
+
+**Last Updated**: 2024-12

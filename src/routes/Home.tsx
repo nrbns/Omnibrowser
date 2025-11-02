@@ -11,6 +11,7 @@ import GraphMindPanel from '../modes/graphmind';
 import { useNavigate } from 'react-router-dom';
 import { MainView } from '../components/layout/MainView';
 import { ResearchSplit } from '../components/Panels/ResearchSplit';
+import { OmniDesk } from '../components/OmniDesk';
 
 export default function Home() {
   const mode = useAppStore(s=>s.mode);
@@ -33,8 +34,10 @@ export default function Home() {
   return (
     <div className={`h-full w-full bg-[#1A1D28] flex flex-col ${isFullscreen ? 'absolute inset-0' : ''}`}>
       {(mode === 'Browse' || !mode) && (
-        <div className="flex-1 w-full">
+        <div className="flex-1 w-full relative">
           <MainView />
+          {/* Show OmniDesk when no tabs */}
+          <OmniDesk />
         </div>
       )}
       {mode === 'Research' && (

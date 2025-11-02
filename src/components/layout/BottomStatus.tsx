@@ -3,12 +3,13 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Lock, Send, Cpu, MemoryStick, Network, Brain, Shield } from 'lucide-react';
+import { Lock, Send, Cpu, MemoryStick, Network, Brain, Shield, Activity } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { ipc } from '../../lib/ipc-typed';
 import { useTabsStore } from '../../state/tabsStore';
 import { NetworkStatus } from '../../lib/ipc-events';
 import { useIPCEvent } from '../../lib/use-ipc-event';
+import { PrivacySwitch } from '../PrivacySwitch';
 
 export function BottomStatus() {
   const { activeId } = useTabsStore();
@@ -72,24 +73,80 @@ export function BottomStatus() {
   };
 
   return (
-    <div className="h-10 flex items-center justify-between px-4 bg-gray-800/90 border-t border-gray-700/50">
+    <div className="h-10 flex items-center justify-between px-4 bg-gray-800/90 backdrop-blur-sm border-t border-gray-700/50">
       {/* Left: Status Indicators */}
-      <div className="flex items-center gap-6 text-xs text-gray-300">
-        <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-4 text-xs text-gray-300">
+        {/* Privacy Mode Switch */}
+        <PrivacySwitch />
+        
+        {/* CPU & Memory Gauges (clickable) */}
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          className="flex items-center gap-1.5 hover:text-gray-200 transition-colors"
+          title="Click to open performance inspector"
+        >
           <Cpu size={14} className="text-gray-500" />
           <span>CPU: {cpuUsage}%</span>
-        </div>
-        <div className="flex items-center gap-1.5">
+          <div className="w-12 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+            <motion.div
+              className="h-full bg-gradient-to-r from-blue-500 to-cyan-500"
+              initial={{ width: 0 }}
+              animate={{ width: `${cpuUsage}%` }}
+              transition={{ duration: 0.3 }}
+            />
+          </div>
+        </motion.button>
+        
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          className="flex items-center gap-1.5 hover:text-gray-200 transition-colors"
+          title="Memory usage"
+        >
           <MemoryStick size={14} className="text-gray-500" />
-          <span>Mem: {memoryUsage}%</span>
+          <span>RAM: {memoryUsage}%</span>
+          <div className="w-12 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+            <motion.div
+              className="h-full bg-gradient-to-r from-green-500 to-emerald-500"
+              initial={{ width: 0 }}
+              animate={{ width: `${memoryUsage}%` }}
+              transition={{ duration: 0.3 }}
+            />
+          </div>
+        </motion.button>
+
+        {/* Network Status */}
+        <div className="flex items-center gap-1.5" title={`Network: ${privacyMode} mode`}>
+          <Network size={14} className={
+            privacyMode === 'Tor' ? 'text-purple-400' :
+            privacyMode === 'Ghost' ? 'text-blue-400' :
+            'text-gray-500'
+          } />
+          <span className={privacyModeColors[privacyMode]}>{privacyMode}</span>
         </div>
-        <div className={`flex items-center gap-1.5 ${dohStatus.enabled ? 'text-blue-400' : 'text-gray-400'}`}>
-          <Network size={14} />
-          <span>DoH: {dohStatus.enabled ? dohStatus.provider : 'Off'}</span>
-        </div>
+        
+        {/* DoH Toggle */}
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          onClick={async () => {
+            if (dohStatus.enabled) {
+              await ipc.dns.disableDoH();
+            } else {
+              await ipc.dns.enableDoH('cloudflare');
+            }
+          }}
+          className={`flex items-center gap-1.5 transition-colors ${
+            dohStatus.enabled ? 'text-purple-400' : 'text-gray-500'
+          } hover:text-gray-200`}
+          title="DNS-over-HTTPS"
+        >
+          <Shield size={14} />
+          <span className="text-xs">DoH</span>
+        </motion.button>
+        
+        {/* Model Status */}
         <div className={`flex items-center gap-1.5 ${modelReady ? 'text-green-400' : 'text-yellow-400'}`}>
           <Brain size={14} />
-          <span>Model: {modelReady ? 'Ready' : 'Loading...'}</span>
+          <span className="text-xs">Model: {modelReady ? 'Ready' : 'Loading...'}</span>
           {modelReady && (
             <motion.div
               className="w-1.5 h-1.5 bg-green-400 rounded-full"
@@ -97,10 +154,6 @@ export function BottomStatus() {
               transition={{ duration: 2, repeat: Infinity }}
             />
           )}
-        </div>
-        <div className={`flex items-center gap-1.5 ${privacyModeColors[privacyMode]}`}>
-          <Shield size={14} />
-          <span>Privacy: {privacyMode}</span>
         </div>
       </div>
 

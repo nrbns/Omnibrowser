@@ -169,6 +169,7 @@ export const ipc = {
     set: (hostname: string, config: unknown) => ipcCall('shields:set', { hostname, config }),
     updateDefault: (config: unknown) => ipcCall('shields:updateDefault', config),
     list: () => ipcCall<unknown, unknown[]>('shields:list', {}),
+    getStatus: () => ipcCall<unknown, { adsBlocked: number; trackersBlocked: number; httpsUpgrades: number; cookies3p: 'block' | 'allow'; webrtcBlocked: boolean; fingerprinting: boolean }>('shields:getStatus', {}),
   },
   vpn: {
     status: () => ipcCall<unknown, { connected: boolean; type?: string; name?: string }>('vpn:status', {}),
@@ -320,6 +321,16 @@ export const ipc = {
     delete: (request: { sessionId: string }) => ipcCall('sessions:delete', request),
     update: (request: { sessionId: string; name?: string; color?: string }) => ipcCall('sessions:update', request),
     getPartition: (request: { sessionId: string }) => ipcCall<{ sessionId: string }, { partition: string }>('sessions:getPartition', request),
+  },
+  private: {
+    createWindow: (options?: { url?: string; autoCloseAfter?: number; contentProtection?: boolean; ghostMode?: boolean }) =>
+      ipcCall<{ url?: string; autoCloseAfter?: number; contentProtection?: boolean; ghostMode?: boolean }, { windowId: number }>('private:createWindow', options || {}),
+    createGhostTab: (options?: { url?: string }) =>
+      ipcCall<{ url?: string }, { tabId: string }>('private:createGhostTab', options || {}),
+    closeAll: () =>
+      ipcCall<unknown, { count: number }>('private:closeAll', {}),
+    panicWipe: (options?: { forensic?: boolean }) =>
+      ipcCall<{ forensic?: boolean }, { success: boolean }>('private:panicWipe', options || {}),
   },
 };
 

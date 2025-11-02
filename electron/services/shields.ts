@@ -46,6 +46,11 @@ class ShieldsService extends EventEmitter {
   }
   private siteConfigs: Map<string, SiteShields> = new Map();
   private adblocker: any = null;
+  
+  // Counters for shields stats
+  private adsBlocked = 0;
+  private trackersBlocked = 0;
+  private httpsUpgrades = 0;
 
   constructor() {
     super();
@@ -125,6 +130,7 @@ class ShieldsService extends EventEmitter {
           const isAdDomain = adDomains.some(domain => url.hostname.includes(domain));
           
           if (isAdDomain) {
+            this.incrementAdsBlocked();
             callback({ cancel: true });
             return;
           }
@@ -149,6 +155,7 @@ class ShieldsService extends EventEmitter {
         if (shields.config.httpsOnly) {
           // Upgrade to HTTPS
           const httpsUrl = details.url.replace(/^http:/, 'https:');
+          this.incrementHttpsUpgrade();
           callback({ redirectURL: httpsUrl });
         } else {
           callback({});
@@ -413,6 +420,46 @@ class ShieldsService extends EventEmitter {
    */
   getAllSiteConfigs(): SiteShields[] {
     return Array.from(this.siteConfigs.values());
+  }
+
+  /**
+   * Get status/counters
+   */
+  getStatus(): {
+    adsBlocked: number;
+    trackersBlocked: number;
+    httpsUpgrades: number;
+    cookies3p: 'block' | 'allow';
+    webrtcBlocked: boolean;
+    fingerprinting: boolean;
+  } {
+    const defaultShields = this.getShieldsForUrl('https://example.com');
+    return {
+      adsBlocked: this.adsBlocked,
+      trackersBlocked: this.trackersBlocked,
+      httpsUpgrades: this.httpsUpgrades,
+      cookies3p: defaultShields.config.cookies === '3p' || defaultShields.config.cookies === 'none' ? 'block' : 'allow',
+      webrtcBlocked: defaultShields.config.webrtc,
+      fingerprinting: defaultShields.config.fingerprinting,
+    };
+  }
+
+  /**
+   * Increment counters (called by request filters)
+   */
+  incrementAdsBlocked(): void {
+    this.adsBlocked++;
+    this.emit('counters-updated', this.getStatus());
+  }
+
+  incrementTrackersBlocked(): void {
+    this.trackersBlocked++;
+    this.emit('counters-updated', this.getStatus());
+  }
+
+  incrementHttpsUpgrade(): void {
+    this.httpsUpgrades++;
+    this.emit('counters-updated', this.getStatus());
   }
 }
 

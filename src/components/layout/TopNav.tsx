@@ -10,6 +10,8 @@ import { useTabsStore } from '../../state/tabsStore';
 import { ipc } from '../../lib/ipc-typed';
 import { ModeSwitch } from '../TopNav/ModeSwitch';
 import { Omnibox } from '../TopNav/Omnibox';
+import { ProgressBar } from '../TopNav/ProgressBar';
+import { QuickActions } from '../TopNav/QuickActions';
 import { ShieldsButton } from '../TopNav/ShieldsButton';
 import { NetworkButton } from '../TopNav/NetworkButton';
 import { SessionSwitcher } from '../sessions/SessionSwitcher';
@@ -251,8 +253,11 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
         </motion.button>
       </div>
 
-      {/* Center: Omnibox */}
-      <Omnibox onCommandPalette={onCommandPalette} />
+      {/* Center: Omnibox with Progress Bar */}
+      <div className="flex-1 relative mx-4">
+        <Omnibox onCommandPalette={onCommandPalette} />
+        <ProgressBar />
+      </div>
 
       {/* Right: Actions & Badges */}
       <div className="flex items-center gap-1.5">
@@ -261,6 +266,9 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
 
         {/* Network Button */}
         <NetworkButton />
+
+        {/* Quick Actions */}
+        <QuickActions />
 
         {/* Dropdown/Filter Button */}
         <motion.button

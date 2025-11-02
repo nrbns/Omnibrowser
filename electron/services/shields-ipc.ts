@@ -51,5 +51,11 @@ export function registerShieldsIpc() {
     const shieldsService = getShieldsService();
     return shieldsService.getAllSiteConfigs();
   });
+
+  // Get status/counters
+  registerHandler('shields:getStatus', z.object({}), async () => {
+    const shieldsService = getShieldsService();
+    return shieldsService.getStatus();
+  });
 }
 

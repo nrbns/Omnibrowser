@@ -11,6 +11,7 @@ import { BottomStatus } from './BottomStatus';
 import { CommandPalette } from './CommandPalette';
 import { PermissionPrompt } from '../Overlays/PermissionPrompt';
 import { ConsentPrompt } from '../Overlays/ConsentPrompt';
+import { AgentOverlay } from '../AgentOverlay';
 import { PermissionRequest, ConsentRequest, ipcEvents } from '../../lib/ipc-events';
 import { useIPCEvent } from '../../lib/use-ipc-event';
 import { useTabsStore } from '../../state/tabsStore';
@@ -173,13 +174,16 @@ export function AppShell() {
         )}
       </div>
 
-      {/* Bottom Status Bar - Hidden in fullscreen */}
-      {!isFullscreen && <BottomStatus />}
+          {/* Bottom Status Bar - Hidden in fullscreen */}
+          {!isFullscreen && <BottomStatus />}
 
-      {/* Overlays */}
-      {commandPaletteOpen && (
-        <CommandPalette onClose={() => setCommandPaletteOpen(false)} />
-      )}
+          {/* Agent Overlay */}
+          <AgentOverlay />
+
+          {/* Overlays */}
+          {commandPaletteOpen && (
+            <CommandPalette onClose={() => setCommandPaletteOpen(false)} />
+          )}
 
       {permissionRequest && (
         <PermissionPrompt 

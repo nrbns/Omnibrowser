@@ -258,6 +258,24 @@ export function ResearchSplit() {
             <Save size={14} />
             Save
           </motion.button>
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={async () => {
+              if (currentUrl && !currentUrl.startsWith('about:') && !currentUrl.startsWith('chrome:')) {
+                try {
+                  await ipc.research.export('markdown', [currentUrl], true);
+                  alert('Exported successfully!');
+                } catch (error) {
+                  console.error('Failed to export:', error);
+                }
+              }
+            }}
+            className="px-3 py-2 bg-green-600/20 hover:bg-green-600/30 border border-green-500/30 rounded text-xs text-green-400 transition-colors"
+            title="Export to Markdown"
+          >
+            Export
+          </motion.button>
         </div>
       </div>
     </div>

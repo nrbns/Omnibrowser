@@ -3,15 +3,21 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*.*.*'
 
 jobs:
-  build-and-release:
-    name: Build and Release
+  release:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            artifact-name: OmniBrowser-linux.AppImage
+          - os: windows-latest
+            artifact-name: OmniBrowser-win.exe
+          - os: macos-latest
+            artifact-name: OmniBrowser-mac.dmg
     
     steps:
       - uses: actions/checkout@v4
@@ -28,33 +34,26 @@ jobs:
       - name: Build
         run: npm run build
       
-      - name: Build installer (Windows)
-        if: matrix.os == 'windows-latest'
-        run: npm run build:win
+      - name: Build release
+        run: npm run build:release
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-      
-      - name: Build installer (macOS)
-        if: matrix.os == 'macos-latest'
-        run: npm run build:mac
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      
-      - name: Build installer (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: npm run build:linux
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: dist/*.{AppImage,exe,dmg,zip}
+      
+      - name: Create GitHub Release
+        if: matrix.os == 'ubuntu-latest'
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            dist/**/*.exe
-            dist/**/*.dmg
-            dist/**/*.AppImage
-            dist/**/*.deb
-            dist/**/*.rpm
+            dist/*.AppImage
+            dist/*.exe
+            dist/*.dmg
+          draft: false
+          prerelease: ${{ contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-

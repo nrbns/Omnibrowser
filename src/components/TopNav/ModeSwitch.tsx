@@ -9,10 +9,10 @@ import { useAppStore } from '../../state/appStore';
 import { useNavigate } from 'react-router-dom';
 
 const modes = [
-  { id: 'Research', icon: Brain, label: 'Research', color: 'text-purple-400' },
-  { id: 'Trade', icon: TrendingUp, label: 'Trade', color: 'text-green-400' },
-  { id: 'Games', icon: Gamepad2, label: 'Game', color: 'text-yellow-400' },
-  { id: 'AI Tasks', icon: Zap, label: 'AI Tasks', color: 'text-cyan-400' },
+  { id: 'Research', icon: Brain, label: 'Research', color: 'text-purple-400', glowColor: 'from-purple-500 via-purple-600 to-purple-500' },
+  { id: 'Trade', icon: TrendingUp, label: 'Trade', color: 'text-green-400', glowColor: 'from-green-500 via-emerald-600 to-green-500' },
+  { id: 'Games', icon: Gamepad2, label: 'Game', color: 'text-yellow-400', glowColor: 'from-yellow-500 via-amber-600 to-yellow-500' },
+  { id: 'AI Tasks', icon: Zap, label: 'AI Tasks', color: 'text-cyan-400', glowColor: 'from-cyan-500 via-blue-600 to-cyan-500' },
 ];
 
 export function ModeSwitch() {
@@ -56,11 +56,20 @@ export function ModeSwitch() {
             <Icon size={16} className={isActive ? 'text-purple-200' : m.color} />
             <span>{m.label}</span>
             {isActive && (
-              <motion.div
-                className="absolute inset-0 bg-gradient-to-r from-purple-600/30 to-purple-500/30 rounded-md"
-                layoutId="activeMode"
-                transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-              />
+              <>
+                <motion.div
+                  className="absolute inset-0 bg-gradient-to-r from-purple-600/30 to-purple-500/30 rounded-md"
+                  layoutId="activeMode"
+                  transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                />
+                {/* Glow accent underline */}
+                <motion.div
+                  className={`absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r ${m.glowColor} rounded-full`}
+                  initial={{ scaleX: 0 }}
+                  animate={{ scaleX: 1 }}
+                  transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                />
+              </>
             )}
           </motion.button>
         );

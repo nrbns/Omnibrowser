@@ -47,6 +47,7 @@ import { registerWorkerIpc } from './services/workers/worker-ipc';
 import { registerVideoCallIpc } from './services/video-call-ipc';
 import { registerSessionsIpc } from './services/sessions-ipc';
 import { registerPrivateIpc } from './services/private-ipc';
+import { getShieldsService } from './services/shields';
 import * as Actions from './services/actions';
 
 let mainWindow: BrowserWindow | null = null;
@@ -142,9 +143,17 @@ app.whenReady().then(async () => {
     registerPerformanceIpc();
     registerWorkerIpc();
     registerVideoCallIpc();
-    registerSessionsIpc();
-    registerPrivateIpc();
-  }
+        registerSessionsIpc();
+        registerPrivateIpc();
+
+        // Forward shields counter updates to renderer
+        const shieldsService = getShieldsService();
+        shieldsService.on('counters-updated', (status) => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('shields:counters', status);
+          }
+        });
+      }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
