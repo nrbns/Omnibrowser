@@ -6,7 +6,7 @@ import { registerHandler } from '../shared/ipc/router';
 import { z } from 'zod';
 import { registerTab, wakeTab, unregisterTab, hibernateTab, isTabSleeping } from './tab-sleep';
 import { registerTabMemory, unregisterTabMemory } from './memory';
-import { burnTab, createEphemeralContainer } from './containers';
+import { burnTab } from './burn';
 import { getShieldsService } from './shields';
 import { tabProxies } from './proxy';
 import { getVideoCallOptimizer } from './video-call-optimizer';
@@ -35,7 +35,7 @@ const windowIdToTabs = new Map<number, TabRecord[]>();
 let activeTabIdByWindow = new Map<number, string | null>();
 let rightDockPxByWindow = new Map<number, number>();
 
-function getTabs(win: BrowserWindow) {
+export function getTabs(win: BrowserWindow) {
   if (!windowIdToTabs.has(win.id)) windowIdToTabs.set(win.id, []);
   return windowIdToTabs.get(win.id)!;
 }
@@ -90,7 +90,7 @@ export function registerTabIpc(win: BrowserWindow) {
       if (activeSession) {
         partition = sessionManager.getSessionPartition(activeSession.id);
       } else {
-        partition = createEphemeralContainer(id);
+        partition = `ephemeral:${randomUUID()}`; // Ephemeral container
       }
     }
     
@@ -419,7 +419,7 @@ export function registerTabIpc(win: BrowserWindow) {
     const tabs = getTabs(win);
     const rec = tabs.find(t => t.id === request.id);
     if (rec) {
-      await burnTab(request.id, rec.view);
+      await burnTab(win, request.id);
       // After burning, close the tab
       const idx = tabs.findIndex(t => t.id === request.id);
       if (idx >= 0) {

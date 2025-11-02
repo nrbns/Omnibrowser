@@ -46,6 +46,7 @@ import { registerPerformanceIpc } from './services/performance/performance-ipc';
 import { registerWorkerIpc } from './services/workers/worker-ipc';
 import { registerVideoCallIpc } from './services/video-call-ipc';
 import { registerSessionsIpc } from './services/sessions-ipc';
+import { registerPrivateIpc } from './services/private-ipc';
 import * as Actions from './services/actions';
 
 let mainWindow: BrowserWindow | null = null;
@@ -142,6 +143,7 @@ app.whenReady().then(async () => {
     registerWorkerIpc();
     registerVideoCallIpc();
     registerSessionsIpc();
+    registerPrivateIpc();
   }
 
   app.on('activate', () => {

@@ -23,6 +23,7 @@ export type Download = {
   progress?: number;
   receivedBytes?: number;
   totalBytes?: number;
+  checksum?: string; // SHA-256 checksum for verification
 };
 
 const downloads: Download[] = [];
