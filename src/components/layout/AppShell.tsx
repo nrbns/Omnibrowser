@@ -10,25 +10,56 @@ import { useTabsStore } from '../../state/tabsStore';
 import { ipc } from '../../lib/ipc-typed';
 
 class ErrorBoundary extends React.Component<
-  { children: React.ReactNode; fallback?: React.ReactNode },
-  { hasError: boolean }
+  { children: React.ReactNode; fallback?: React.ReactNode; componentName?: string },
+  { hasError: boolean; error?: Error; errorInfo?: string }
 > {
-  constructor(props: { children: React.ReactNode; fallback?: React.ReactNode }) {
+  constructor(props: { children: React.ReactNode; fallback?: React.ReactNode; componentName?: string }) {
     super(props);
     this.state = { hasError: false };
   }
 
-  static getDerivedStateFromError() {
-    return { hasError: true };
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
   }
 
-  componentDidCatch(error: Error) {
-    console.warn('Component error caught:', error);
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error(`ErrorBoundary caught error${this.props.componentName ? ` in ${this.props.componentName}` : ''}:`, error, errorInfo);
+    this.setState({ error, errorInfo: errorInfo.componentStack });
   }
 
   render() {
     if (this.state.hasError) {
-      return this.props.fallback || <div style={{ padding: '8px', color: '#94a3b8' }}>Component error</div>;
+      // If there's a custom fallback, use it
+      if (this.props.fallback) {
+        return this.props.fallback;
+      }
+      
+      // Otherwise, return null to hide the error silently in production
+      // or show minimal error info in development
+      if (process.env.NODE_ENV === 'development') {
+        return (
+          <div style={{ 
+            padding: '8px', 
+            color: '#ef4444', 
+            fontSize: '11px',
+            backgroundColor: '#1e1e1e',
+            borderLeft: '2px solid #ef4444'
+          }}>
+            {this.props.componentName ? `${this.props.componentName} error` : 'Component error'}
+            {this.state.error && (
+              <details style={{ marginTop: '4px', color: '#94a3b8' }}>
+                <summary style={{ cursor: 'pointer' }}>Details</summary>
+                <pre style={{ fontSize: '10px', marginTop: '4px', whiteSpace: 'pre-wrap' }}>
+                  {this.state.error.message}
+                </pre>
+              </details>
+            )}
+          </div>
+        );
+      }
+      
+      // In production, hide errors silently to avoid UI clutter
+      return null;
     }
     return this.props.children;
   }
@@ -174,7 +205,7 @@ export function AppShell() {
       {/* Top Navigation - Hidden in fullscreen */}
       {!isFullscreen && (
         <Suspense fallback={<div style={{ height: '40px', backgroundColor: '#0f172a' }} />}>
-          <ErrorBoundary fallback={<div style={{ height: '40px', backgroundColor: '#0f172a', padding: '8px', color: '#94a3b8' }}>Navigation Error</div>}>
+          <ErrorBoundary componentName="TopNav" fallback={<div style={{ height: '40px', backgroundColor: '#0f172a', padding: '8px', color: '#94a3b8' }}>Navigation Error</div>}>
             <TopNav 
               onAgentToggle={() => setRightPanelOpen(!rightPanelOpen)}
               onCommandPalette={() => setCommandPaletteOpen(true)}
@@ -190,7 +221,7 @@ export function AppShell() {
           {/* Tab Strip - Hidden in fullscreen */}
           {!isFullscreen && (
         <Suspense fallback={null}>
-          <ErrorBoundary>
+          <ErrorBoundary componentName="TabStrip">
             <TabStrip />
           </ErrorBoundary>
         </Suspense>
@@ -205,7 +236,7 @@ export function AppShell() {
         {/* Right Panel (Agent Console) - Hidden in fullscreen */}
         {!isFullscreen && (
         <Suspense fallback={null}>
-          <ErrorBoundary>
+          <ErrorBoundary componentName="RightPanel">
             <RightPanel 
               open={rightPanelOpen}
               onClose={() => setRightPanelOpen(false)}
@@ -218,7 +249,7 @@ export function AppShell() {
       {/* Bottom Status Bar - Hidden in fullscreen */}
       {!isFullscreen && (
       <Suspense fallback={null}>
-        <ErrorBoundary>
+        <ErrorBoundary componentName="BottomStatus">
           <BottomStatus />
         </ErrorBoundary>
       </Suspense>
@@ -226,7 +257,7 @@ export function AppShell() {
 
       {/* Agent Overlay */}
       <Suspense fallback={null}>
-        <ErrorBoundary>
+        <ErrorBoundary componentName="AgentOverlay">
           <AgentOverlay />
         </ErrorBoundary>
       </Suspense>
@@ -234,7 +265,7 @@ export function AppShell() {
       {/* Overlays */}
       {commandPaletteOpen && (
         <Suspense fallback={null}>
-          <ErrorBoundary>
+          <ErrorBoundary componentName="CommandPalette">
             <CommandPalette onClose={() => setCommandPaletteOpen(false)} />
           </ErrorBoundary>
         </Suspense>
@@ -242,7 +273,7 @@ export function AppShell() {
 
       {permissionRequest && (
         <Suspense fallback={null}>
-          <ErrorBoundary>
+          <ErrorBoundary componentName="PermissionPrompt">
             <PermissionPrompt 
               request={permissionRequest}
               onClose={() => setPermissionRequest(null)}
@@ -253,7 +284,7 @@ export function AppShell() {
 
       {consentRequest && (
         <Suspense fallback={null}>
-          <ErrorBoundary>
+          <ErrorBoundary componentName="ConsentPrompt">
             <ConsentPrompt 
               request={consentRequest}
               onClose={() => setConsentRequest(null)}

@@ -13,8 +13,8 @@ export function MainView() {
   const { activeId, tabs } = useTabsStore();
   const { mode } = useAppStore();
   const containerRef = useRef<HTMLDivElement>(null);
-  // Initialize browserReady based on current state
-  const [browserReady, setBrowserReady] = useState(() => tabs.length > 0 && activeId ? true : false);
+  // Initialize browserReady - if tabs exist, assume ready immediately
+  const [browserReady, setBrowserReady] = useState(() => tabs.length > 0);
   const [activeTabUrl, setActiveTabUrl] = useState<string>('');
   const [activeTabTitle, setActiveTabTitle] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
@@ -155,33 +155,18 @@ export function MainView() {
     return () => clearInterval(interval);
   }, [activeId, activeTabTitle, activeTabUrl]);
 
-  // Auto-hide loading overlay after tabs are created to ensure BrowserView is visible
+  // Auto-hide loading overlay immediately when tabs exist
   useEffect(() => {
-    if (tabs.length > 0 && activeId) {
-      // Mark as ready immediately when we have an active tab
-      // BrowserView should be visible once tab is created
-      if (!browserReady) {
-        setBrowserReady(true);
-      }
-    } else if (tabs.length === 0) {
-      // No tabs, reset browser ready state
+    if (tabs.length > 0) {
+      // Tabs exist - BrowserView should be visible
+      setBrowserReady(true);
+      setIsLoading(false);
+    } else {
+      // No tabs, show empty state
       setBrowserReady(false);
+      setIsLoading(false);
     }
-  }, [tabs.length, activeId, browserReady]);
-
-  // Force browserReady to true after a short delay if tabs exist (fallback)
-  // This ensures the loading overlay doesn't stay forever
-  useEffect(() => {
-    if (tabs.length > 0 && activeId && !browserReady) {
-      const timer = setTimeout(() => {
-        // Force ready state if still not ready after delay
-        setBrowserReady(true);
-        setIsLoading(false);
-        setProgress(100);
-      }, 2000); // Give BrowserView up to 2 seconds to initialize
-      return () => clearTimeout(timer);
-    }
-  }, [tabs.length, activeId, browserReady]);
+  }, [tabs.length]);
 
   // Show browser view container even when no active tab (for BrowserView positioning)
   // Empty state overlay is handled by OmniDesk component
@@ -234,9 +219,9 @@ export function MainView() {
         </div>
       )}
       
-      {/* Loading overlay - Only show very briefly when tab first created, then hide immediately */}
-      {/* BrowserView should be visible as soon as tab is created and bounds are set */}
-      {tabs.length > 0 && activeId && !browserReady && (
+      {/* Loading overlay - Only show briefly on initial load if no tabs exist yet */}
+      {/* Once tabs exist, BrowserView should be visible immediately */}
+      {tabs.length === 0 && !browserReady && (
         <div 
           className="absolute inset-0 h-full w-full flex items-center justify-center bg-white transition-opacity duration-300" 
           style={{ 
@@ -247,10 +232,10 @@ export function MainView() {
           <div className="text-center">
             <div className="text-6xl mb-4 animate-pulse">🌐</div>
             <h2 className="text-xl font-semibold text-gray-800 mb-2">
-              Preparing browser...
+              OmniBrowser
             </h2>
             <p className="text-gray-500 text-sm">
-              {activeTabUrl || 'Initializing tab'}
+              Initializing...
             </p>
           </div>
         </div>

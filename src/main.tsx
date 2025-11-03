@@ -126,7 +126,7 @@ function LoadingFallback() {
     }}>
       <div style={{ textAlign: 'center' }}>
         <div style={{ fontSize: '48px', marginBottom: '16px' }}>🌐</div>
-        <div style={{ fontSize: '16px' }}>Loading OmniBrowser...</div>
+        <div style={{ fontSize: '16px' }}>Initializing...</div>
       </div>
     </div>
   );

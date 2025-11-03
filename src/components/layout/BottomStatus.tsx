@@ -57,8 +57,14 @@ export function BottomStatus() {
   useEffect(() => {
     // Load DoH status
     ipc.dns.status().then(status => {
-      setDohStatus(status as any);
-    }).catch(() => {});
+      if (status && typeof status === 'object') {
+        setDohStatus(status as any);
+      }
+    }).catch((error) => {
+      console.warn('Failed to load DNS status:', error);
+      // Set default state on error
+      setDohStatus({ enabled: false, provider: 'cloudflare' });
+    });
 
     // Check model status (would check Ollama heartbeat)
     // ipc.agent.getModelStatus().then(status => {
@@ -128,10 +134,16 @@ export function BottomStatus() {
         <motion.button
           whileHover={{ scale: 1.05 }}
           onClick={async () => {
-            if (dohStatus.enabled) {
-              await ipc.dns.disableDoH();
-            } else {
-              await ipc.dns.enableDoH('cloudflare');
+            try {
+              if (dohStatus.enabled) {
+                await ipc.dns.disableDoH();
+                setDohStatus({ enabled: false, provider: 'cloudflare' });
+              } else {
+                await ipc.dns.enableDoH('cloudflare');
+                setDohStatus({ enabled: true, provider: 'cloudflare' });
+              }
+            } catch (error) {
+              console.error('Failed to toggle DoH:', error);
             }
           }}
           className={`flex items-center gap-1.5 transition-colors ${
