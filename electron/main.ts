@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import 'source-map-support/register';
 import { app, BrowserWindow, ipcMain, session, shell } from 'electron';
 import * as path from 'node:path';
 import { applySecurityPolicies } from './security';
@@ -81,6 +82,12 @@ function createMainWindow() {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
+  });
+
+  // Legacy safety net for popups
+  mainWindow.webContents.on('new-window', (event, url) => {
+    event.preventDefault();
+    try { shell.openExternal(url); } catch {}
   });
 
   // Prevent in-app navigations to external pages; open them externally instead
