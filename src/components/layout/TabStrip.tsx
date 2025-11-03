@@ -118,9 +118,7 @@ export function TabStrip() {
         setTabs([]);
         setAllTabs([]);
       }
-      
-      // Dispatch custom event for URL bar updates
-      window.dispatchEvent(new CustomEvent('tabs:updated', { detail: mappedTabs }));
+      // Do not re-dispatch 'tabs:updated' here to avoid feedback loops
     };
 
     // Subscribe to IPC events via the event bus
