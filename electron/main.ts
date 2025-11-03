@@ -83,6 +83,17 @@ function createMainWindow() {
     return { action: 'deny' };
   });
 
+  // Prevent in-app navigations to external pages; open them externally instead
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    try {
+      const current = mainWindow?.webContents.getURL();
+      if (url && url !== current) {
+        event.preventDefault();
+        shell.openExternal(url);
+      }
+    } catch {}
+  });
+
   if (isDev) {
     // Development: load from Vite dev server
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL!);
@@ -90,7 +101,8 @@ function createMainWindow() {
     // mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
     // Production: load from built files
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    const htmlPath = path.resolve(app.getAppPath(), 'dist', 'index.html');
+    mainWindow.loadFile(htmlPath);
   }
 
   // Maximize window on startup (full screen)
@@ -219,6 +231,14 @@ app.on('activate', () => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+// Crash guardrails for production visibility
+process.on('uncaughtException', (err) => {
+  try { console.error('[uncaughtException]', err); } catch {}
+});
+process.on('unhandledRejection', (reason) => {
+  try { console.error('[unhandledRejection]', reason); } catch {}
 });
 
 app.on('before-quit', async () => {
