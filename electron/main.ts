@@ -71,8 +71,10 @@ function createMainWindow() {
     title: 'OmniBrowser',
     backgroundColor: '#1A1D28',
     webPreferences: {
-      // vite-plugin-electron outputs preload to dist-electron/preload.js (same dir as main.js)
-      preload: path.join(__dirname, 'preload.js'),
+      // Use built preload in prod; use local CJS preload in dev (ts-node)
+      preload: isDev
+        ? path.join(process.cwd(), 'electron', 'preload.cjs')
+        : path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
