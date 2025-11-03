@@ -54,7 +54,7 @@ type Section = {
   category: string;
 };
 
-import { Video } from 'lucide-react';
+import { Video, Database, Search, Cloud, Lock } from 'lucide-react';
 
 const sections: Section[] = [
   { id: 'appearance', title: 'Appearance', icon: Palette, category: 'Basics' },
@@ -66,6 +66,9 @@ const sections: Section[] = [
   { id: 'system', title: 'System', icon: Monitor, category: 'Advanced' },
   { id: 'performance', title: 'Performance', icon: Cpu, category: 'Advanced' },
   { id: 'notifications', title: 'Notifications', icon: Bell, category: 'Advanced' },
+  { id: 'cloudVector', title: 'Cloud Vector DB', icon: Cloud, category: 'AI & Sync' },
+  { id: 'hybridSearch', title: 'Hybrid Search', icon: Search, category: 'AI & Sync' },
+  { id: 'e2eeSync', title: 'E2EE Sync', icon: Lock, category: 'AI & Sync' },
 ];
 
 export default function Settings() {
@@ -92,24 +95,101 @@ export default function Settings() {
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const loaded = await ipc.settings.get() as Settings;
+        // Try to load settings, with fallback defaults
+        let loaded: Settings | null = null;
+        try {
+          loaded = await ipc.settings.get() as Settings;
+        } catch (error) {
+          console.warn('Failed to load settings from IPC, using defaults:', error);
+        }
+        
+        
+        // Use defaults if loading failed
+        if (!loaded) {
+          loaded = {
+            privacy: {
+              burnOnClose: false,
+              telemetry: 'off',
+              doNotTrack: true,
+              autoPurgeCookies: false,
+              purgeAfterDays: 30,
+            },
+            network: {
+              doh: false,
+              dohProvider: 'cloudflare',
+              proxy: null,
+              perTabProxy: false,
+              quic: true,
+            },
+            downloads: {
+              requireConsent: false,
+              defaultPath: 'Downloads',
+              checksum: false,
+            },
+            performance: {
+              tabSleepMins: 20,
+              memoryCapMB: 2048,
+              gpuAcceleration: true,
+            },
+            ai: {
+              provider: 'local',
+              model: 'default',
+              maxTokens: 4096,
+              temperature: 0.7,
+            },
+            ui: {
+              theme: 'dark',
+              compactMode: false,
+              showProxyBadge: true,
+            },
+            startup: {
+              behavior: 'newTab',
+              customPages: [],
+            },
+          };
+        }
+        
         // Ensure startup settings exist
         if (!loaded.startup) {
           loaded.startup = { behavior: 'newTab', customPages: [] };
         }
+        
+        // Ensure all required properties exist
+        if (!loaded.privacy) loaded.privacy = { burnOnClose: false, telemetry: 'off', doNotTrack: true, autoPurgeCookies: false, purgeAfterDays: 30 };
+        if (!loaded.network) loaded.network = { doh: false, dohProvider: 'cloudflare', proxy: null, perTabProxy: false, quic: true };
+        if (!loaded.downloads) loaded.downloads = { requireConsent: false, defaultPath: 'Downloads', checksum: false };
+        if (!loaded.performance) loaded.performance = { tabSleepMins: 20, memoryCapMB: 2048, gpuAcceleration: true };
+        if (!loaded.ai) loaded.ai = { provider: 'local', model: 'default', maxTokens: 4096, temperature: 0.7 };
+        if (!loaded.ui) loaded.ui = { theme: 'dark', compactMode: false, showProxyBadge: true };
+        
         setSettings(loaded);
         
-        // Load video call config
-        const vcConfig = await ipc.videoCall.getConfig();
-        setVideoCallConfig({
-          ...vcConfig,
-          maxResolution: (vcConfig.maxResolution || '720p') as '720p' | '480p' | '360p' | '240p',
-          priorityMode: (vcConfig.priorityMode || 'balanced') as 'performance' | 'balanced' | 'quality',
-        });
+        // Load video call config (with fallback)
+        try {
+          const vcConfig = await ipc.videoCall.getConfig();
+          setVideoCallConfig({
+            enabled: vcConfig?.enabled ?? true,
+            adaptiveQuality: vcConfig?.adaptiveQuality ?? true,
+            maxResolution: (vcConfig?.maxResolution || '720p') as '720p' | '480p' | '360p' | '240p',
+            maxFrameRate: vcConfig?.maxFrameRate ?? 30,
+            bandwidthEstimate: vcConfig?.bandwidthEstimate ?? 1000,
+            priorityMode: (vcConfig?.priorityMode || 'balanced') as 'performance' | 'balanced' | 'quality',
+          });
+        } catch (error) {
+          console.warn('Failed to load video call config, using defaults:', error);
+          // Keep default videoCallConfig state
+        }
         
-        // Load network quality
-        const quality = await ipc.videoCall.getNetworkQuality();
-        setNetworkQuality(quality);
+        // Load network quality (with fallback)
+        try {
+          const quality = await ipc.videoCall.getNetworkQuality();
+          if (quality) {
+            setNetworkQuality(quality);
+          }
+        } catch (error) {
+          console.warn('Failed to load network quality, using defaults:', error);
+          // Keep default networkQuality state
+        }
       } catch (error) {
         console.error('Failed to load settings:', error);
       } finally {
@@ -117,16 +197,79 @@ export default function Settings() {
       }
     };
     loadSettings();
+
+    // Set a timeout to prevent infinite loading
+    const timeoutId = setTimeout(() => {
+      console.warn('Settings load timeout, using defaults');
+      setLoading(false);
+      // Set default settings if timeout occurs
+      setSettings(prev => {
+        if (prev) return prev; // Don't override if already loaded
+        return {
+          privacy: {
+            burnOnClose: false,
+            telemetry: 'off',
+            doNotTrack: true,
+            autoPurgeCookies: false,
+            purgeAfterDays: 30,
+          },
+          network: {
+            doh: false,
+            dohProvider: 'cloudflare',
+            proxy: null,
+            perTabProxy: false,
+            quic: true,
+          },
+          downloads: {
+            requireConsent: false,
+            defaultPath: 'Downloads',
+            checksum: false,
+          },
+          performance: {
+            tabSleepMins: 20,
+            memoryCapMB: 2048,
+            gpuAcceleration: true,
+          },
+          ai: {
+            provider: 'local',
+            model: 'default',
+            maxTokens: 4096,
+            temperature: 0.7,
+          },
+          ui: {
+            theme: 'dark',
+            compactMode: false,
+            showProxyBadge: true,
+          },
+          startup: {
+            behavior: 'newTab',
+            customPages: [],
+          },
+        };
+      });
+    }, 3000); // 3 second timeout
     
-    // Monitor network quality
-    const qualityInterval = setInterval(async () => {
-      try {
-        const quality = await ipc.videoCall.getNetworkQuality();
-        setNetworkQuality(quality);
-      } catch {}
-    }, 5000);
+    // Monitor network quality (only if IPC is available)
+    let qualityInterval: NodeJS.Timeout | null = null;
+    try {
+      qualityInterval = setInterval(async () => {
+        try {
+          const quality = await ipc.videoCall.getNetworkQuality();
+          if (quality) {
+            setNetworkQuality(quality);
+          }
+        } catch {
+          // Ignore errors in polling
+        }
+      }, 5000);
+    } catch {
+      // Interval not set if IPC fails
+    }
     
-    return () => clearInterval(qualityInterval);
+    return () => {
+      clearTimeout(timeoutId);
+      if (qualityInterval) clearInterval(qualityInterval);
+    };
   }, []);
 
   // Update setting
@@ -170,16 +313,40 @@ export default function Settings() {
     return groups;
   }, [filteredSections]);
 
-  if (loading || !settings) {
+  // Show loading state only briefly
+  if (loading) {
     return (
       <div className="h-full w-full flex items-center justify-center bg-[#1A1D28]">
-        <SettingsIcon size={24} className="text-blue-400 animate-spin" />
+        <div className="text-center">
+          <SettingsIcon size={32} className="text-blue-400 animate-spin mx-auto mb-4" />
+          <p className="text-gray-400 text-sm">Loading settings...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // If settings failed to load, use defaults and show error banner
+  if (!settings) {
+    return (
+      <div className="h-full w-full bg-[#1A1D28] text-gray-100 flex items-center justify-center">
+        <div className="text-center max-w-md">
+          <div className="text-red-400 text-4xl mb-4">⚠️</div>
+          <h2 className="text-xl font-semibold mb-2">Failed to load settings</h2>
+          <p className="text-gray-400 mb-4">Using default settings. Some features may not be available.</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium"
+          >
+            Reload Page
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="h-full w-full bg-[#1A1D28] text-gray-100 flex">
+      
       {/* Left Sidebar */}
       <div className="w-64 border-r border-gray-800/50 flex flex-col">
         {/* Search */}
@@ -845,6 +1012,366 @@ export default function Settings() {
               <h2 className="text-2xl font-bold mb-6">Notifications</h2>
               <div className="p-4 rounded-lg bg-gray-900/60 border border-gray-800/50">
                 <p className="text-gray-400">Notification settings will be available in a future update.</p>
+              </div>
+            </motion.div>
+          )}
+
+          {activeSection === 'cloudVector' && (
+            <motion.div
+              key="cloudVector"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="p-8"
+            >
+              <h2 className="text-2xl font-bold mb-6">Cloud Vector Database</h2>
+              <p className="text-gray-400 mb-6">Sync your knowledge graph to the cloud for cross-device access and semantic search</p>
+              
+              <div className="space-y-6">
+                <div className="flex items-center justify-between p-4 rounded-lg bg-gray-900/60 border border-gray-800/50">
+                  <div>
+                    <h4 className="font-medium">Enable Cloud Vector DB</h4>
+                    <p className="text-sm text-gray-400">Sync embeddings to Qdrant or Pinecone for cross-device knowledge sharing</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      id="cloudVectorEnabled"
+                      className="sr-only peer"
+                      defaultChecked={false}
+                      onChange={async (e) => {
+                        try {
+                          await ipc.cloudVector.config({
+                            enabled: e.target.checked,
+                            provider: 'qdrant',
+                          });
+                        } catch (error) {
+                          console.error('Failed to update cloud vector config:', error);
+                        }
+                      }}
+                    />
+                    <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                  </label>
+                </div>
+
+                <div className="p-4 rounded-lg bg-gray-900/60 border border-gray-800/50">
+                  <label className="block mb-2 text-sm font-medium">Provider</label>
+                  <select
+                    id="cloudVectorProvider"
+                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    defaultValue="qdrant"
+                    onChange={async (e) => {
+                      try {
+                        await ipc.cloudVector.config({
+                          enabled: (document.getElementById('cloudVectorEnabled') as HTMLInputElement)?.checked || false,
+                          provider: e.target.value as 'qdrant' | 'pinecone' | 'none',
+                        });
+                      } catch (error) {
+                        console.error('Failed to update provider:', error);
+                      }
+                    }}
+                  >
+                    <option value="none">None (Local only)</option>
+                    <option value="qdrant">Qdrant</option>
+                    <option value="pinecone">Pinecone</option>
+                  </select>
+                </div>
+
+                <div className="p-4 rounded-lg bg-gray-900/60 border border-gray-800/50">
+                  <label className="block mb-2 text-sm font-medium">Endpoint URL</label>
+                  <input
+                    type="url"
+                    placeholder="https://your-qdrant-instance.com"
+                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="mt-1 text-xs text-gray-400">Qdrant server URL or Pinecone API endpoint</p>
+                </div>
+
+                <div className="p-4 rounded-lg bg-gray-900/60 border border-gray-800/50">
+                  <label className="block mb-2 text-sm font-medium">API Key</label>
+                  <input
+                    type="password"
+                    placeholder="Enter API key"
+                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="mt-1 text-xs text-gray-400">Required for cloud providers</p>
+                </div>
+
+                <div className="p-4 rounded-lg bg-gray-900/60 border border-gray-800/50">
+                  <label className="block mb-2 text-sm font-medium">Collection Name</label>
+                  <input
+                    type="text"
+                    placeholder="omnibrowser-vectors"
+                    defaultValue="omnibrowser-vectors"
+                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <button
+                  onClick={async () => {
+                    try {
+                      await ipc.cloudVector.sync([]);
+                      alert('Sync started successfully');
+                    } catch (error) {
+                      console.error('Failed to sync:', error);
+                      alert('Sync failed. Check console for details.');
+                    }
+                  }}
+                  className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium"
+                >
+                  Sync Now
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {activeSection === 'hybridSearch' && (
+            <motion.div
+              key="hybridSearch"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="p-8"
+            >
+              <h2 className="text-2xl font-bold mb-6">Hybrid Search</h2>
+              <p className="text-gray-400 mb-6">Configure multi-source search aggregation (Brave, Bing, Custom crawler)</p>
+              
+              <div className="space-y-6">
+                <div className="p-4 rounded-lg bg-gray-900/60 border border-gray-800/50">
+                  <h3 className="text-lg font-semibold mb-4">Search Sources</h3>
+                  
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-medium">Brave Search</h4>
+                        <p className="text-sm text-gray-400">Privacy-focused search engine</p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          defaultChecked={true}
+                          className="sr-only peer"
+                          onChange={async (e) => {
+                            try {
+                              await ipc.hybridSearch.config({
+                                sources: {
+                                  brave: { enabled: e.target.checked },
+                                },
+                              });
+                            } catch (error) {
+                              console.error('Failed to update Brave config:', error);
+                            }
+                          }}
+                        />
+                        <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                      </label>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-medium">Bing Search</h4>
+                        <p className="text-sm text-gray-400">Microsoft Bing API</p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          defaultChecked={false}
+                          className="sr-only peer"
+                          onChange={async (e) => {
+                            try {
+                              await ipc.hybridSearch.config({
+                                sources: {
+                                  bing: { enabled: e.target.checked },
+                                },
+                              });
+                            } catch (error) {
+                              console.error('Failed to update Bing config:', error);
+                            }
+                          }}
+                        />
+                        <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                      </label>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-medium">Custom Crawler</h4>
+                        <p className="text-sm text-gray-400">Internal web scraper</p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          defaultChecked={true}
+                          className="sr-only peer"
+                          onChange={async (e) => {
+                            try {
+                              await ipc.hybridSearch.config({
+                                sources: {
+                                  custom: { enabled: e.target.checked },
+                                },
+                              });
+                            } catch (error) {
+                              console.error('Failed to update custom config:', error);
+                            }
+                          }}
+                        />
+                        <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-lg bg-gray-900/60 border border-gray-800/50">
+                  <label className="block mb-2 text-sm font-medium">Maximum Results</label>
+                  <input
+                    type="number"
+                    min="5"
+                    max="50"
+                    defaultValue={20}
+                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between p-4 rounded-lg bg-gray-900/60 border border-gray-800/50">
+                  <div>
+                    <h4 className="font-medium">Enable Reranking</h4>
+                    <p className="text-sm text-gray-400">Use ML-based reranking for better results</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      defaultChecked={true}
+                      className="sr-only peer"
+                      onChange={async (e) => {
+                        try {
+                          await ipc.hybridSearch.config({
+                            rerank: e.target.checked,
+                          });
+                        } catch (error) {
+                          console.error('Failed to update rerank config:', error);
+                        }
+                      }}
+                    />
+                    <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                  </label>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {activeSection === 'e2eeSync' && (
+            <motion.div
+              key="e2eeSync"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="p-8"
+            >
+              <h2 className="text-2xl font-bold mb-6">End-to-End Encrypted Sync</h2>
+              <p className="text-gray-400 mb-6">Brave Sync 2.0 style encrypted chain for cross-device synchronization</p>
+              
+              <div className="space-y-6">
+                <div className="p-4 rounded-lg bg-blue-900/20 border border-blue-700/30">
+                  <h4 className="font-medium mb-2 text-blue-300">How it works</h4>
+                  <p className="text-sm text-blue-200/80">
+                    Your data is encrypted locally before syncing. Only you have the encryption key. 
+                    Works without a central server (peer-to-peer) or with an optional relay server.
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between p-4 rounded-lg bg-gray-900/60 border border-gray-800/50">
+                  <div>
+                    <h4 className="font-medium">Enable E2EE Sync</h4>
+                    <p className="text-sm text-gray-400">Sync bookmarks, history, knowledge graph, and workspaces across devices</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      id="e2eeSyncEnabled"
+                      className="sr-only peer"
+                      defaultChecked={false}
+                      onChange={async (e) => {
+                        try {
+                          await ipc.e2eeSync.config({
+                            enabled: e.target.checked,
+                          });
+                        } catch (error) {
+                          console.error('Failed to update E2EE sync config:', error);
+                        }
+                      }}
+                    />
+                    <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                  </label>
+                </div>
+
+                <div className="p-4 rounded-lg bg-gray-900/60 border border-gray-800/50">
+                  <label className="block mb-2 text-sm font-medium">Sync Password</label>
+                  <input
+                    type="password"
+                    id="e2eeSyncPassword"
+                    placeholder="Enter password for encryption"
+                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="mt-1 text-xs text-gray-400">Used to derive encryption key. Must be the same on all devices.</p>
+                </div>
+
+                <div className="p-4 rounded-lg bg-gray-900/60 border border-gray-800/50">
+                  <label className="block mb-2 text-sm font-medium">Relay Server (Optional)</label>
+                  <input
+                    type="url"
+                    placeholder="wss://sync-relay.example.com"
+                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="mt-1 text-xs text-gray-400">Leave empty for peer-to-peer sync only</p>
+                </div>
+
+                <div className="p-4 rounded-lg bg-gray-900/60 border border-gray-800/50">
+                  <h4 className="font-medium mb-3">Sync Targets</h4>
+                  <div className="space-y-2">
+                    {(['bookmark', 'history', 'knowledge', 'workspace', 'settings'] as const).map((type) => (
+                      <label key={type} className="flex items-center gap-3 p-2 rounded bg-gray-800/50 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          defaultChecked={true}
+                          className="w-4 h-4 text-blue-600"
+                        />
+                        <span className="capitalize">{type}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  onClick={async () => {
+                    try {
+                      const passwordInput = document.getElementById('e2eeSyncPassword') as HTMLInputElement;
+                      await ipc.e2eeSync.init({ password: passwordInput?.value || '' });
+                      const status = await ipc.e2eeSync.status();
+                      alert(`Sync initialized. Status: ${status.synced ? 'Active' : 'Inactive'}`);
+                    } catch (error) {
+                      console.error('Failed to init sync:', error);
+                      alert('Sync initialization failed. Check console for details.');
+                    }
+                  }}
+                  className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium"
+                >
+                  Initialize Sync
+                </button>
+
+                <button
+                  onClick={async () => {
+                    try {
+                      await ipc.e2eeSync.sync();
+                      alert('Manual sync completed');
+                    } catch (error) {
+                      console.error('Failed to sync:', error);
+                      alert('Sync failed. Check console for details.');
+                    }
+                  }}
+                  className="w-full px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium"
+                >
+                  Sync Now
+                </button>
               </div>
             </motion.div>
           )}

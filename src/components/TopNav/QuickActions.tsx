@@ -20,9 +20,12 @@ export function QuickActions({ onReaderToggle }: QuickActionsProps) {
   const handleScreenshot = async () => {
     if (!activeId) return;
     try {
-      // Would call IPC to take screenshot
-      // await ipc.tabs.screenshot(activeId);
-      console.log('Screenshot not implemented yet');
+      const result = await ipc.tabs.screenshot(activeId);
+      if (result?.success) {
+        console.log('Screenshot saved:', result.path);
+      } else {
+        console.error('Screenshot failed:', result?.error);
+      }
     } catch (error) {
       console.error('Failed to take screenshot:', error);
     }
@@ -31,10 +34,7 @@ export function QuickActions({ onReaderToggle }: QuickActionsProps) {
   const handleInspect = async () => {
     if (!activeId) return;
     try {
-      // Call devtools IPC handler
-      if ((window as any).ipc?.invoke) {
-        await (window as any).ipc.invoke('tabs:devtools', activeId);
-      }
+      await ipc.tabs.devtools(activeId);
     } catch (error) {
       console.error('Failed to open DevTools:', error);
     }

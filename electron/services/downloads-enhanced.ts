@@ -229,3 +229,144 @@ export function registerEnhancedDownloadsIpc(win: BrowserWindow) {
     });
   });
 }
+
+export function registerDownloadsIpc() {
+  // Get main window for sending events (will be null initially, handled in event handlers)
+  let getMainWindow: () => BrowserWindow | null;
+  try {
+    getMainWindow = require('./windows').getMainWindow;
+  } catch {
+    // Fallback if windows module not available
+    getMainWindow = () => BrowserWindow.getAllWindows()[0] || null;
+  }
+  
+  // Register IPC handlers
+  registerHandler('downloads:list', z.object({}), async () => {
+    const { listDownloads } = await import('./storage');
+    return listDownloads();
+  });
+
+  registerHandler('downloads:requestConsent', z.object({
+    url: z.string().url(),
+    filename: z.string(),
+    size: z.number().optional(),
+    privateMode: z.boolean().optional(),
+  }), async (_event, request) => {
+    // Consent handling is done in will-download event
+    return { success: true };
+  });
+
+  registerHandler('downloads:openFile', z.object({ path: z.string() }), async (_event, request) => {
+    try {
+      await shell.openPath(request.path);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  registerHandler('downloads:showInFolder', z.object({ path: z.string() }), async (_event, request) => {
+    try {
+      shell.showItemInFolder(request.path);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  // Set up will-download handler
+  const sess = session.defaultSession;
+  
+  sess.on('will-download', async (event, item: DownloadItem, webContents) => {
+    const url = item.getURL();
+    const filename = item.getFilename();
+    const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    
+    const downloadRecord = { 
+      id, 
+      url, 
+      filename: filename || url.split('/').pop() || 'download',
+      status: 'downloading' as const,
+      progress: 0,
+      createdAt: Date.now(),
+      receivedBytes: 0,
+      totalBytes: item.getTotalBytes(),
+    };
+    
+    addDownloadRecord(downloadRecord);
+
+    // Determine save path
+    const isPrivate = false; // Check if tab is private
+    const downloadDir = isPrivate 
+      ? getPrivateDownloadDir()
+      : path.join(app.getPath('downloads'), 'OmniBrowser');
+    
+    // Ensure directory exists
+    await fs.mkdir(downloadDir, { recursive: true }).catch(() => {});
+    
+    const savePath = path.join(downloadDir, filename || 'download');
+    item.setSavePath(savePath);
+    
+    item.on('updated', (_ev, state) => {
+      const received = item.getReceivedBytes();
+      const total = item.getTotalBytes();
+      const progress = total > 0 ? received / total : 0;
+      
+      addDownloadRecord({
+        ...downloadRecord,
+        status: state === 'interrupted' ? 'failed' : 'downloading',
+        progress,
+        receivedBytes: received,
+        totalBytes: total,
+      });
+      
+      const win = BrowserWindow.fromWebContents(webContents) || getMainWindow();
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('downloads:progress', {
+          id,
+          url,
+          filename: downloadRecord.filename,
+          status: state === 'interrupted' ? 'failed' : 'downloading',
+          progress,
+          receivedBytes: received,
+          totalBytes: total,
+        });
+      }
+    });
+    
+    item.once('done', async (_ev, state) => {
+      const finalPath = item.getSavePath();
+      const finalStatus = state === 'completed' ? 'completed' : state === 'cancelled' ? 'cancelled' : 'failed';
+      
+      let checksum: string | undefined;
+      if (finalStatus === 'completed' && finalPath) {
+        try {
+          checksum = await calculateChecksum(finalPath);
+        } catch (error) {
+          console.error('Failed to calculate checksum:', error);
+        }
+      }
+      
+      const win = BrowserWindow.fromWebContents(webContents) || getMainWindow();
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('downloads:done', {
+          id,
+          url,
+          filename,
+          status: finalStatus,
+          path: finalPath,
+          checksum,
+          createdAt: downloadRecord.createdAt,
+        });
+      }
+      
+      addDownloadRecord({
+        ...downloadRecord,
+        id,
+        status: finalStatus,
+        path: finalPath,
+        checksum,
+      });
+    });
+  });
+}

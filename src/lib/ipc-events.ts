@@ -142,15 +142,53 @@ export const ipcEvents = new IPCEventBus();
 if (typeof window !== 'undefined') {
   // Listen for tab updates
   if (window.ipc && (window.ipc as any).on) {
-    (window.ipc as any).on('tabs:updated', (tabs: TabUpdate[]) => {
-      ipcEvents.emit('tabs:updated', tabs);
-    });
-    (window.ipc as any).on('tabs:progress', (data: { tabId: string; progress: number }) => {
-      ipcEvents.emit('tabs:progress', data);
-    });
-    (window.ipc as any).on('tabs:navigation-state', (data: { tabId: string; canGoBack: boolean; canGoForward: boolean }) => {
-      ipcEvents.emit('tabs:navigation-state', data);
-    });
+    const tabUpdateHandler = (_event: any, tabs: any) => {
+      // Handle both direct data and event+data formats
+      const tabList = Array.isArray(tabs) ? tabs : (Array.isArray(_event) ? _event : []);
+      ipcEvents.emit('tabs:updated', tabList);
+    };
+    const tabProgressHandler = (_event: any, data: any) => {
+      const progressData = data || _event;
+      ipcEvents.emit('tabs:progress', progressData);
+    };
+    const navigationStateHandler = (_event: any, data: any) => {
+      const navData = data || _event;
+      ipcEvents.emit('tabs:navigation-state', navData);
+    };
+
+    // Listen to both legacy and typed IPC channels
+    (window.ipc as any).on('tabs:updated', tabUpdateHandler);
+    (window.ipc as any).on('ob://ipc/v1/tabs:updated', tabUpdateHandler);
+    (window.ipc as any).on('tabs:progress', tabProgressHandler);
+    (window.ipc as any).on('ob://ipc/v1/tabs:progress', tabProgressHandler);
+    (window.ipc as any).on('tabs:navigation-state', navigationStateHandler);
+    (window.ipc as any).on('ob://ipc/v1/tabs:navigation-state', navigationStateHandler);
+
+    // Proper cleanup using Page Lifecycle API instead of unload
+    const cleanup = () => {
+      if (window.ipc && (window.ipc as any).removeListener) {
+        (window.ipc as any).removeListener('tabs:updated', tabUpdateHandler);
+        (window.ipc as any).removeListener('ob://ipc/v1/tabs:updated', tabUpdateHandler);
+        (window.ipc as any).removeListener('tabs:progress', tabProgressHandler);
+        (window.ipc as any).removeListener('ob://ipc/v1/tabs:progress', tabProgressHandler);
+        (window.ipc as any).removeListener('tabs:navigation-state', navigationStateHandler);
+        (window.ipc as any).removeListener('ob://ipc/v1/tabs:navigation-state', navigationStateHandler);
+      }
+    };
+
+    // Use pagehide event (modern alternative to unload)
+    if ('onpagehide' in window) {
+      window.addEventListener('pagehide', cleanup);
+    }
+    // Fallback for browsers that don't support pagehide
+    if (typeof document !== 'undefined' && 'visibilityState' in document) {
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'hidden') {
+          // Don't cleanup on visibility change, only on actual page unload
+        }
+      };
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
   }
 
   // Listen for shields counters
@@ -188,6 +226,19 @@ if (typeof window !== 'undefined') {
     ipcEvents.emit('agent:consent:request', e.detail);
   }) as EventListener);
 
+  // Listen for streaming AI events via IPC
+  if (window.ipc && (window.ipc as any).on) {
+    (window.ipc as any).on('agent:stream:chunk', (_event: any, data: any) => {
+      ipcEvents.emit('agent:stream:chunk', data);
+    });
+    (window.ipc as any).on('agent:stream:done', (_event: any, data: any) => {
+      ipcEvents.emit('agent:stream:done', data);
+    });
+    (window.ipc as any).on('agent:stream:error', (_event: any, data: any) => {
+      ipcEvents.emit('agent:stream:error', data);
+    });
+  }
+
   // Listen for permission requests
   window.addEventListener('permissions:request', ((e: CustomEvent<PermissionRequest>) => {
     ipcEvents.emit('permissions:request', e.detail);
@@ -200,9 +251,22 @@ if (typeof window !== 'undefined') {
 
   // Also listen via IPC if available
   if (window.ipc && (window.ipc as any).on) {
-    (window.ipc as any).on('app:fullscreen-changed', (data: { fullscreen: boolean }) => {
+    const fullscreenHandler = (data: { fullscreen: boolean }) => {
       ipcEvents.emit('app:fullscreen-changed', data);
-    });
+    };
+    (window.ipc as any).on('app:fullscreen-changed', fullscreenHandler);
+    
+    // Cleanup handler for fullscreen events
+    const cleanupFullscreen = () => {
+      if (window.ipc && (window.ipc as any).removeListener) {
+        (window.ipc as any).removeListener('app:fullscreen-changed', fullscreenHandler);
+      }
+    };
+    
+    // Use pagehide for cleanup (modern alternative to unload)
+    if ('onpagehide' in window) {
+      window.addEventListener('pagehide', cleanupFullscreen, { once: true });
+    }
   }
 }
 

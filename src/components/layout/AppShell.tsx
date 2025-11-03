@@ -2,20 +2,47 @@
  * AppShell - Main layout container with all components wired
  */
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { Outlet } from 'react-router-dom';
-import { TopNav } from './TopNav';
-import { TabStrip } from './TabStrip';
-import { RightPanel } from './RightPanel';
-import { BottomStatus } from './BottomStatus';
-import { CommandPalette } from './CommandPalette';
-import { PermissionPrompt } from '../Overlays/PermissionPrompt';
-import { ConsentPrompt } from '../Overlays/ConsentPrompt';
-import { AgentOverlay } from '../AgentOverlay';
 import { PermissionRequest, ConsentRequest, ipcEvents } from '../../lib/ipc-events';
 import { useIPCEvent } from '../../lib/use-ipc-event';
 import { useTabsStore } from '../../state/tabsStore';
 import { ipc } from '../../lib/ipc-typed';
+
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode; fallback?: React.ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: React.ReactNode; fallback?: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error) {
+    console.warn('Component error caught:', error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback || <div style={{ padding: '8px', color: '#94a3b8' }}>Component error</div>;
+    }
+    return this.props.children;
+  }
+}
+
+// Lazy load heavy components
+const TopNav = React.lazy(() => import('./TopNav').then(m => ({ default: m.TopNav })));
+const TabStrip = React.lazy(() => import('./TabStrip').then(m => ({ default: m.TabStrip })));
+const RightPanel = React.lazy(() => import('./RightPanel').then(m => ({ default: m.RightPanel })));
+const BottomStatus = React.lazy(() => import('./BottomStatus').then(m => ({ default: m.BottomStatus })));
+const CommandPalette = React.lazy(() => import('./CommandPalette').then(m => ({ default: m.CommandPalette })));
+const PermissionPrompt = React.lazy(() => import('../Overlays/PermissionPrompt').then(m => ({ default: m.PermissionPrompt })));
+const ConsentPrompt = React.lazy(() => import('../Overlays/ConsentPrompt').then(m => ({ default: m.ConsentPrompt })));
+const AgentOverlay = React.lazy(() => import('../AgentOverlay').then(m => ({ default: m.AgentOverlay })));
 
 export function AppShell() {
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
@@ -146,10 +173,14 @@ export function AppShell() {
     <div className="flex flex-col h-screen bg-[#1A1D28] text-gray-100 overflow-hidden relative">
       {/* Top Navigation - Hidden in fullscreen */}
       {!isFullscreen && (
-        <TopNav 
-          onAgentToggle={() => setRightPanelOpen(!rightPanelOpen)}
-          onCommandPalette={() => setCommandPaletteOpen(true)}
-        />
+        <Suspense fallback={<div style={{ height: '40px', backgroundColor: '#0f172a' }} />}>
+          <ErrorBoundary fallback={<div style={{ height: '40px', backgroundColor: '#0f172a', padding: '8px', color: '#94a3b8' }}>Navigation Error</div>}>
+            <TopNav 
+              onAgentToggle={() => setRightPanelOpen(!rightPanelOpen)}
+              onCommandPalette={() => setCommandPaletteOpen(true)}
+            />
+          </ErrorBoundary>
+        </Suspense>
       )}
 
       {/* Main Layout - Full Width (No Sidebar) */}
@@ -157,7 +188,13 @@ export function AppShell() {
         {/* Center Content - Full Width */}
         <div className="flex flex-col flex-1 overflow-hidden w-full">
           {/* Tab Strip - Hidden in fullscreen */}
-          {!isFullscreen && <TabStrip />}
+          {!isFullscreen && (
+        <Suspense fallback={null}>
+          <ErrorBoundary>
+            <TabStrip />
+          </ErrorBoundary>
+        </Suspense>
+          )}
 
           {/* Route Content - Full Width */}
           <div className={`flex-1 overflow-hidden relative w-full ${isFullscreen ? 'absolute inset-0' : ''}`}>
@@ -167,36 +204,62 @@ export function AppShell() {
 
         {/* Right Panel (Agent Console) - Hidden in fullscreen */}
         {!isFullscreen && (
-          <RightPanel 
-            open={rightPanelOpen}
-            onClose={() => setRightPanelOpen(false)}
-          />
+        <Suspense fallback={null}>
+          <ErrorBoundary>
+            <RightPanel 
+              open={rightPanelOpen}
+              onClose={() => setRightPanelOpen(false)}
+            />
+          </ErrorBoundary>
+        </Suspense>
         )}
       </div>
 
-          {/* Bottom Status Bar - Hidden in fullscreen */}
-          {!isFullscreen && <BottomStatus />}
+      {/* Bottom Status Bar - Hidden in fullscreen */}
+      {!isFullscreen && (
+      <Suspense fallback={null}>
+        <ErrorBoundary>
+          <BottomStatus />
+        </ErrorBoundary>
+      </Suspense>
+      )}
 
-          {/* Agent Overlay */}
+      {/* Agent Overlay */}
+      <Suspense fallback={null}>
+        <ErrorBoundary>
           <AgentOverlay />
+        </ErrorBoundary>
+      </Suspense>
 
-          {/* Overlays */}
-          {commandPaletteOpen && (
+      {/* Overlays */}
+      {commandPaletteOpen && (
+        <Suspense fallback={null}>
+          <ErrorBoundary>
             <CommandPalette onClose={() => setCommandPaletteOpen(false)} />
-          )}
+          </ErrorBoundary>
+        </Suspense>
+      )}
 
       {permissionRequest && (
-        <PermissionPrompt 
-          request={permissionRequest}
-          onClose={() => setPermissionRequest(null)}
-        />
+        <Suspense fallback={null}>
+          <ErrorBoundary>
+            <PermissionPrompt 
+              request={permissionRequest}
+              onClose={() => setPermissionRequest(null)}
+            />
+          </ErrorBoundary>
+        </Suspense>
       )}
 
       {consentRequest && (
-        <ConsentPrompt 
-          request={consentRequest}
-          onClose={() => setConsentRequest(null)}
-        />
+        <Suspense fallback={null}>
+          <ErrorBoundary>
+            <ConsentPrompt 
+              request={consentRequest}
+              onClose={() => setConsentRequest(null)}
+            />
+          </ErrorBoundary>
+        </Suspense>
       )}
     </div>
   );

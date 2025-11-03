@@ -5,6 +5,32 @@
 import { registerHandler } from '../shared/ipc/router';
 import { z } from 'zod';
 import { getSessionManager } from './sessions';
+import { BrowserWindow } from 'electron';
+import { getTabs } from './tabs';
+
+// Helper function to close tabs by session ID
+function closeTabsBySession(win: BrowserWindow, sessionId: string): void {
+  const tabs = getTabs(win);
+  const sessionTabs = tabs.filter(t => t.sessionId === sessionId);
+  
+  for (const tab of sessionTabs) {
+    try {
+      win.removeBrowserView(tab.view);
+      tab.view.webContents.close();
+    } catch (error) {
+      console.error('Error closing tab:', error);
+    }
+  }
+  
+  // Remove tabs from array
+  const tabIdsToRemove = new Set(sessionTabs.map(t => t.id));
+  const index = tabs.length;
+  for (let i = tabs.length - 1; i >= 0; i--) {
+    if (tabIdsToRemove.has(tabs[i].id)) {
+      tabs.splice(i, 1);
+    }
+  }
+}
 
 export function registerSessionsIpc() {
   const sessionManager = getSessionManager();
@@ -20,8 +46,22 @@ export function registerSessionsIpc() {
   });
 
   // List all sessions
-  registerHandler('sessions:list', z.object({}), async () => {
-    return sessionManager.listSessions();
+  registerHandler('sessions:list', z.object({}), async (event) => {
+    const sessions = sessionManager.listSessions();
+    // Update tab counts for each session
+    const sessionsWithTabCounts = sessions.map(session => {
+      // Count tabs for this session
+      if (event?.sender) {
+        const win = BrowserWindow.fromWebContents(event.sender);
+        if (win) {
+          const tabs = getTabs(win);
+          const sessionTabs = tabs.filter(t => t.sessionId === session.id);
+          return { ...session, tabCount: sessionTabs.length };
+        }
+      }
+      return session;
+    });
+    return sessionsWithTabCounts;
   });
 
   // Get active session
@@ -32,8 +72,35 @@ export function registerSessionsIpc() {
   // Set active session
   registerHandler('sessions:setActive', z.object({
     sessionId: z.string(),
-  }), async (_event, request) => {
+  }), async (event, request) => {
     const success = sessionManager.setActiveSession(request.sessionId);
+    
+    if (success && event.sender) {
+      // Notify renderer that session has changed
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (win) {
+        // Emit tab updates so UI refreshes
+        win.webContents.send('session:switched', { sessionId: request.sessionId });
+        
+        // Refresh tab list to show only tabs for new session
+        const tabs = getTabs(win);
+        const active = tabs.find(t => t.sessionId === request.sessionId);
+        if (active) {
+          // Find first tab of new session to activate
+          const newSessionTabs = tabs.filter(t => t.sessionId === request.sessionId);
+          if (newSessionTabs.length > 0) {
+            // Tab activation will be handled by tabs:activate
+            win.webContents.send('tabs:updated', newSessionTabs.map(t => ({
+              id: t.id,
+              title: t.view.webContents.getTitle() || 'New Tab',
+              url: t.view.webContents.getURL() || 'about:blank',
+              active: false,
+            })));
+          }
+        }
+      }
+    }
+    
     return { success };
   });
 
@@ -51,7 +118,24 @@ export function registerSessionsIpc() {
   // Delete session
   registerHandler('sessions:delete', z.object({
     sessionId: z.string(),
-  }), async (_event, request) => {
+  }), async (event, request) => {
+    // Close all tabs belonging to this session
+    if (event.sender) {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (win) {
+        closeTabsBySession(win, request.sessionId);
+        
+        // Emit tab update after closing
+        const tabs = getTabs(win);
+        win.webContents.send('tabs:updated', tabs.map(t => ({
+          id: t.id,
+          title: t.view.webContents.getTitle() || 'New Tab',
+          url: t.view.webContents.getURL() || 'about:blank',
+          active: false,
+        })));
+      }
+    }
+    
     const success = sessionManager.deleteSession(request.sessionId);
     return { success };
   });

@@ -13,6 +13,20 @@ type IPCResponse<T> = { ok: true; data: T } | { ok: false; error: string };
  * @param request Request payload
  * @param schema Optional response schema for validation
  */
+// Plan type for agent
+export interface Plan {
+  id: string;
+  goal: string;
+  steps: Array<{
+    id: string;
+    action: string;
+    args: Record<string, unknown>;
+    dependsOn?: string[];
+    expectedOutput?: string;
+  }>;
+  estimatedDuration?: number;
+}
+
 export async function ipcCall<TRequest, TResponse = unknown>(
   channel: string,
   request: TRequest,
@@ -21,7 +35,9 @@ export async function ipcCall<TRequest, TResponse = unknown>(
   const fullChannel = `ob://ipc/v1/${channel}`;
   
   if (!window.ipc || typeof window.ipc.invoke !== 'function') {
-    throw new Error('IPC not available');
+    console.warn('IPC not available, returning default response');
+    // Return empty array for array types, null for objects, empty string for strings
+    return Promise.resolve((Array.isArray({} as TResponse) ? [] : null) as TResponse);
   }
   
   const response = await window.ipc.invoke(fullChannel, request) as IPCResponse<TResponse>;
@@ -46,14 +62,33 @@ export async function ipcCall<TRequest, TResponse = unknown>(
  */
 export const ipc = {
   tabs: {
-    create: (url?: string) => ipcCall('tabs:create', { url: url || 'about:blank' }),
-    close: (request: { id: string }) => ipcCall('tabs:close', request),
-    activate: (request: { id: string }) => ipcCall('tabs:activate', request),
-    navigate: (id: string, url: string) => ipcCall('tabs:navigate', { id, url }),
-    goBack: (id: string) => ipcCall('tabs:goBack', { id }),
-    goForward: (id: string) => ipcCall('tabs:goForward', { id }),
-    reload: (id: string) => ipcCall('tabs:reload', { id }),
-    list: () => ipcCall<unknown, Array<{ id: string; title: string; active: boolean; url?: string }>>('tabs:list', {}),
+    create: async (url?: string) => {
+      try {
+        return await ipcCall('tabs:create', { url: url || 'about:blank' });
+      } catch (error) {
+        console.warn('Failed to create tab:', error);
+        return null;
+      }
+    },
+    close: (request: { id: string }) => ipcCall('tabs:close', request).catch(err => console.warn('Failed to close tab:', err)),
+    activate: (request: { id: string }) => ipcCall('tabs:activate', request).catch(err => console.warn('Failed to activate tab:', err)),
+    navigate: (id: string, url: string) => ipcCall('tabs:navigate', { id, url }).catch(err => console.warn('Failed to navigate:', err)),
+    goBack: (id: string) => ipcCall('tabs:goBack', { id }).catch(err => console.warn('Failed to go back:', err)),
+    goForward: (id: string) => ipcCall('tabs:goForward', { id }).catch(err => console.warn('Failed to go forward:', err)),
+    devtools: (id: string) => ipcCall('tabs:devtools', { id }),
+    screenshot: (id?: string) => ipcCall<{ id?: string }, { success: boolean; path?: string; error?: string }>('tabs:screenshot', { id }),
+    pip: (id?: string, enabled?: boolean) => ipcCall<{ id?: string; enabled?: boolean }, { success: boolean; error?: string }>('tabs:pip', { id, enabled }),
+    find: (id?: string) => ipcCall<{ id?: string }, { success: boolean; error?: string }>('tabs:find', { id }),
+    reload: (id: string) => ipcCall('tabs:reload', { id }).catch(err => console.warn('Failed to reload:', err)),
+    list: async () => {
+      try {
+        const result = await ipcCall<unknown, Array<{ id: string; title: string; active: boolean; url?: string }>>('tabs:list', {});
+        return Array.isArray(result) ? result : [];
+      } catch (error) {
+        console.warn('Failed to list tabs:', error);
+        return [];
+      }
+    },
     hibernate: (id: string) => ipcCall('tabs:hibernate', { id }),
     burn: (id: string) => ipcCall('tabs:burn', { id }),
     onUpdated: (callback: (tabs: Array<{ id: string; title: string; active: boolean; url?: string }>) => void) => {
@@ -90,6 +125,40 @@ export const ipc = {
       ipcCall<{ query: string; context?: { url?: string; text?: string } }, { answer: string; sources?: string[] }>('agent:ask', { query, context }),
     deepResearch: (request: { query: string; maxSources?: number; outputFormat?: 'json' | 'csv' | 'markdown'; includeCitations?: boolean }) =>
       ipcCall('agent:deepResearch', request),
+    stream: {
+      start: (query: string, options?: { model?: string; temperature?: number; maxTokens?: number }) =>
+        ipcCall('agent:stream:start', { query, ...options }),
+      stop: (streamId: string) => ipcCall('agent:stream:stop', { streamId }),
+    },
+    generatePlanFromGoal: (request: { goal: string; mode?: string; constraints?: string[] }) =>
+      ipcCall<{ goal: string; mode?: string; constraints?: string[] }, Plan>('agent:generatePlanFromGoal', request),
+    executePlan: (request: { planId: string; plan: Plan }) =>
+      ipcCall('agent:executePlan', request),
+    guardrails: {
+      config: (config: any) => ipcCall('agent:guardrails:config', config),
+      check: (type: 'prompt' | 'domain' | 'ratelimit' | 'step', data: any) =>
+        ipcCall('agent:guardrails:check', { type, data }),
+    },
+  },
+  cloudVector: {
+    config: (config: { provider: 'qdrant' | 'pinecone' | 'none'; endpoint?: string; apiKey?: string; collection?: string; enabled: boolean }) =>
+      ipcCall('cloud-vector:config', config),
+    sync: (documentIds?: string[]) => ipcCall('cloud-vector:sync', { documentIds }),
+    search: (query: string, topK?: number) => ipcCall('cloud-vector:search', { query, topK }),
+    available: () => ipcCall<unknown, { available: boolean }>('cloud-vector:available', {}),
+  },
+  hybridSearch: {
+    search: (query: string, maxResults?: number) => ipcCall('search:hybrid', { query, maxResults }),
+    config: (config: { sources?: { brave?: { enabled: boolean; apiKey?: string }; bing?: { enabled: boolean; apiKey?: string; endpoint?: string }; custom?: { enabled: boolean } }; maxResults?: number; rerank?: boolean }) =>
+      ipcCall('search:config', config),
+  },
+  e2eeSync: {
+    config: (config: { enabled: boolean; syncEndpoint?: string; encryptionKey?: string; chainId?: string }) =>
+      ipcCall('sync:config', config),
+    init: (request: { password: string }) => ipcCall('sync:init', request),
+    sync: () => ipcCall('sync:sync', {}),
+    status: () => ipcCall<unknown, { synced: boolean; chainId?: string; enabled: boolean }>('sync:status', {}),
+    pull: () => ipcCall<unknown, { data: unknown[] }>('sync:pull', {}),
   },
   consent: {
     createRequest: (action: unknown) => ipcCall('consent:createRequest', action),

@@ -8,7 +8,7 @@ import { runAgent, DSL } from './services/agent/brain';
 import { registerRecorderIpc } from './automate/recorder';
 import { registerTabIpc } from './services/tabs';
 import { registerProxyIpc } from './services/proxy';
-import { registerDownloadsIpc } from './services/downloads';
+import { registerDownloadsIpc } from './services/downloads-enhanced';
 import { registerScrapingIpc } from './services/scraping';
 import { registerVideoIpc } from './services/video';
 import { registerThreatsIpc } from './services/threats';
@@ -47,8 +47,13 @@ import { registerWorkerIpc } from './services/workers/worker-ipc';
 import { registerVideoCallIpc } from './services/video-call-ipc';
 import { registerSessionsIpc } from './services/sessions-ipc';
 import { registerPrivateIpc } from './services/private-ipc';
+import { initializeTelemetry, shutdownTelemetry } from './services/observability/telemetry';
 import { getShieldsService } from './services/shields';
 import * as Actions from './services/actions';
+import { registerCloudVectorIpc } from './services/knowledge/cloud-vector-ipc';
+import { registerHybridSearchIpc } from './services/search/hybrid-search-ipc';
+import { registerE2EESyncIpc } from './services/sync/e2ee-sync-ipc';
+import { registerStreamingIpc } from './services/agent/streaming-ipc';
 
 let mainWindow: BrowserWindow | null = null;
 const agentStore = new AgentStore();
@@ -93,6 +98,15 @@ networkControls.initializeDefaults();
 
 app.whenReady().then(async () => {
   applySecurityPolicies();
+
+  // Initialize observability (OpenTelemetry)
+  initializeTelemetry({
+    enabled: process.env.OTEL_ENABLED === 'true',
+    serviceName: 'omnibrowser',
+    serviceVersion: app.getVersion(),
+    otlpEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+    consoleExporter: process.env.NODE_ENV === 'development',
+  });
   
   // Apply IPv6 protection now that session is available
   if (networkControls.getConfig().ipv6LeakProtection) {
@@ -105,6 +119,10 @@ app.whenReady().then(async () => {
   setAgentStore(agentStore);
   
   if (mainWindow) {
+    // Set main window reference early
+    const { setMainWindow } = require('./services/windows');
+    setMainWindow(mainWindow);
+    
     registerRecorderIpc(mainWindow);
     registerTabIpc(mainWindow);
     registerProxyIpc();
@@ -143,35 +161,54 @@ app.whenReady().then(async () => {
     registerPerformanceIpc();
     registerWorkerIpc();
     registerVideoCallIpc();
-        registerSessionsIpc();
-        registerPrivateIpc();
+    registerSessionsIpc();
+    registerPrivateIpc();
+    
+    // New architecture enhancements
+    registerCloudVectorIpc();
+    registerHybridSearchIpc();
+    registerE2EESyncIpc();
+    registerStreamingIpc();
 
-        // Forward shields counter updates to renderer
-        const shieldsService = getShieldsService();
-        shieldsService.on('counters-updated', (status) => {
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('shields:counters', status);
-          }
+    // Forward shields counter updates to renderer
+    const shieldsService = getShieldsService();
+    shieldsService.on('counters-updated', (status) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        // Send counters to all tabs - each tab component will filter by activeId
+        // For now, send with empty tabId, frontend will match by active tab
+        mainWindow.webContents.send('shields:counters', {
+          tabId: '', // Will be matched by frontend
+          ads: status.adsBlocked || 0,
+          trackers: status.trackersBlocked || 0,
+          cookiesBlocked: 0, // Would need to track this separately
+          httpsUpgrades: status.httpsUpgrades || 0,
         });
       }
+    });
+  }
+});
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createMainWindow();
-      if (mainWindow) mainWindow.maximize();
-    } else {
-      // If window exists but is minimized, restore and maximize
-      const existingWindow = BrowserWindow.getAllWindows()[0];
-      if (existingWindow) {
-        existingWindow.maximize();
-        existingWindow.focus();
-      }
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createMainWindow();
+    if (mainWindow) mainWindow.maximize();
+  } else {
+    // If window exists but is minimized, restore and maximize
+    const existingWindow = BrowserWindow.getAllWindows()[0];
+    if (existingWindow) {
+      existingWindow.maximize();
+      existingWindow.focus();
     }
-  });
+  }
 });
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', async () => {
+  // Shutdown telemetry gracefully
+  await shutdownTelemetry();
 });
 
 // Minimal IPC placeholders (expand later)

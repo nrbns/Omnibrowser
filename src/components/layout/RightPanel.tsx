@@ -3,11 +3,12 @@
  */
 
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Brain, Zap, FileText, Shield, ListChecks, Activity } from 'lucide-react';
+import { X, Brain, Zap, FileText, Shield, ListChecks, Activity, Sparkles } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { ipc } from '../../lib/ipc-typed';
 import { AgentPlan, AgentStep, ConsentRequest } from '../../lib/ipc-events';
 import { useIPCEvent } from '../../lib/use-ipc-event';
+import { AgentPlanner } from '../AgentPlanner';
 
 interface RightPanelProps {
   open: boolean;
@@ -15,6 +16,7 @@ interface RightPanelProps {
 }
 
 const tabs = [
+  { id: 'planner', icon: Sparkles, label: 'Planner' },
   { id: 'plan', icon: ListChecks, label: 'Plan' },
   { id: 'actions', icon: Zap, label: 'Actions' },
   { id: 'logs', icon: Activity, label: 'Logs' },
@@ -23,7 +25,7 @@ const tabs = [
 ];
 
 export function RightPanel({ open, onClose }: RightPanelProps) {
-  const [activeTab, setActiveTab] = useState('plan');
+  const [activeTab, setActiveTab] = useState('planner');
   const [plan, setPlan] = useState<AgentPlan | null>(null);
   const [steps, setSteps] = useState<AgentStep[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
@@ -123,6 +125,10 @@ export function RightPanel({ open, onClose }: RightPanelProps) {
 
           {/* Content */}
           <div className="flex-1 overflow-y-auto p-4">
+            {activeTab === 'planner' && (
+              <AgentPlanner />
+            )}
+
             {activeTab === 'plan' && (
               <div className="space-y-4">
                 {plan ? (

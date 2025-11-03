@@ -34,10 +34,34 @@ export function SessionSwitcher() {
         ipc.sessions.list(),
         ipc.sessions.getActive(),
       ]);
-      setSessions(allSessions as BrowserSession[]);
-      setActiveSession(active as BrowserSession | null);
+      // Ensure we have arrays
+      if (Array.isArray(allSessions)) {
+        setSessions(allSessions as BrowserSession[]);
+      } else {
+        setSessions([]);
+      }
+      if (active && typeof active === 'object') {
+        setActiveSession(active as BrowserSession | null);
+      } else {
+        setActiveSession(null);
+      }
     } catch (error) {
       console.error('Failed to load sessions:', error);
+      // On error, at least show default session
+      setSessions([{
+        id: 'default',
+        name: 'Default',
+        profileId: 'default',
+        createdAt: Date.now(),
+        tabCount: 0,
+      }]);
+      setActiveSession({
+        id: 'default',
+        name: 'Default',
+        profileId: 'default',
+        createdAt: Date.now(),
+        tabCount: 0,
+      });
     }
   };
 

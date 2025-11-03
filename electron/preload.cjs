@@ -132,23 +132,46 @@ contextBridge.exposeInMainWorld('research', researchApi);
 // Typed IPC bridge (for ob://ipc/v1/* channels)
 const typedApi = {
   invoke: async (channel, request) => {
-    return ipcRenderer.invoke(channel, request);
+    try {
+      const response = await ipcRenderer.invoke(channel, request);
+      // Handle both wrapped ({ok, data}) and direct responses
+      if (response && typeof response === 'object' && 'ok' in response) {
+        if (!response.ok) {
+          throw new Error(response.error || 'IPC call failed');
+        }
+        return response.data;
+      }
+      return response;
+    } catch (error) {
+      console.error(`[IPC] Error invoking ${channel}:`, error);
+      throw error;
+    }
   },
   on: (channel, callback) => {
-    ipcRenderer.on(channel, callback);
+    const wrappedCallback = (_event, ...args) => {
+      // IPC events come as (event, data), extract data
+      const data = args.length > 0 ? args[0] : args;
+      callback(_event, data);
+    };
+    ipcRenderer.on(channel, wrappedCallback);
     // Also listen to legacy channel if it's tabs:updated
-    if (channel === 'tabs:updated') {
-      ipcRenderer.on('tabs:updated', callback);
+    if (channel === 'tabs:updated' || channel === 'ob://ipc/v1/tabs:updated') {
+      ipcRenderer.on('tabs:updated', wrappedCallback);
     }
   },
   removeListener: (channel, callback) => {
-    ipcRenderer.removeListener(channel, callback);
-    if (channel === 'tabs:updated') {
-      ipcRenderer.removeListener('tabs:updated', callback);
+    ipcRenderer.removeAllListeners(channel);
+    if (channel === 'tabs:updated' || channel === 'ob://ipc/v1/tabs:updated') {
+      ipcRenderer.removeAllListeners('tabs:updated');
     }
   },
 };
 
 contextBridge.exposeInMainWorld('ipc', typedApi);
+
+// Ensure window.ipc is available for legacy code
+if (!window.ipc) {
+  window.ipc = typedApi;
+}
 
 

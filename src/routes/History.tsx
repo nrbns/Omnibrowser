@@ -31,9 +31,15 @@ export default function HistoryPage() {
     const loadHistory = async () => {
       try {
         const list = await ipc.history.list() as HistoryEntry[];
-        setItems(list || []);
+        // Ensure we have an array
+        if (Array.isArray(list)) {
+          setItems(list);
+        } else {
+          setItems([]);
+        }
       } catch (error) {
         console.error('Failed to load history:', error);
+        setItems([]); // Set empty array on error
       } finally {
         setLoading(false);
       }
@@ -113,12 +119,22 @@ export default function HistoryPage() {
     setItems(items.filter(e => e.url !== url));
   };
 
-  const handleNavigate = (url: string) => {
-    // Navigate to home first, then create a new tab with the URL
-    navigate('/');
-    setTimeout(() => {
-      ipc.tabs.create(url).catch(console.error);
-    }, 100);
+  const handleNavigate = async (url: string) => {
+    try {
+      // Create tab with the URL directly - it will be activated automatically
+      const result = await ipc.tabs.create(url);
+      if (result) {
+        // Navigate to home to show the tab in MainView
+        navigate('/');
+      }
+    } catch (error) {
+      console.error('Failed to open history URL:', error);
+      // Fallback: navigate to home and create blank tab
+      navigate('/');
+      setTimeout(() => {
+        ipc.tabs.create('about:blank').catch(console.error);
+      }, 100);
+    }
   };
 
   const formatTime = (timestamp: number) => {

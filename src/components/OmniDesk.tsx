@@ -13,6 +13,7 @@ import { useTabsStore } from '../state/tabsStore';
 import { useAppStore } from '../state/appStore';
 import { ipc } from '../lib/ipc-typed';
 import { useNavigate } from 'react-router-dom';
+import { ipcEvents } from '../lib/ipc-events';
 
 export function OmniDesk() {
   const { tabs } = useTabsStore();
@@ -22,42 +23,192 @@ export function OmniDesk() {
   const [pinnedInsights, setPinnedInsights] = useState<any[]>([]);
   const [continueSessions, setContinueSessions] = useState<any[]>([]);
 
+  // Load workspace and session data
   useEffect(() => {
-    // Load recent workspaces
-    ipc.workspaceV2.list().then(result => {
-      const workspaces = (result as any)?.workspaces || [];
-      setRecentWorkspaces(workspaces.slice(0, 3));
-    }).catch(() => {});
+    const loadData = async () => {
+      try {
+        // Load recent workspaces
+        const workspaceResult = await ipc.workspaceV2.list();
+        const workspaces = (workspaceResult as any)?.workspaces || [];
+        setRecentWorkspaces(workspaces.slice(0, 3));
+      } catch (error) {
+        console.warn('Failed to load workspaces:', error);
+      }
 
-    // Load continue sessions (would come from session manager)
-    // Mock for now
-    setContinueSessions([
-      { type: 'Research', title: 'Quantum Computing Research', url: 'about:blank', timestamp: Date.now() - 3600000 },
-      { type: 'Trade', title: 'Market Analysis', url: 'about:blank', timestamp: Date.now() - 7200000 },
-    ]);
+      try {
+        // Load recent sessions from session manager
+        const sessionsResult = await ipc.sessions.list();
+        const sessions = (sessionsResult as any) || [];
+        
+        // Transform sessions into continue format
+        const continueItems = sessions
+          .slice(0, 2)
+          .map((session: any) => ({
+            id: session.id,
+            type: session.name?.includes('Research') ? 'Research' : 
+                  session.name?.includes('Trade') ? 'Trade' : 'Browse',
+            title: session.name || 'Untitled Session',
+            url: 'about:blank',
+            timestamp: session.createdAt || Date.now() - 3600000,
+            sessionId: session.id
+          }));
+        
+        if (continueItems.length > 0) {
+          setContinueSessions(continueItems);
+        } else {
+          // Fallback: Show mock sessions if none exist
+          setContinueSessions([
+            { 
+              type: 'Research', 
+              title: 'Quantum Computing Research', 
+              url: 'about:blank', 
+              timestamp: Date.now() - 3600000 
+            },
+            { 
+              type: 'Trade', 
+              title: 'Market Analysis', 
+              url: 'about:blank', 
+              timestamp: Date.now() - 7200000 
+            },
+          ]);
+        }
+      } catch (error) {
+        console.warn('Failed to load sessions:', error);
+        // Fallback to mock data
+        setContinueSessions([
+          { 
+            type: 'Research', 
+            title: 'Quantum Computing Research', 
+            url: 'about:blank', 
+            timestamp: Date.now() - 3600000 
+          },
+          { 
+            type: 'Trade', 
+            title: 'Market Analysis', 
+            url: 'about:blank', 
+            timestamp: Date.now() - 7200000 
+          },
+        ]);
+      }
+    };
+
+    loadData();
+
+    // Listen for workspace updates
+    const unsubscribeWorkspace = ipcEvents.on('workspace:updated', () => {
+      loadData();
+    });
+
+    return () => {
+      unsubscribeWorkspace();
+    };
   }, []);
 
   const quickActions = [
-    { icon: Sparkles, label: 'Ask Agent', action: () => navigate('/agent'), color: 'from-blue-500 to-cyan-500' },
-    { icon: Search, label: 'Search Topic', action: () => navigate('/search'), color: 'from-purple-500 to-pink-500' },
-    { icon: FileText, label: 'Research Notes', action: () => setMode('Research'), color: 'from-green-500 to-emerald-500' },
-    { icon: Workflow, label: 'Run Playbook', action: () => navigate('/playbooks'), color: 'from-orange-500 to-red-500' },
+    { 
+      icon: Sparkles, 
+      label: 'Ask Agent', 
+      action: async () => {
+        navigate('/agent');
+      }, 
+      color: 'from-blue-500 to-cyan-500' 
+    },
+    { 
+      icon: Search, 
+      label: 'Search Topic', 
+      action: async () => {
+        // Switch to research mode and open search
+        setMode('Research');
+        await ipc.tabs.create('about:blank');
+      }, 
+      color: 'from-purple-500 to-pink-500' 
+    },
+    { 
+      icon: FileText, 
+      label: 'Research Notes', 
+      action: async () => {
+        setMode('Research');
+        await ipc.tabs.create('about:blank');
+      }, 
+      color: 'from-green-500 to-emerald-500' 
+    },
+    { 
+      icon: Workflow, 
+      label: 'Run Playbook', 
+      action: () => {
+        navigate('/playbooks');
+      }, 
+      color: 'from-orange-500 to-red-500' 
+    },
   ];
 
   const handleContinueSession = async (session: any) => {
-    if (session.type === 'Research') {
-      setMode('Research');
-      await ipc.tabs.create(session.url);
-    } else if (session.type === 'Trade') {
-      setMode('Trade');
-      await ipc.tabs.create(session.url);
+    try {
+      let urlToLoad = session.url || 'about:blank';
+      
+      // Switch to the session first if it has a sessionId
+      if (session.sessionId) {
+        try {
+          await ipc.sessions.setActive({ sessionId: session.sessionId });
+          
+          // Wait a bit for session to switch
+          await new Promise(resolve => setTimeout(resolve, 200));
+          
+          // Check if session has tabs already
+          const tabs = await ipc.tabs.list();
+          if (tabs.length > 0) {
+            // Session has tabs, they should be visible now
+            // Activate the first tab if none is active
+            const activeTab = tabs.find(t => t.active);
+            if (!activeTab && tabs[0]) {
+              await ipc.tabs.activate({ id: tabs[0].id });
+            }
+            return; // Tabs exist, don't create new one
+          }
+          
+          // No tabs in session, create one with the session URL or default
+          if (!urlToLoad || urlToLoad === 'about:blank') {
+            // Try to get last visited URL from session or use default
+            urlToLoad = 'about:blank';
+          }
+        } catch (error) {
+          console.warn('Failed to set active session:', error);
+          // Continue with creating a tab
+        }
+      }
+      
+      // Set mode if specified
+      if (session.type === 'Research') {
+        setMode('Research');
+      } else if (session.type === 'Trade') {
+        setMode('Trade');
+      }
+      
+      // Create tab with the URL
+      const result = await ipc.tabs.create(urlToLoad);
+      if (!result) {
+        throw new Error('Failed to create tab');
+      }
+      
+      // Wait a bit for tab to be created and activated
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+    } catch (error) {
+      console.error('Failed to continue session:', error);
+      // Last resort: create a blank tab
+      try {
+        await ipc.tabs.create('about:blank');
+      } catch (e) {
+        console.error('Failed to create fallback tab:', e);
+      }
     }
   };
 
-  if (tabs.length > 0) return null; // Only show when no tabs
+  // Only show when no tabs
+  if (tabs.length > 0) return null;
 
   return (
-    <div className="h-full w-full bg-gradient-to-br from-[#1A1D28] via-[#1F2332] to-[#1A1D28] flex items-center justify-center p-8 overflow-auto">
+    <div className="absolute inset-0 h-full w-full bg-gradient-to-br from-[#1A1D28] via-[#1F2332] to-[#1A1D28] flex items-center justify-center p-8 overflow-auto z-10">
       <div className="max-w-5xl w-full space-y-8">
         {/* Header */}
         <motion.div
@@ -86,7 +237,7 @@ export function OmniDesk() {
                 onClick={action.action}
                 whileHover={{ scale: 1.05, y: -2 }}
                 whileTap={{ scale: 0.95 }}
-                className={`p-6 rounded-xl bg-gradient-to-br ${action.color} bg-opacity-10 hover:bg-opacity-20 border border-gray-700/50 backdrop-blur-sm transition-all group`}
+                className={`p-6 rounded-xl bg-gradient-to-br ${action.color} bg-opacity-10 hover:bg-opacity-20 border border-gray-700/50 backdrop-blur-sm transition-all group cursor-pointer`}
               >
                 <Icon className="w-8 h-8 mx-auto mb-2 text-gray-300 group-hover:text-white transition-colors" />
                 <div className="text-sm font-medium text-gray-300 group-hover:text-white transition-colors">
@@ -115,7 +266,7 @@ export function OmniDesk() {
                   key={idx}
                   onClick={() => handleContinueSession(session)}
                   whileHover={{ scale: 1.02, x: 4 }}
-                  className="p-4 rounded-lg bg-gray-800/50 border border-gray-700/50 hover:border-gray-600 transition-all text-left group"
+                  className="p-4 rounded-lg bg-gray-800/50 border border-gray-700/50 hover:border-gray-600 transition-all text-left group cursor-pointer"
                 >
                   <div className="flex items-center gap-2 mb-1">
                     <span className={`text-xs px-2 py-0.5 rounded ${
@@ -156,7 +307,7 @@ export function OmniDesk() {
                   key={idx}
                   onClick={() => navigate(`/w/${workspace.id}`)}
                   whileHover={{ scale: 1.05 }}
-                  className="p-3 rounded-lg bg-gray-800/50 border border-gray-700/50 hover:border-gray-600 transition-all"
+                  className="p-3 rounded-lg bg-gray-800/50 border border-gray-700/50 hover:border-gray-600 transition-all cursor-pointer"
                 >
                   <div className="text-sm font-medium text-gray-200 truncate">
                     {workspace.name}
@@ -170,4 +321,3 @@ export function OmniDesk() {
     </div>
   );
 }
-

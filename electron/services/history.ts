@@ -83,17 +83,39 @@ export function clearHistory(): void {
 }
 
 export function searchHistory(query: string): HistoryEntry[] {
-  const lowerQuery = query.toLowerCase();
-  return items.filter(entry => 
+  if (!query || query.trim().length === 0) {
+    // Return most recent entries if no query
+    return items.slice(0, 20);
+  }
+  
+  const lowerQuery = query.toLowerCase().trim();
+  const results = items.filter(entry => 
     entry.url.toLowerCase().includes(lowerQuery) ||
     entry.title.toLowerCase().includes(lowerQuery)
   );
+  
+  // Sort by most recent first (already in items array order)
+  // But prioritize by visit count and recency
+  return results
+    .sort((a, b) => {
+      // First sort by visit count (more visits = more relevant)
+      if (b.visitCount !== a.visitCount) {
+        return b.visitCount - a.visitCount;
+      }
+      // Then by most recent visit
+      const aTime = a.lastVisitTime || a.timestamp;
+      const bTime = b.lastVisitTime || b.timestamp;
+      return bTime - aTime;
+    })
+    .slice(0, 50); // Limit to 50 most relevant results
 }
 
 export function registerHistoryIpc() {
   // Typed IPC handlers
   registerHandler('history:list', z.object({}), async () => {
-    return getHistory();
+    const history = getHistory();
+    // Ensure we always return an array
+    return Array.isArray(history) ? history : [];
   });
 
   registerHandler('history:clear', z.object({}), async () => {

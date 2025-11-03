@@ -12,7 +12,7 @@ const modes = [
   { id: 'Research', icon: Brain, label: 'Research', color: 'text-purple-400', glowColor: 'from-purple-500 via-purple-600 to-purple-500' },
   { id: 'Trade', icon: TrendingUp, label: 'Trade', color: 'text-green-400', glowColor: 'from-green-500 via-emerald-600 to-green-500' },
   { id: 'Games', icon: Gamepad2, label: 'Game', color: 'text-yellow-400', glowColor: 'from-yellow-500 via-amber-600 to-yellow-500' },
-  { id: 'AI Tasks', icon: Zap, label: 'AI Tasks', color: 'text-cyan-400', glowColor: 'from-cyan-500 via-blue-600 to-cyan-500' },
+  { id: 'Browse', icon: Zap, label: 'Browse', color: 'text-cyan-400', glowColor: 'from-cyan-500 via-blue-600 to-cyan-500' },
 ];
 
 export function ModeSwitch() {
@@ -21,15 +21,12 @@ export function ModeSwitch() {
 
   const handleModeChange = (newMode: typeof modes[number]) => {
     setMode(newMode.id as any);
-    if (newMode.id === 'AI Tasks') {
-      navigate('/agent');
-    } else {
-      navigate('/');
-    }
+    // All modes stay on home page, agent is accessed separately
+    navigate('/');
   };
 
-  // Map current mode - default to Research if Browse
-  const currentMode = mode === 'Browse' ? 'Research' : mode;
+  // Map current mode - use mode as-is, default to Research
+  const currentMode = mode || 'Research';
 
   return (
     <div className="flex items-center gap-1 bg-gray-800/60 rounded-lg p-1 border border-gray-700/50 shadow-sm">
@@ -45,31 +42,23 @@ export function ModeSwitch() {
             whileTap={{ scale: 0.98 }}
             className={`
               relative flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium
-              transition-all duration-200
+              transition-all duration-200 cursor-pointer
               ${isActive
-                ? 'bg-gradient-to-r from-purple-600/40 to-purple-500/40 text-white shadow-lg'
+                ? `bg-gradient-to-r ${m.glowColor} text-white shadow-lg`
                 : 'text-gray-400 hover:text-gray-200 hover:bg-gray-700/30'
               }
             `}
             title={m.label}
           >
-            <Icon size={16} className={isActive ? 'text-purple-200' : m.color} />
+            <Icon size={16} className={isActive ? 'text-white' : m.color} />
             <span>{m.label}</span>
             {isActive && (
-              <>
-                <motion.div
-                  className="absolute inset-0 bg-gradient-to-r from-purple-600/30 to-purple-500/30 rounded-md"
-                  layoutId="activeMode"
-                  transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-                />
-                {/* Glow accent underline */}
-                <motion.div
-                  className={`absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r ${m.glowColor} rounded-full`}
-                  initial={{ scaleX: 0 }}
-                  animate={{ scaleX: 1 }}
-                  transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-                />
-              </>
+              <motion.div
+                className={`absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r ${m.glowColor} rounded-full`}
+                initial={{ scaleX: 0 }}
+                animate={{ scaleX: 1 }}
+                transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+              />
             )}
           </motion.button>
         );

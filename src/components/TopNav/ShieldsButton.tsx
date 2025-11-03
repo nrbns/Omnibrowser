@@ -35,9 +35,10 @@ export function ShieldsButton() {
 
   // Listen for shields counters
   useIPCEvent<ShieldsCounters>('shields:counters', (data) => {
-    if (data.tabId === activeId) {
+    // If tabId is empty or matches activeId, update counters
+    if (!data.tabId || data.tabId === '' || data.tabId === activeId) {
       setCounters(data);
-      setTotalBlocked(data.ads + data.trackers + data.cookiesBlocked);
+      setTotalBlocked((data.ads || 0) + (data.trackers || 0) + (data.cookiesBlocked || 0));
     }
   }, [activeId]);
 

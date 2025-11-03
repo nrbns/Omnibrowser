@@ -1,18 +1,51 @@
 import { useEffect, useRef, useState } from 'react';
+import { ipc } from '../lib/ipc-typed';
+import { ipcEvents } from '../lib/ipc-events';
 
 export default function AgentConsole() {
   const [runId, setRunId] = useState<string | null>(null);
   const [logs, setLogs] = useState<any[]>([]);
+  const [streamingText, setStreamingText] = useState<string>('');
+  const [streamId, setStreamId] = useState<string | null>(null);
   const dslRef = useRef<string>(JSON.stringify({ goal: "Open example.com", steps: [{ skill: 'navigate', args: { url: 'https://example.com' } }], output: { type: 'json', schema: {} } }, null, 2));
 
   useEffect(()=>{
     if (!window.agent) return;
-    window.agent.onToken((t: any)=> setLogs((l: any[])=> [...l, t]));
-    window.agent.onStep((s: any)=> setLogs((l: any[])=> [...l, s]));
-    return () => {
-      // listeners auto-removed on page unload in this stub
+    
+    const tokenHandler = (t: any) => setLogs((l: any[])=> [...l, t]);
+    const stepHandler = (s: any) => setLogs((l: any[])=> [...l, s]);
+    
+    window.agent.onToken(tokenHandler);
+    window.agent.onStep(stepHandler);
+    
+    // Listen for streaming AI chunks
+    const streamChunkHandler = (data: { streamId: string; chunk: { text?: string; finished?: boolean } }) => {
+      if (data.streamId === streamId) {
+        if (data.chunk.text) {
+          setStreamingText(prev => prev + (data.chunk.text || ''));
+        }
+        if (data.chunk.finished) {
+          setStreamId(null);
+        }
+      }
     };
-  },[]);
+
+    const unsubscribeChunk = ipcEvents.on<{ streamId: string; chunk: { text?: string; finished?: boolean } }>('agent:stream:chunk', streamChunkHandler);
+    const unsubscribeDone = ipcEvents.on<{ streamId: string }>('agent:stream:done', (data) => {
+      if (data.streamId === streamId) {
+        setStreamId(null);
+      }
+    });
+    
+    // Cleanup function - properly removes listeners
+    return () => {
+      unsubscribeChunk();
+      unsubscribeDone();
+      // Note: In Electron, IPC listeners are automatically cleaned up when the renderer process terminates
+      // If window.agent had removeListener methods, we would call them here
+      // For now, React's cleanup is sufficient as listeners are scoped to this component
+    };
+  },[streamId]);
 
   return (
     <div className="p-3 grid grid-cols-2 gap-3 h-full">
@@ -44,6 +77,54 @@ export default function AgentConsole() {
       <div className="flex flex-col gap-2">
         <h3 className="font-medium">Live Logs</h3>
         <pre className="flex-1 bg-neutral-900 rounded p-2 text-xs overflow-auto">{JSON.stringify(logs, null, 2)}</pre>
+        
+        {/* Streaming AI Response */}
+        {streamingText && (
+          <div className="mt-4 p-4 bg-neutral-800 rounded border border-blue-500/30">
+            <h4 className="font-medium mb-2 text-blue-400">Streaming Response:</h4>
+            <div className="text-sm text-gray-300 whitespace-pre-wrap max-h-60 overflow-y-auto">
+              {streamingText}
+            </div>
+            <button
+              onClick={async () => {
+                if (streamId) {
+                  await ipc.agent.stream.stop(streamId);
+                  setStreamId(null);
+                  setStreamingText('');
+                }
+              }}
+              className="mt-2 px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-xs"
+            >
+              Stop Stream
+            </button>
+          </div>
+        )}
+        
+        {/* Start Streaming Button */}
+        <button
+          onClick={async () => {
+            try {
+              const query = prompt('Enter your query for streaming AI:');
+              if (!query) return;
+              
+              setStreamingText('');
+              const result = await ipc.agent.stream.start(query, {
+                model: 'llama3.2',
+                temperature: 0.7,
+              });
+              
+              if (result?.streamId) {
+                setStreamId(result.streamId);
+              }
+            } catch (error) {
+              console.error('Failed to start stream:', error);
+              alert('Failed to start streaming. Check console for details.');
+            }
+          }}
+          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded text-sm font-medium"
+        >
+          Start Streaming AI
+        </button>
       </div>
     </div>
   );

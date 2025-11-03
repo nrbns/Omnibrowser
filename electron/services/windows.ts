@@ -7,6 +7,13 @@ export function setMainWindow(win: BrowserWindow) {
 }
 
 export function getMainWindow(): BrowserWindow | null {
+  if (!mainWindow) {
+    // Fallback: try to get the focused window or first window
+    const windows = BrowserWindow.getAllWindows();
+    if (windows.length > 0) {
+      return windows[0];
+    }
+  }
   return mainWindow;
 }
 

@@ -1,5 +1,5 @@
 import { BrowserView, BrowserWindow, ipcMain, session, screen } from 'electron';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { addToGraph } from '../services/graph';
 import { pushHistory } from './history';
 import { registerHandler } from '../shared/ipc/router';
@@ -69,29 +69,56 @@ export function registerTabIpc(win: BrowserWindow) {
   registerHandler('tabs:list', z.object({}), async () => {
     const tabs = getTabs(win);
     const active = activeTabIdByWindow.get(win.id);
-    return tabs.map(t => ({ 
-      id: t.id, 
-      title: t.view.webContents.getTitle() || 'New Tab', 
-      active: t.id === active,
-      url: t.view.webContents.getURL(),
-    })) as z.infer<typeof TabListResponse>;
+    return tabs.map(t => {
+      try {
+        const url = t.view.webContents.getURL();
+        return { 
+          id: t.id, 
+          title: t.view.webContents.getTitle() || 'New Tab', 
+          active: t.id === active,
+          url: url || 'about:blank',
+        };
+      } catch (e) {
+        // If webContents is destroyed, return basic info
+        return {
+          id: t.id,
+          title: 'New Tab',
+          active: t.id === active,
+          url: 'about:blank',
+        };
+      }
+    }) as z.infer<typeof TabListResponse>;
   });
 
   registerHandler('tabs:create', TabCreateRequest, async (_event, request) => {
     const id = randomUUID();
     
     // Get partition from active session or profile
+    // Enhanced with site isolation: each origin gets its own partition for security
     let partition: string;
+    let basePartition: string;
+    
     if (request.profileId) {
-      partition = `persist:profile:${request.profileId}`;
+      basePartition = `persist:profile:${request.profileId}`;
     } else {
       const sessionManager = getSessionManager();
       const activeSession = sessionManager.getActiveSession();
       if (activeSession) {
-        partition = sessionManager.getSessionPartition(activeSession.id);
+        basePartition = sessionManager.getSessionPartition(activeSession.id);
       } else {
-        partition = `ephemeral:${randomUUID()}`; // Ephemeral container
+        basePartition = `ephemeral:${randomUUID()}`; // Ephemeral container
       }
+    }
+    
+    // Add site isolation: hash origin to create unique partition per site
+    try {
+      const url = new URL(request.url || 'about:blank');
+      const origin = url.origin;
+      const originHash = createHash('sha256').update(origin).digest('hex').slice(0, 16);
+      partition = `${basePartition}:site:${originHash}`;
+    } catch {
+      // Fallback to base partition if URL parsing fails
+      partition = basePartition;
     }
     
     const sess = session.fromPartition(partition);
@@ -365,25 +392,59 @@ export function registerTabIpc(win: BrowserWindow) {
   registerHandler('tabs:close', TabCloseRequest, async (_event, request) => {
     const tabs = getTabs(win);
     const idx = tabs.findIndex(t => t.id === request.id);
-    if (idx >= 0) {
-      const [rec] = tabs.splice(idx, 1);
-      
-      // Unregister from sleep and memory monitoring
+    if (idx < 0) {
+      return { success: false, error: 'Tab not found' };
+    }
+    
+    const [rec] = tabs.splice(idx, 1);
+    const wasActive = activeTabIdByWindow.get(win.id) === request.id;
+    
+    // Unregister from sleep and memory monitoring
+    try {
       unregisterTab(request.id);
       unregisterTabMemory(request.id);
-      
-      // Update session tab count
-      if (rec.sessionId) {
+    } catch (e) {
+      console.warn('Error unregistering tab:', e);
+    }
+    
+    // Update session tab count
+    if (rec.sessionId) {
+      try {
         const sessionManager = getSessionManager();
         const sessionTabs = tabs.filter(t => t.sessionId === rec.sessionId);
         sessionManager.updateTabCount(rec.sessionId, sessionTabs.length);
+      } catch (e) {
+        console.warn('Error updating session tab count:', e);
       }
-      
+    }
+    
+    // Close BrowserView and webContents
+    try {
       win.removeBrowserView(rec.view);
       rec.view.webContents.close();
-      if (activeTabIdByWindow.get(win.id) === request.id) activeTabIdByWindow.set(win.id, null);
-      emit();
+    } catch (e) {
+      console.error('Error closing tab BrowserView:', e);
     }
+    
+    // If the closed tab was active, activate another tab
+    if (wasActive) {
+      if (tabs.length > 0) {
+        // Activate the tab at the same index, or the last tab if at the end
+        const nextTab = tabs[Math.min(idx, tabs.length - 1)];
+        if (nextTab) {
+          setActiveTab(win, nextTab.id);
+        } else {
+          activeTabIdByWindow.set(win.id, null);
+        }
+      } else {
+        // No tabs left, clear active tab
+        activeTabIdByWindow.set(win.id, null);
+      }
+    }
+    
+    // Emit tab update immediately
+    emit();
+    
     return { success: true };
   });
 
@@ -391,21 +452,60 @@ export function registerTabIpc(win: BrowserWindow) {
     setActiveTab(win, request.id);
     
     // Wake tab if sleeping
-    wakeTab(request.id);
+    try {
+      wakeTab(request.id);
+    } catch (e) {
+      console.warn('Error waking tab:', e);
+    }
     
     const tabs = getTabs(win);
     const rec = tabs.find(t => t.id === request.id);
     const active = activeTabIdByWindow.get(win.id);
-    win.webContents.send('tabs:updated', tabs.map(t => ({ id: t.id, title: t.view.webContents.getTitle() || 'New Tab', active: t.id === active })));
+    
+    // Send updated tab list with URLs
+    const tabList = tabs.map(t => {
+      try {
+        const url = t.view.webContents.getURL();
+        return { 
+          id: t.id, 
+          title: t.view.webContents.getTitle() || 'New Tab', 
+          url: url || 'about:blank',
+          active: t.id === active 
+        };
+      } catch (e) {
+        return {
+          id: t.id,
+          title: 'New Tab',
+          url: 'about:blank',
+          active: t.id === active,
+        };
+      }
+    });
+    
+    try {
+      win.webContents.send('tabs:updated', tabList);
+      win.webContents.send('ob://ipc/v1/tabs:updated', tabList);
+    } catch (e) {
+      console.warn('Error sending tab update:', e);
+    }
     
     // Send navigation state for newly activated tab
     if (rec) {
-      win.webContents.send('tabs:navigation-state', {
-        tabId: request.id,
-        canGoBack: rec.view.webContents.canGoBack(),
-        canGoForward: rec.view.webContents.canGoForward(),
-      });
+      setTimeout(() => {
+        try {
+          win.webContents.send('tabs:navigation-state', {
+            tabId: request.id,
+            canGoBack: rec.view.webContents.canGoBack(),
+            canGoForward: rec.view.webContents.canGoForward(),
+          });
+        } catch (e) {
+          console.warn('Error sending navigation state:', e);
+        }
+      }, 100);
     }
+    
+    // Force emit to ensure UI updates
+    emit();
     
     return { success: true };
   });
@@ -452,14 +552,58 @@ export function registerTabIpc(win: BrowserWindow) {
     const tabs = getTabs(win);
     const rec = request.id === 'active' ? tabs.find(t => t.id === activeTabIdByWindow.get(win.id)) : tabs.find(t => t.id === request.id);
     if (rec) {
-      rec.view.webContents.loadURL(request.url);
+      // Validate and normalize URL
+      let finalUrl = request.url.trim();
+      
+      // If it's already a valid URL, use it
+      if (finalUrl.startsWith('http://') || finalUrl.startsWith('https://') || finalUrl.startsWith('about:') || finalUrl.startsWith('chrome:')) {
+        try {
+          if (!finalUrl.startsWith('about:') && !finalUrl.startsWith('chrome:')) {
+            const urlObj = new URL(finalUrl);
+            finalUrl = urlObj.href;
+          }
+        } catch {
+          // Invalid URL, treat as search
+          finalUrl = `https://www.google.com/search?q=${encodeURIComponent(request.url)}`;
+        }
+      } else {
+        // Check if it looks like a domain
+        const domainPattern = /^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]*\.[a-zA-Z]{2,}$/;
+        if (domainPattern.test(finalUrl) || finalUrl.includes('.')) {
+          // Looks like a domain, add https://
+          finalUrl = `https://${finalUrl}`;
+        } else {
+          // Search query
+          finalUrl = `https://www.google.com/search?q=${encodeURIComponent(finalUrl)}`;
+        }
+      }
+      
+      try {
+        await rec.view.webContents.loadURL(finalUrl);
+      } catch (err) {
+        console.error('Failed to navigate to URL:', finalUrl, err);
+        // Fallback to about:blank if load fails
+        try {
+          await rec.view.webContents.loadURL('about:blank');
+        } catch (e) {
+          console.error('Failed to load fallback URL:', e);
+        }
+      }
+      
       // Navigation state will be updated via did-navigate event
       // Also send immediate state update
-      win.webContents.send('tabs:navigation-state', {
-        tabId: rec.id,
-        canGoBack: rec.view.webContents.canGoBack(),
-        canGoForward: rec.view.webContents.canGoForward(),
-      });
+      setTimeout(() => {
+        try {
+          win.webContents.send('tabs:navigation-state', {
+            tabId: rec.id,
+            canGoBack: rec.view.webContents.canGoBack(),
+            canGoForward: rec.view.webContents.canGoForward(),
+          });
+          emit(); // Emit tab update after navigation
+        } catch (e) {
+          console.error('Error sending navigation state:', e);
+        }
+      }, 100);
     }
     return { success: true };
   });
@@ -789,50 +933,113 @@ export function registerTabIpc(win: BrowserWindow) {
 function setActiveTab(win: BrowserWindow, id: string) {
   const tabs = getTabs(win);
   const rec = tabs.find(t => t.id === id);
-  if (!rec) return;
-  for (const t of tabs) win.removeBrowserView(t.view);
-  activeTabIdByWindow.set(win.id, id);
-  win.addBrowserView(rec.view);
-  updateBrowserViewBounds(win, id);
+  if (!rec) {
+    console.warn(`Tab ${id} not found for activation`);
+    return;
+  }
   
-  // Emit tab update
-  const active = activeTabIdByWindow.get(win.id);
-  const tabList = tabs.map(t => {
-    const title = t.view.webContents.getTitle() || 'New Tab';
-    const url = t.view.webContents.getURL() || 'about:blank';
-    return { 
-      id: t.id, 
-      title, 
-      url,
-      active: t.id === active 
-    };
-  });
-  win.webContents.send('tabs:updated', tabList);
+  try {
+    // Remove all BrowserViews first
+    const currentViews = win.getBrowserViews();
+    for (const view of currentViews) {
+      try {
+        win.removeBrowserView(view);
+      } catch (e) {
+        // Ignore errors if view is already removed
+      }
+    }
+    
+    // Set active tab ID
+    activeTabIdByWindow.set(win.id, id);
+    
+    // Add the active BrowserView
+    win.addBrowserView(rec.view);
+    
+    // Update bounds immediately
+    updateBrowserViewBounds(win, id);
+    
+    // Force bounds update again after a brief delay to ensure proper positioning
+    setTimeout(() => {
+      updateBrowserViewBounds(win, id);
+    }, 50);
+    
+    // Emit tab update with proper error handling
+    const active = activeTabIdByWindow.get(win.id);
+    const tabList = tabs.map(t => {
+      try {
+        const url = t.view.webContents.getURL();
+        const title = t.view.webContents.getTitle() || 'New Tab';
+        return { 
+          id: t.id, 
+          title, 
+          url: url || 'about:blank',
+          active: t.id === active 
+        };
+      } catch (e) {
+        return {
+          id: t.id,
+          title: 'New Tab',
+          url: 'about:blank',
+          active: t.id === active,
+        };
+      }
+    });
+    
+    try {
+      win.webContents.send('tabs:updated', tabList);
+      win.webContents.send('ob://ipc/v1/tabs:updated', tabList);
+    } catch (e) {
+      console.warn('Error sending tab update:', e);
+    }
+  } catch (e) {
+    console.error('Error setting active tab:', e);
+  }
 }
 
 function updateBrowserViewBounds(win: BrowserWindow, id?: string) {
   const tabId = id || activeTabIdByWindow.get(win.id);
-  if (!tabId) return;
+  if (!tabId) return null;
   const tabs = getTabs(win);
   const rec = tabs.find(t => t.id === tabId);
-  if (!rec) return;
+  if (!rec) {
+    console.warn(`Tab ${tabId} not found for bounds update`);
+    return null;
+  }
   
-  const bounds = win.getContentBounds();
-  const right = rightDockPxByWindow.get(win.id) || 0;
-  const sidebarWidth = 0; // Sidebar removed
-  const topNavHeight = 56; // TopNav height
-  const tabStripHeight = 40; // TabStrip height
-  const bottomStatusHeight = 40; // BottomStatus height
-  const top = topNavHeight + tabStripHeight;
-  const bottom = bottomStatusHeight;
-  
-  rec.view.setBounds({ 
-    x: sidebarWidth, 
-    y: top, 
-    width: Math.max(0, bounds.width - sidebarWidth - right), 
-    height: Math.max(0, bounds.height - top - bottom) 
-  });
-  rec.view.setAutoResize({ width: true, height: true, horizontal: false, vertical: false });
+  try {
+    const bounds = win.getContentBounds();
+    const right = rightDockPxByWindow.get(win.id) || 0;
+    const sidebarWidth = 0; // Sidebar removed
+    const topNavHeight = 56; // TopNav height
+    const tabStripHeight = 40; // TabStrip height
+    const bottomStatusHeight = 40; // BottomStatus height
+    const top = topNavHeight + tabStripHeight;
+    const bottom = bottomStatusHeight;
+    
+    const viewBounds = { 
+      x: sidebarWidth, 
+      y: top, 
+      width: Math.max(0, bounds.width - sidebarWidth - right), 
+      height: Math.max(0, bounds.height - top - bottom) 
+    };
+    
+    rec.view.setBounds(viewBounds);
+    rec.view.setAutoResize({ width: true, height: true, horizontal: false, vertical: false });
+    
+    // Ensure BrowserView is visible
+    try {
+      if (typeof rec.view.setVisible === 'function') {
+        rec.view.setVisible(true);
+      }
+    } catch (e) {
+      // setVisible might not exist in all Electron versions
+    }
+    
+    return viewBounds;
+  } catch (e) {
+    console.error('Error updating BrowserView bounds:', e);
+    return null;
+  }
 }
 
 // Update BrowserView bounds on window resize

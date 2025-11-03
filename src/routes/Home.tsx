@@ -33,17 +33,13 @@ export default function Home() {
   
   return (
     <div className={`h-full w-full bg-[#1A1D28] flex flex-col ${isFullscreen ? 'absolute inset-0' : ''}`}>
-      {(mode === 'Browse' || !mode) && (
+      {(mode === 'Browse' || !mode || mode === 'Research') && (
         <div className="flex-1 w-full relative">
           <MainView />
           {/* Show OmniDesk when no tabs */}
           <OmniDesk />
-        </div>
-      )}
-      {mode === 'Research' && (
-        <div className="h-full w-full flex flex-col relative">
-          <MainView />
-          {!isFullscreen && (
+          {/* Show Research panel overlay when in Research mode and not fullscreen */}
+          {mode === 'Research' && !isFullscreen && (
             <div className="absolute inset-0 pointer-events-none">
               <div className="pointer-events-auto h-full w-full">
                 <ResearchSplit />

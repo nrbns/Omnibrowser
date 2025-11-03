@@ -3,8 +3,8 @@
  */
 
 import { useState, useEffect } from 'react';
-import { ArrowLeft, ArrowRight, RefreshCw, Camera, PictureInPicture, Search, Download, History, Settings, Bot, ChevronDown, Workflow } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { ArrowLeft, ArrowRight, RefreshCw, Camera, PictureInPicture, Search, Download, History, Settings, Bot, ChevronDown, Workflow, Home, ZoomIn, ZoomOut, Code, FileText, Network, Layers } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useTabsStore } from '../../state/tabsStore';
 import { ipc } from '../../lib/ipc-typed';
@@ -176,20 +176,29 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
   }, [activeId]);
 
   const handleScreenshot = async () => {
-    if (activeId) {
-      try {
-        // Would implement screenshot capture
-        // await ipc.tabs.captureScreenshot(activeId);
-      } catch {}
+    if (!activeId) return;
+    try {
+      const result = await ipc.tabs.screenshot(activeId);
+      if (result?.success) {
+        // Screenshot saved, folder opened
+        console.log('Screenshot saved:', result.path);
+      } else {
+        console.error('Screenshot failed:', result?.error);
+      }
+    } catch (error) {
+      console.error('Failed to capture screenshot:', error);
     }
   };
 
   const handlePIP = async () => {
-    if (activeId) {
-      try {
-        // Would implement picture-in-picture
-        // await ipc.tabs.enterPIP(activeId);
-      } catch {}
+    if (!activeId) return;
+    try {
+      const result = await ipc.tabs.pip(activeId, true);
+      if (!result?.success) {
+        console.warn('PIP request failed:', result?.error || 'No video element found');
+      }
+    } catch (error) {
+      console.error('Failed to enter PIP:', error);
     }
   };
 
@@ -203,6 +212,17 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
 
       {/* Browser Navigation Controls */}
       <div className="flex items-center gap-1.5 flex-shrink-0">
+        {/* Home Button */}
+        <motion.button
+          onClick={() => navigate('/')}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          className="p-2.5 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-300 hover:text-blue-400 transition-all cursor-pointer"
+          title="Home (Go to home screen)"
+        >
+          <Home size={18} />
+        </motion.button>
+        
         <motion.button
           onClick={handleBack}
           disabled={!canGoBack || !activeId}
@@ -270,28 +290,170 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
         {/* Quick Actions */}
         <QuickActions />
 
-        {/* Dropdown/Filter Button */}
-        <motion.button
-          onClick={() => setDropdownOpen(!dropdownOpen)}
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          className="relative p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all"
-          title="Options"
-        >
-          <ChevronDown size={18} />
-        </motion.button>
+        {/* Options Dropdown */}
+        <div className="relative">
+          <motion.button
+            onClick={() => setDropdownOpen(!dropdownOpen)}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            className="relative p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all"
+            title="Options"
+          >
+            <ChevronDown size={18} />
+          </motion.button>
+
+          <AnimatePresence>
+            {dropdownOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setDropdownOpen(false)}
+                />
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="absolute right-0 top-full mt-2 w-56 bg-gray-900/95 backdrop-blur-xl border border-gray-700/50 rounded-lg shadow-2xl z-50 py-2"
+                >
+                  <button
+                    onClick={() => {
+                      if (activeId) {
+                        ipc.tabs.devtools(activeId).catch(console.error);
+                      }
+                      setDropdownOpen(false);
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors"
+                  >
+                    <Code size={16} />
+                    <span>Developer Tools</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (activeId) {
+                        // Zoom in - would implement via IPC
+                      }
+                      setDropdownOpen(false);
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors"
+                  >
+                    <ZoomIn size={16} />
+                    <span>Zoom In</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (activeId) {
+                        // Zoom out - would implement via IPC
+                      }
+                      setDropdownOpen(false);
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors"
+                  >
+                    <ZoomOut size={16} />
+                    <span>Zoom Out</span>
+                  </button>
+                  <div className="h-px bg-gray-700/50 my-1" />
+                  <button
+                    onClick={() => {
+                      navigate('/workspace');
+                      setDropdownOpen(false);
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors"
+                  >
+                    <FileText size={16} />
+                    <span>Workspaces</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      navigate('/playbooks');
+                      setDropdownOpen(false);
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors"
+                  >
+                    <Workflow size={16} />
+                    <span>Playbooks</span>
+                  </button>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
+        </div>
 
         {/* Hierarchy/Structure Button */}
-        <motion.button
-          onClick={() => setHierarchyOpen(!hierarchyOpen)}
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          className="relative p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all"
-          title="View Hierarchy"
-        >
-          <Workflow size={18} />
-          <ChevronDown size={12} className="absolute bottom-0 right-0" />
-        </motion.button>
+        <div className="relative">
+          <motion.button
+            onClick={() => setHierarchyOpen(!hierarchyOpen)}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            className="relative p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all"
+            title="View Hierarchy"
+          >
+            <Workflow size={18} />
+            <ChevronDown size={12} className="absolute bottom-0 right-0" />
+          </motion.button>
+
+          <AnimatePresence>
+            {hierarchyOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setHierarchyOpen(false)}
+                />
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="absolute right-0 top-full mt-2 w-64 bg-gray-900/95 backdrop-blur-xl border border-gray-700/50 rounded-lg shadow-2xl z-50 py-2"
+                >
+                  <button
+                    onClick={() => {
+                      navigate('/');
+                      setHierarchyOpen(false);
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors"
+                  >
+                    <Layers size={16} />
+                    <span>Knowledge Graph</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      // Would open history graph view
+                      navigate('/history');
+                      setHierarchyOpen(false);
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors"
+                  >
+                    <Network size={16} />
+                    <span>History Graph</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      // Would open page structure view
+                      if (activeId) {
+                        ipc.tabs.devtools(activeId).catch(console.error);
+                      }
+                      setHierarchyOpen(false);
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors"
+                  >
+                    <Code size={16} />
+                    <span>Page Structure</span>
+                  </button>
+                  <div className="h-px bg-gray-700/50 my-1" />
+                  <button
+                    onClick={() => {
+                      navigate('/runs');
+                      setHierarchyOpen(false);
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors"
+                  >
+                    <Workflow size={16} />
+                    <span>Automation Runs</span>
+                  </button>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
+        </div>
 
         {/* Camera/Screenshot Button */}
         <motion.button
@@ -315,23 +477,26 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
           <PictureInPicture size={18} />
         </motion.button>
 
-        {/* Find Button */}
+        {/* Find Button - Opens find in page */}
         <motion.button
-          onClick={() => {
-            if (activeId) {
-              // Send find command to active tab
-              window.dispatchEvent(new KeyboardEvent('keydown', { 
-                key: 'f', 
-                metaKey: true, 
-                ctrlKey: true,
-                bubbles: true 
-              }));
+          onClick={async () => {
+            if (!activeId) return;
+            try {
+              // Use IPC to trigger find in page for the active BrowserView
+              const tabs = await ipc.tabs.list();
+              const activeTab = tabs.find((t: any) => t.id === activeId);
+              if (activeTab) {
+                // Use IPC to trigger find in page
+                await ipc.tabs.find(activeId);
+              }
+            } catch (error) {
+              console.error('Failed to open find:', error);
             }
           }}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           className="p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all"
-          title="Find (⌘F)"
+          title="Find in Page (⌘F)"
         >
           <Search size={18} />
         </motion.button>

@@ -89,8 +89,29 @@ class ShieldsService extends EventEmitter {
       }
       const { fetch } = await import('undici');
 
-      this.adblocker = ElectronBlocker.fromPrebuiltAdsOnly(fetch);
-      this.adblocker.enableBlockingInSession(session.defaultSession);
+      this.adblocker = await ElectronBlocker.fromPrebuiltAdsOnly(fetch);
+      
+      // Enable blocking - API might vary between versions
+      if (typeof this.adblocker.enableBlockingInSession === 'function') {
+        this.adblocker.enableBlockingInSession(session.defaultSession);
+      } else if (typeof (this.adblocker as any).enable === 'function') {
+        (this.adblocker as any).enable();
+      } else if (typeof (this.adblocker as any).engine?.enable === 'function') {
+        (this.adblocker as any).engine.enable();
+      } else {
+        // Try to enable via session
+        try {
+          await this.adblocker.update({
+            newEngine: this.adblocker.engine,
+            session: session.defaultSession,
+          } as any);
+        } catch (e) {
+          // If update fails, fallback to request filters
+          console.warn('[Shields] Could not enable adblocker, using fallback');
+          this.setupFallbackAdBlocking();
+          return;
+        }
+      }
 
       // Adblocker is initialized with prebuilt lists
       // Additional lists can be loaded if needed, but fromPrebuiltAdsOnly already includes them

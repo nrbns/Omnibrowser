@@ -1,9 +1,10 @@
 /**
- * Omnibox - URL bar with autocomplete suggestions
+ * Omnibox - URL bar with autocomplete suggestions and search
+ * Fully functional search and navigation
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, Lock, Shield, AlertCircle } from 'lucide-react';
+import { Search, Lock, Shield, AlertCircle, Globe } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ipc } from '../../lib/ipc-typed';
 import { useTabsStore } from '../../state/tabsStore';
@@ -12,7 +13,7 @@ import { useIPCEvent } from '../../lib/use-ipc-event';
 import { debounce } from 'lodash-es';
 
 interface Suggestion {
-  type: 'history' | 'tab' | 'command';
+  type: 'history' | 'tab' | 'command' | 'search';
   title: string;
   url?: string;
   icon?: string;
@@ -32,28 +33,30 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
   const activeTab = tabs.find(t => t.id === activeId);
 
   // Listen for tab updates
-  useIPCEvent<TabUpdate[]>('tabs:updated', (tabs) => {
-    const tab = tabs.find(t => t.active);
-    if (tab) {
+  useIPCEvent<TabUpdate[]>('tabs:updated', (tabList) => {
+    const tab = Array.isArray(tabList) ? tabList.find((t: any) => t.active) : null;
+    if (tab && !focused) {
       setUrl(tab.url || '');
       try {
-        const urlObj = new URL(tab.url);
+        const urlObj = new URL(tab.url || 'about:blank');
         setSiteInfo({
           secure: urlObj.protocol === 'https:',
         });
-      } catch {}
+      } catch {
+        setSiteInfo(null);
+      }
     }
-  }, [activeId]);
+  }, [activeId, focused]);
 
   // Listen for progress updates
   useIPCEvent<{ tabId: string; progress: number }>('tabs:progress', (data) => {
     if (data.tabId === activeId) {
       setProgress(data.progress);
-      setIsLoading(data.progress < 100);
+      setIsLoading(data.progress < 100 && data.progress > 0);
     }
   }, [activeId]);
 
-  // Debounced search suggestions
+  // Search suggestions with history and tabs
   const searchSuggestions = useCallback(
     debounce(async (query: string) => {
       if (!query.trim()) {
@@ -62,46 +65,71 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
       }
 
       const results: Suggestion[] = [];
+      const queryLower = query.toLowerCase().trim();
 
       // Commands
-      if (query.startsWith('?') || query.toLowerCase().startsWith('ask ')) {
+      if (queryLower.startsWith('?') || queryLower.startsWith('ask ')) {
         results.push({
           type: 'command',
           title: `Ask Agent: ${query.startsWith('?') ? query.slice(1) : query.slice(4)}`,
+          url: query,
         });
       }
-      if (query.startsWith('/')) {
+      if (queryLower.startsWith('/')) {
         results.push({
           type: 'command',
           title: `Run Command: ${query.slice(1)}`,
+          url: query,
+        });
+      }
+
+      // Search suggestion (Google/DuckDuckGo)
+      if (queryLower.length > 0 && !queryLower.startsWith('http') && !queryLower.includes('.')) {
+        results.push({
+          type: 'search',
+          title: `Search: ${query}`,
+          url: `https://www.google.com/search?q=${encodeURIComponent(query)}`,
         });
       }
 
       // Tab matches
       tabs.forEach(tab => {
         const title = tab.title || 'Untitled';
-        const url = tab.url || '';
-        if (title.toLowerCase().includes(query.toLowerCase()) ||
-            url.toLowerCase().includes(query.toLowerCase())) {
+        const tabUrl = tab.url || '';
+        if (title.toLowerCase().includes(queryLower) ||
+            tabUrl.toLowerCase().includes(queryLower)) {
           results.push({
             type: 'tab',
             title,
-            url: url || undefined,
+            url: tabUrl || undefined,
           });
         }
       });
 
-      // History (would fetch from IPC)
+      // History search (recent searches when query is empty or short)
       try {
-        // const history = await ipc.history.search(query);
-        // history.slice(0, 3).forEach(item => {
-        //   results.push({
-        //     type: 'history',
-        //     title: item.title,
-        //     url: item.url,
-        //   });
-        // });
-      } catch {}
+        let history: any[] = [];
+        if (queryLower.trim().length === 0 || queryLower.length < 2) {
+          // If query is empty or very short, get recent history
+          history = await ipc.history.search('');
+        } else {
+          // Normal search
+          history = await ipc.history.search(query);
+        }
+        
+        if (Array.isArray(history) && history.length > 0) {
+          history.slice(0, 5).forEach((item: any) => {
+            results.push({
+              type: 'history',
+              title: item.title || item.url || 'Untitled',
+              url: item.url,
+            });
+          });
+        }
+      } catch (error) {
+        // History search not available, continue
+        console.warn('History search failed:', error);
+      }
 
       setSuggestions(results.slice(0, 8));
     }, 150),
@@ -119,12 +147,15 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'l') {
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      const modifier = isMac ? e.metaKey : e.ctrlKey;
+      
+      if (modifier && e.key === 'l') {
         e.preventDefault();
         inputRef.current?.focus();
         inputRef.current?.select();
       }
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      if (modifier && e.key === 'k') {
         e.preventDefault();
         onCommandPalette();
       }
@@ -134,28 +165,52 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
   }, [onCommandPalette]);
 
   const handleNavigate = async (targetUrl: string) => {
-    if (!activeId) return;
+    if (!activeId) {
+      // Create a new tab if none exists
+      try {
+        const newTab = await ipc.tabs.create(targetUrl);
+        if (newTab) {
+          setFocused(false);
+          setSuggestions([]);
+          return;
+        }
+      } catch (error) {
+        console.error('Failed to create tab for navigation:', error);
+      }
+      return;
+    }
 
     // Agent query
     if (targetUrl.startsWith('?') || targetUrl.toLowerCase().startsWith('ask ')) {
       const query = targetUrl.startsWith('?') ? targetUrl.slice(1).trim() : targetUrl.slice(4).trim();
-                  try {
-                    const tabUrl = activeTab?.url;
-                    const response = await ipc.agent.ask(query, tabUrl ? { url: tabUrl } : undefined);
-                    alert(`Agent: ${response.answer}`);
-                  } catch (error: any) {
-                    alert(`Agent error: ${error.message || 'Unknown error'}`);
-                  }
+      try {
+        const tabUrl = activeTab?.url;
+        const response = await ipc.agent.ask(query, tabUrl ? { url: tabUrl } : undefined);
+        alert(`Agent: ${response.answer}`);
+      } catch (error: any) {
+        console.error('Agent error:', error);
+        alert(`Agent error: ${error.message || 'Unknown error'}`);
+      }
       return;
     }
 
     // Normalize URL
-    let finalUrl = targetUrl;
-    if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
-      if (targetUrl.includes('.') && !targetUrl.includes(' ')) {
-        finalUrl = `https://${targetUrl}`;
+    let finalUrl = targetUrl.trim();
+    
+    // If it's already a valid URL, use it
+    if (finalUrl.startsWith('http://') || finalUrl.startsWith('https://')) {
+      // URL is valid, use as-is
+    } else if (finalUrl.startsWith('about:')) {
+      // Special protocol, use as-is
+    } else {
+      // Check if it looks like a domain
+      const domainPattern = /^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]*\.[a-zA-Z]{2,}$/;
+      if (domainPattern.test(finalUrl) || finalUrl.includes('.')) {
+        // Looks like a domain, add https://
+        finalUrl = `https://${finalUrl}`;
       } else {
-        finalUrl = `https://www.google.com/search?q=${encodeURIComponent(targetUrl)}`;
+        // Search query
+        finalUrl = `https://www.google.com/search?q=${encodeURIComponent(finalUrl)}`;
       }
     }
 
@@ -163,8 +218,17 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
       await ipc.tabs.navigate(activeId, finalUrl);
       setFocused(false);
       setSuggestions([]);
+      setUrl(finalUrl); // Update displayed URL
     } catch (error) {
       console.error('Navigation failed:', error);
+      // Try creating a new tab if navigation to active tab fails
+      try {
+        await ipc.tabs.create(finalUrl);
+        setFocused(false);
+        setSuggestions([]);
+      } catch (createError) {
+        console.error('Failed to create new tab:', createError);
+      }
     }
   };
 
@@ -190,8 +254,16 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
     } else if (e.key === 'Escape') {
       setFocused(false);
       setSuggestions([]);
+      inputRef.current?.blur();
     }
   };
+
+  // Sync URL with active tab when not focused
+  useEffect(() => {
+    if (!focused && activeTab) {
+      setUrl(activeTab.url || '');
+    }
+  }, [activeTab, focused]);
 
   return (
     <div className="relative flex-1 max-w-2xl">
@@ -206,8 +278,10 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
             <div className="absolute left-3 flex items-center gap-2 z-10">
               {siteInfo.secure ? (
                 <Lock size={14} className="text-green-400" />
-              ) : (
+              ) : url.startsWith('http://') ? (
                 <AlertCircle size={14} className="text-amber-400" />
+              ) : (
+                <Globe size={14} className="text-gray-400" />
               )}
               {siteInfo.shieldCount !== undefined && siteInfo.shieldCount > 0 && (
                 <div className="flex items-center gap-1">
@@ -248,6 +322,7 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
 
           {/* Search Icon */}
           <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+            <Search size={14} className="text-gray-500" />
             <kbd className="hidden sm:inline px-1.5 py-0.5 bg-gray-900/50 rounded border border-gray-700/50 text-xs text-gray-500">⌘K</kbd>
           </div>
         </div>
@@ -265,11 +340,11 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
             {suggestions.map((suggestion, index) => (
               <motion.button
                 key={index}
-                onClick={() => {
-                  if (suggestion.url) {
-                    handleNavigate(suggestion.url);
-                  } else {
-                    handleNavigate(url);
+                onClick={async () => {
+                  if (suggestion.url && suggestion.url !== 'about:blank') {
+                    await handleNavigate(suggestion.url);
+                  } else if (url && url.trim().length > 0) {
+                    await handleNavigate(url);
                   }
                 }}
                 onMouseEnter={() => setSelectedIndex(index)}
@@ -284,6 +359,7 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
               >
                 <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
                   {suggestion.type === 'command' && <Search size={14} className="text-blue-400" />}
+                  {suggestion.type === 'search' && <Search size={14} className="text-purple-400" />}
                   {suggestion.type === 'tab' && <div className="w-3 h-3 bg-blue-500 rounded-full" />}
                   {suggestion.type === 'history' && <div className="w-3 h-3 bg-gray-500 rounded-full" />}
                 </div>
@@ -301,4 +377,3 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
     </div>
   );
 }
-

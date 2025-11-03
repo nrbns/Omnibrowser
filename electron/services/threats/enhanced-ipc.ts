@@ -8,6 +8,7 @@ import { getEnhancedThreatScanner } from './enhanced-scanner';
 import { getFileAnalyzer } from './file-analyzer';
 import { getFingerprintLibrary } from './fingerprint-lib';
 import { getThreatGraphService } from '../self-defense/threat-graph';
+import { getClamAVScanner } from './clamav-scanner';
 
 export function registerEnhancedThreatIpc(): void {
   registerHandler('threats:scanUrlEnhanced', z.object({ url: z.string() }), async (_event, request) => {
@@ -25,6 +26,18 @@ export function registerEnhancedThreatIpc(): void {
   registerHandler('threats:analyzeFile', z.object({ filePath: z.string() }), async (_event, request) => {
     const analyzer = getFileAnalyzer();
     const result = await analyzer.analyze(request.filePath);
+    return result;
+  });
+
+  registerHandler('threats:scanFileClamAV', z.object({ filePath: z.string() }), async (_event, request) => {
+    const clamav = getClamAVScanner();
+    const result = await clamav.scanFile(request.filePath);
+    return result;
+  });
+
+  registerHandler('threats:updateClamAVDefinitions', z.object({}), async () => {
+    const clamav = getClamAVScanner();
+    const result = await clamav.updateDefinitions();
     return result;
   });
 
