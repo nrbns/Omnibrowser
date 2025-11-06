@@ -24,7 +24,15 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
-    emptyOutDir: true
+    emptyOutDir: true,
+    rollupOptions: {
+      external: [
+        '@ghostery/adblocker-electron',
+        '@cliqz/adblocker-electron',
+        'chromium-bidi/lib/cjs/bidiMapper/BidiMapper',
+        'chromium-bidi/lib/cjs/cdp/CdpConnection'
+      ],
+    }
   },
   server: {
     port: 5173,

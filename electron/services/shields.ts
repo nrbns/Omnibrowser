@@ -66,16 +66,20 @@ class ShieldsService extends EventEmitter {
       // Use adblocker package if available; avoid bundler static resolution with @vite-ignore
       let ElectronBlocker: any = null;
       const tryImport = async (mod: string) => {
+        // Build module name dynamically to prevent bundler resolution
+        const name = mod;
         // @ts-ignore
-        return await import(/* @vite-ignore */ mod);
+        return await import(/* @vite-ignore */ name);
       };
       try {
         // Prefer installed @cliqz first (present in package.json), then ghostery
-        const blockerModule = await tryImport('@cliqz/adblocker-electron');
+        const cliqz = '@cliqz' + '/adblocker-electron';
+        const blockerModule = await tryImport(cliqz);
         ElectronBlocker = blockerModule.ElectronBlocker;
       } catch {
         try {
-          const blockerModule = await tryImport('@ghostery/adblocker-electron');
+          const ghostery = '@ghostery' + '/adblocker-electron';
+          const blockerModule = await tryImport(ghostery);
           ElectronBlocker = blockerModule.ElectronBlocker;
         } catch {
           console.warn('[Shields] Adblocker not available, using fallback blocking');
