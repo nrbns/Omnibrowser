@@ -63,17 +63,19 @@ class ShieldsService extends EventEmitter {
    */
   private async initializeAdblocker(): Promise<void> {
     try {
-      // Use @ghostery/adblocker-electron (or deprecated @cliqz) for performance (optional dependency)
-      // If not available, ad blocking will be handled via request filters
+      // Use adblocker package if available; avoid bundler static resolution with @vite-ignore
       let ElectronBlocker: any = null;
+      const tryImport = async (mod: string) => {
+        // @ts-ignore
+        return await import(/* @vite-ignore */ mod);
+      };
       try {
-        // @ts-ignore - @ghostery/adblocker-electron may not have types
-        const blockerModule = await import('@ghostery/adblocker-electron');
+        // Prefer installed @cliqz first (present in package.json), then ghostery
+        const blockerModule = await tryImport('@cliqz/adblocker-electron');
         ElectronBlocker = blockerModule.ElectronBlocker;
       } catch {
         try {
-          // @ts-ignore - @cliqz/adblocker-electron may not have types
-          const blockerModule = await import('@cliqz/adblocker-electron');
+          const blockerModule = await tryImport('@ghostery/adblocker-electron');
           ElectronBlocker = blockerModule.ElectronBlocker;
         } catch {
           console.warn('[Shields] Adblocker not available, using fallback blocking');
