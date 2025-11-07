@@ -5,7 +5,7 @@
  */
 
 import { app, BrowserWindow } from 'electron';
-import { promises as fs } from 'node:fs';
+import { promises as fs, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { getSessionManager, BrowserSession } from './sessions';
 import { getTabs } from './tabs';
@@ -32,14 +32,37 @@ export interface SessionSnapshot {
 
 const SESSION_FILE = path.join(app.getPath('userData'), 'sessions.jsonl');
 const SNAPSHOT_FILE = path.join(app.getPath('userData'), 'session-snapshot.json');
+const USER_DATA_DIR = app.getPath('userData');
 let persistenceTimer: NodeJS.Timeout | null = null;
 let isShuttingDown = false;
+let directoryInitialized = false;
+
+/**
+ * Ensure the userData directory exists (synchronous, called once)
+ */
+function ensureDirectoryExists(): void {
+  if (directoryInitialized) return;
+  
+  try {
+    if (!existsSync(USER_DATA_DIR)) {
+      mkdirSync(USER_DATA_DIR, { recursive: true });
+    }
+    directoryInitialized = true;
+  } catch (error: any) {
+    // Directory might already exist or creation might fail
+    // This is non-critical, we'll handle it in saveSessionState
+    console.warn('[Session] Failed to initialize directory:', error.message);
+  }
+}
 
 /**
  * Save session state atomically (write to temp file, then rename)
  */
 async function saveSessionState(): Promise<void> {
   if (isShuttingDown) return;
+
+  // Ensure directory exists (synchronous check first)
+  ensureDirectoryExists();
 
   try {
     const sessionManager = getSessionManager();
@@ -88,54 +111,81 @@ async function saveSessionState(): Promise<void> {
       sessions,
     };
 
-    // Ensure directory exists - create with recursive: true and handle race conditions
+    // Ensure directory exists (multiple attempts with different methods)
     const dir = path.dirname(SNAPSHOT_FILE);
-    try {
-      await fs.mkdir(dir, { recursive: true });
-    } catch (error: any) {
-      // Directory might already exist (EEXIST) or might be created by another process
-      // Only log if it's not a "file exists" error
-      if (error.code !== 'EEXIST') {
-        console.warn('[Session] Failed to create directory:', error.message);
+    
+    // Method 1: Synchronous check and create
+    if (!existsSync(dir)) {
+      try {
+        mkdirSync(dir, { recursive: true });
+      } catch (error: any) {
+        // Ignore if already exists
+        if (error.code !== 'EEXIST') {
+          // Try async method as fallback
+          await fs.mkdir(dir, { recursive: true }).catch(() => {});
+        }
       }
     }
     
-    // Verify directory exists before writing
+    // Method 2: Verify with async access
     try {
       await fs.access(dir);
     } catch {
-      // Directory still doesn't exist, try once more
-      await fs.mkdir(dir, { recursive: true }).catch(() => {});
+      // Directory doesn't exist, create it
+      try {
+        await fs.mkdir(dir, { recursive: true });
+      } catch (createError: any) {
+        // If creation fails, skip this save (non-critical)
+        if (createError.code !== 'EEXIST') {
+          return; // Silent fail - session persistence is non-critical
+        }
+      }
     }
     
     // Atomic write: write to temp file, then rename
     const tempFile = `${SNAPSHOT_FILE}.tmp`;
     try {
+      // Write temp file
       await fs.writeFile(tempFile, JSON.stringify(snapshot, null, 2), 'utf-8');
+      
+      // Rename (atomic operation)
       await fs.rename(tempFile, SNAPSHOT_FILE);
     } catch (error: any) {
-      // If rename fails because directory doesn't exist, create it and retry
+      // If rename fails because directory doesn't exist, create it and retry once
       if (error.code === 'ENOENT') {
         try {
-          await fs.mkdir(dir, { recursive: true });
+          // Create directory synchronously this time
+          if (!existsSync(dir)) {
+            mkdirSync(dir, { recursive: true });
+          }
+          // Retry write and rename
           await fs.writeFile(tempFile, JSON.stringify(snapshot, null, 2), 'utf-8');
           await fs.rename(tempFile, SNAPSHOT_FILE);
-        } catch (retryError) {
-          console.error('[Session] Failed to save snapshot after retry:', retryError);
+        } catch (retryError: any) {
+          // Final failure - delete temp file if it exists and silently fail
+          try {
+            await fs.unlink(tempFile).catch(() => {});
+          } catch {}
+          // Don't log error - session persistence failures are non-critical
+          return;
         }
       } else {
-        console.error('[Session] Failed to save snapshot:', error);
+        // Other errors (permissions, disk full, etc.) - silent fail
+        try {
+          await fs.unlink(tempFile).catch(() => {});
+        } catch {}
+        return;
       }
     }
 
     // Also append to JSONL for audit trail (keep last 100 entries)
-    // Ensure directory exists (same directory as snapshot)
+    // Directory should already exist from above, but verify
     const jsonlDir = path.dirname(SESSION_FILE);
-    try {
-      await fs.mkdir(jsonlDir, { recursive: true });
-    } catch (error: any) {
-      if (error.code !== 'EEXIST') {
-        // Silent fail - directory might already exist
+    if (!existsSync(jsonlDir)) {
+      try {
+        mkdirSync(jsonlDir, { recursive: true });
+      } catch {
+        // Silent fail - JSONL is just audit trail
       }
     }
     
@@ -146,9 +196,8 @@ async function saveSessionState(): Promise<void> {
       // If file doesn't exist, create it
       try {
         await fs.writeFile(SESSION_FILE, jsonlLine, 'utf-8');
-      } catch (error) {
+      } catch {
         // Silent fail for JSONL - it's just an audit trail
-        console.warn('[Session] Failed to write JSONL:', error);
       }
     }
 
@@ -233,23 +282,20 @@ export async function restoreWindows(
  * Start automatic persistence (every 2 seconds)
  */
 export function startSessionPersistence(): void {
-  // Ensure directory exists before starting persistence
-  const dir = path.dirname(SNAPSHOT_FILE);
-  fs.mkdir(dir, { recursive: true }).catch(() => {
-    // Directory creation failed, but we'll try again on first save
-  });
+  // Ensure directory exists synchronously before starting persistence
+  ensureDirectoryExists();
 
   // Save immediately on start (but don't block if it fails)
   saveSessionState().catch(() => {
     // Silent fail - will retry on next interval
   });
 
-  // Save every 2 seconds
+  // Save every 2 seconds (increased interval to reduce load)
   persistenceTimer = setInterval(() => {
     saveSessionState().catch(() => {
-      // Silent fail - don't spam console with errors
+      // Silent fail - session persistence is non-critical
     });
-  }, 2000);
+  }, 3000); // Increased from 2s to 3s to reduce file I/O
 
   // Save on app close
   app.on('before-quit', () => {

@@ -36,6 +36,7 @@ let activeTabIdByWindow = new Map<number, string | null>();
 let rightDockPxByWindow = new Map<number, number>();
 const resizeTimers = new WeakMap<BrowserWindow, NodeJS.Timeout>();
 const pendingBoundsUpdateTimers = new Map<string, NodeJS.Timeout>();
+const cleanupRegistered = new WeakMap<BrowserWindow, boolean>(); // Track cleanup registration
 
 const clearPendingBoundsTimerForTab = (winId: number, tabId: string) => {
   const timerKey = `${winId}:${tabId}`;
