@@ -216,6 +216,18 @@ export const ipc = {
     }) => ipcCall('research:queryEnhanced', { query, ...options }),
     clearCache: () => ipcCall('research:clearCache', {}),
   },
+  document: {
+    ingest: (source: string, type: 'pdf' | 'docx' | 'web', title?: string) =>
+      ipcCall('document:ingest', { source, type, title }),
+    get: (id: string) => ipcCall<{ id: string }, any>('document:get', { id }),
+    list: () => ipcCall<unknown, any[]>('document:list', {}),
+    delete: (id: string) => ipcCall<{ id: string }, { success: boolean }>('document:delete', { id }),
+    reverify: (id: string) => ipcCall<{ id: string }, any>('document:reverify', { id }),
+    export: (id: string, format: 'markdown' | 'html', outputPath: string, citationStyle?: 'apa' | 'mla' | 'chicago' | 'ieee' | 'harvard') =>
+      ipcCall('document:export', { id, format, outputPath, citationStyle }),
+    exportToString: (id: string, format: 'markdown' | 'html', citationStyle?: 'apa' | 'mla' | 'chicago' | 'ieee' | 'harvard') =>
+      ipcCall<{ id: string; format: 'markdown' | 'html'; citationStyle?: string }, { content: string }>('document:exportToString', { id, format, citationStyle }),
+  },
   downloads: {
     list: () => ipcCall<unknown, any[]>('downloads:list', {}),
     requestConsent: (url: string, filename: string, size?: number) =>

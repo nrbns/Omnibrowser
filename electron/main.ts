@@ -208,6 +208,8 @@ app.whenReady().then(async () => {
     registerResearchIpc();
     const { registerResearchEnhancedIpc } = await import('./services/research-enhanced');
     registerResearchEnhancedIpc();
+    const { registerDocumentReviewIpc } = await import('./services/document-review');
+    registerDocumentReviewIpc();
     registerPluginIpc();
     registerProfileIpc();
     registerAgentIpc();
