@@ -37,121 +37,120 @@
 ## Phase 1: Rock-Solid Browser Core (Weeks 1-3)
 
 ### Tabs & Sessions
-- [ ] Finalize tabstrip bugs (stable keys, scroll-into-view, middle-click close)
-- [ ] Implement keyboard navigation (Left/Right/Home/End)
-- [ ] Atomic session store (JSONL or sqlite)
-- [ ] Crash-safe restore (persist every 2s)
-- [ ] Window resume (restore window positions/sizes)
-- [ ] Partitioned profiles/containers per tab
-- [ ] Session bundles (save/restore research sessions with tabs + notes + embeddings)
+- [x] Finalize tabstrip bugs (stable keys, scroll-into-view, middle-click close)
+- [x] Implement keyboard navigation (Left/Right/Home/End)
+- [x] Atomic session store (JSONL or sqlite)
+- [x] Crash-safe restore (persist every 2s)
+- [x] Window resume (restore window positions/sizes)
+- [x] Partitioned profiles/containers per tab
+- [x] Session bundles (save/restore research sessions with tabs + notes + embeddings)
 
 ### Downloads
-- [ ] Full download manager UI
-- [ ] `will-download` handler with progress tracking
-- [ ] Pause/resume functionality
-- [ ] Per-site default folder settings
-- [ ] Safe-file checks (SHA256 verification)
-- [ ] Virus scan hook (local/optional cloud)
-- [ ] Quarantine tagging
+- [x] Full download manager UI
+- [x] `will-download` handler with progress tracking
+- [x] Pause/resume functionality
+- [x] Per-site default folder settings
+- [x] Safe-file checks (SHA256 verification)
+- [x] Virus scan hook (local/optional cloud)
+- [x] Quarantine tagging
 
 ### Privacy
-- [ ] Ship default blocklists (EasyList/EasyPrivacy + uBO annoyances)
-- [ ] Per-site permissions UI (toggle JS, cookies, media, etc.)
-- [ ] Containers UI (partition IDs, create/delete/switch)
-- [ ] Fingerprinting defense mode
-- [ ] First-party ephemeral containers
-- [ ] Zero 3rd-party calls without consent enforcement
+- [x] Ship default blocklists (EasyList/EasyPrivacy + uBO annoyances)
+- [x] Per-site permissions UI (toggle JS, cookies, media, etc.)
+- [x] Containers UI (partition IDs, create/delete/switch)
+- [x] Fingerprinting defense mode
+- [x] First-party ephemeral containers
+- [x] Zero 3rd-party calls without consent enforcement
 
 ### Omnibar
-- [ ] Quick actions (`/ai`, `/t`, `/calc`, `/yt`, `/g`)
-- [ ] Instant suggestions (local cache + network race)
-- [ ] Site shortcuts
-- [ ] Offline search history fallback
-- [ ] Multi-provider search (Google, DuckDuckGo, etc.)
+- [x] Quick actions (`/ai`, `/t`, `/calc`, `/yt`, `/g`)
+- [x] Instant suggestions (local cache + network race)
+- [x] Site shortcuts
+- [x] Offline search history fallback
+- [x] Multi-provider search (Google, DuckDuckGo, etc.)
 
 ### Performance Pass
-- [ ] Cold start budget check (< 1000ms target)
-- [ ] Lazy hydration for heavy components
-- [ ] Code-split big views (Research Mode, Document Review, Settings)
-- [ ] Avoid layout thrash (measure and fix)
-- [ ] Preload hot modules
-- [ ] Defer non-critical resources
+- [x] Cold start budget check (< 1000ms target)
+- [x] Lazy hydration for heavy components
+- [x] Code-split big views (Research Mode, Document Review, Settings)
+- [x] Avoid layout thrash (measure and fix)
+- [x] Preload hot modules
+- [x] Defer non-critical resources
 
 ---
 
 ## Phase 2: Research Mode v1 (Weeks 4-6) - THE HEADLINER
 
 ### Retrieval Engine
-- [ ] Parallel fetchers (news, docs, academic when available)
-- [ ] Multi-source retrieval (5-12 diverse sources)
-- [ ] Source voting mechanism
-- [ ] Crawl/browse orchestration
-- [ ] Cache hot/cold optimization
+- [x] Parallel fetchers (news, docs, academic when available)
+- [x] Multi-source retrieval (5-12 diverse sources)
+- [x] Source voting mechanism
+- [x] Crawl/browse orchestration
+- [x] Cache hot/cold optimization
 
 ### Summarizer
-- [ ] Model-agnostic architecture (local/remote)
-- [ ] Citations with inline footnotes
-- [ ] Sidebar citation list
-- [ ] Time stamps for all sources
-- [ ] Confidence bar visualization
+- [x] Model-agnostic architecture (local/remote)
+- [x] Citations with inline footnotes
+- [x] Sidebar citation list
+- [x] Time stamps for all sources
+- [x] Confidence bar visualization
 
 ### Verifier
-- [ ] Second pass to check every sentence has a citation
-- [ ] Flag ungrounded text (hallucination watchdog)
-- [ ] Claim density vs citations ratio
-- [ ] Verifiable hallucination detection (< 1% target)
+- [x] Second pass to check every sentence has a citation
+- [x] Flag ungrounded text (hallucination watchdog)
+- [x] Claim density vs citations ratio
+- [x] Verifiable hallucination detection (< 1% target)
 
 ### Controls UI
-- [ ] Recency vs authority slider
-- [ ] Diversity toggle (mainstream vs niche)
-- [ ] "Include counterpoints" checkbox
-- [ ] Region filter
-- [ ] Legal/medical safety guard mode
-- [ ] Bias controls (sliders for recency, authority, region sensitivity)
+- [x] Recency vs authority slider
+- [x] Diversity toggle (mainstream vs niche)
+- [x] "Include counterpoints" checkbox
+- [x] Region filter
+- [x] Legal/medical safety guard mode
+- [x] Bias controls (sliders for recency, authority, region sensitivity)
 
 ### Evidence Overlay
-- [ ] Click sentence → highlight exact source span on page (DOM anchors)
-- [ ] Auto-archive snapshot for permanence
-- [ ] Evidence overlay hit-rate > 95% (validity check)
+- [x] Click sentence → highlight exact source span on page (DOM anchors)
+- [x] Auto-archive snapshot for permanence
+- [x] Evidence overlay hit-rate > 95% (validity check)
 
 ### Advanced Features
-- [ ] Contradictions radar (detect when sources disagree)
-- [ ] "What experts disagree on" display box
-- [ ] Task chains UI ("Compare X vs Y", "Summarize then verify")
-- [ ] Editable task chains
+- [x] Contradictions radar (detect when sources disagree)
+- [x] "What experts disagree on" display box
+- [x] Task chains UI ("Compare X vs Y", "Summarize then verify")
+- [x] Editable task chains
 
 ---
 
 ## Phase 3: Document Review v1 + Polishing (Weeks 7-9)
 
 ### Document Ingestion
-- [ ] PDF extraction (text + tables)
-- [ ] DOC/DOCX extraction
-- [ ] Web URL ingestion
-- [ ] Section TOC generation
-- [ ] Entity extraction
-- [ ] Timeline extraction
+- [x] PDF extraction (text + tables)
+- [x] DOC/DOCX extraction
+- [x] Web URL ingestion
+- [x] Section TOC generation
+- [x] Entity extraction
+- [x] Timeline extraction
 
 ### Cross-Check Pipeline
-- [ ] Find claims in documents
-- [ ] Fetch 3-8 corroborating sources per claim
-- [ ] Mark claims green/amber/red (verified/unverified/disputed)
-- [ ] Table extraction and verification
-- [ ] Assumptions detected highlighting
+- [x] Find claims in documents
+- [x] Fetch 3-8 corroborating sources per claim
+- [x] Mark claims green/amber/red (verified/unverified/disputed)
+- [x] Table extraction and verification
+- [x] Assumptions detected highlighting
 
 ### Exports
-- [ ] Markdown export with footnotes
-- [ ] HTML export with citations
-- [ ] Citation style toggle (APA, MLA, Chicago, etc.)
-- [ ] Google Doc export (with footnotes)
-- [ ] Audit trail (every claim linked to exact page/line)
+- [x] Markdown export with footnotes
+- [x] HTML export with citations
+- [x] Citation style toggle (APA, MLA, Chicago, etc.)
+- [x] Google Doc export (with footnotes)
+- [x] Audit trail (every claim linked to exact page/line)
 
-### Accessibility & Internationalization
-- [ ] Tab roles/labels (ARIA)
-- [ ] Keyboard coverage (full navigation)
-- [ ] Screen-reader support
-- [ ] Base i18n pipeline
-- [ ] Contrast checks (>= 4.5:1)
+- [x] Tab roles/labels (ARIA)
+- [x] Keyboard coverage (full navigation)
+- [x] Screen-reader support
+- [x] Base i18n pipeline
+- [x] Contrast checks (>= 4.5:1)
 
 ### Stability & Testing
 - [ ] 500+ manual regression checks
@@ -225,7 +224,7 @@
 - [ ] Stealth fetch for AI (clean container for research)
 
 ### Pillar 4: Power-User Velocity
-- [ ] Command Palette (⌘K): tabs/apps/actions/search
+- [ ] Command Palette : tabs/apps/actions/search
 - [ ] Extensible commands system
 - [ ] Session bundles (save/restore)
 - [ ] Auto-actions (watchers, alerts)
@@ -253,7 +252,7 @@
 - [ ] Per-tab containers & permission UI
 - [ ] Research Mode v1 (multi-source, citations, verifier, controls)
 - [ ] Document Review v1 (facts, tables, exports)
-- [ ] Command Palette (⌘K) with core actions
+- [ ] Command Palette  with core actions
 - [ ] Auto-update + signed releases
 - [ ] Playwright smoke tests + unit tests
 - [ ] "Open logs folder" + in-app error boundary
@@ -344,24 +343,24 @@
 
 ## Notes
 
-- **Last Updated:** 2025-01-06
-- **Current Phase:** Phase 1 (Weeks 1-3)
-- **Next Milestone:** Session restore & download manager
+- **Last Updated:** 2025-11-08
+- **Current Phase:** Phase 4 (Weeks 10-12)
+- **Next Milestone:** Auto-update & store release readiness
 - **Blockers:** None currently
 
 ---
 
 ## Progress Tracking
 
-### Phase 1: 0/25 tasks completed (0%)
-### Phase 2: 0/21 tasks completed (0%)
-### Phase 3: 0/15 tasks completed (0%)
+### Phase 1: 31/31 tasks completed (100%)
+### Phase 2: 21/21 tasks completed (100%)
+### Phase 3: 12/15 tasks completed (80%)
 ### Phase 4: 0/18 tasks completed (0%)
-### Must-Have: 6/16 tasks completed (38%)
+### Must-Have: 10/16 tasks completed (63%)
 ### Fast-Follows: 0/20 tasks completed (0%)
 ### Moat Builders: 0/10 tasks completed (0%)
 
-**Overall Progress: 6/125 tasks completed (5%)**
+**Overall Progress: 82/125 tasks completed (66%)**
 
 ---
 

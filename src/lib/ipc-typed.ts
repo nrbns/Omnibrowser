@@ -4,6 +4,7 @@
  */
 
 import { z } from 'zod';
+import { ResearchResult } from '../types/research';
 
 type IPCResponse<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -342,18 +343,35 @@ export const ipc = {
       region?: string;
       recencyWeight?: number;
       authorityWeight?: number;
-    }) => ipcCall('research:queryEnhanced', { query, ...options }),
+    }) => ipcCall<
+      {
+        query: string;
+        maxSources?: number;
+        includeCounterpoints?: boolean;
+        region?: string;
+        recencyWeight?: number;
+        authorityWeight?: number;
+      },
+      ResearchResult
+    >('research:queryEnhanced', { query, ...options }),
     clearCache: () => ipcCall('research:clearCache', {}),
   },
   document: {
     ingest: (source: string, type: 'pdf' | 'docx' | 'web', title?: string) =>
-      ipcCall('document:ingest', { source, type, title }),
-    get: (id: string) => ipcCall<{ id: string }, any>('document:get', { id }),
-    list: () => ipcCall<unknown, any[]>('document:list', {}),
-    delete: (id: string) => ipcCall<{ id: string }, { success: boolean }>('document:delete', { id }),
-    reverify: (id: string) => ipcCall<{ id: string }, any>('document:reverify', { id }),
+      ipcCall<{ source: string; type: 'pdf' | 'docx' | 'web'; title?: string }, DocumentReview>('document:ingest', { source, type, title }),
+    get: (id: string) =>
+      ipcCall<{ id: string }, DocumentReview>('document:get', { id }),
+    list: () =>
+      ipcCall<unknown, DocumentReview[]>('document:list', {}),
+    delete: (id: string) =>
+      ipcCall<{ id: string }, { success: boolean }>('document:delete', { id }),
+    reverify: (id: string) =>
+      ipcCall<{ id: string }, DocumentReview>('document:reverify', { id }),
     export: (id: string, format: 'markdown' | 'html', outputPath: string, citationStyle?: 'apa' | 'mla' | 'chicago' | 'ieee' | 'harvard') =>
-      ipcCall('document:export', { id, format, outputPath, citationStyle }),
+      ipcCall<
+        { id: string; format: 'markdown' | 'html'; outputPath: string; citationStyle?: string },
+        { success: boolean; path: string }
+      >('document:export', { id, format, outputPath, citationStyle }),
     exportToString: (id: string, format: 'markdown' | 'html', citationStyle?: 'apa' | 'mla' | 'chicago' | 'ieee' | 'harvard') =>
       ipcCall<{ id: string; format: 'markdown' | 'html'; citationStyle?: string }, { content: string }>('document:exportToString', { id, format, citationStyle }),
   },

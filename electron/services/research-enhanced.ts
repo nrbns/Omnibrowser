@@ -9,6 +9,7 @@ import { fetch } from 'undici';
 import { registerHandler } from '../shared/ipc/router';
 import { z } from 'zod';
 import { verifyResearchResult, VerificationResult } from './research-verifier';
+import { getHybridSearchService, SearchResult as HybridSearchResult } from './search/hybrid-search';
 
 export interface ResearchSource {
   url: string;
@@ -19,6 +20,7 @@ export interface ResearchSource {
   domain: string;
   relevanceScore: number;
   sourceType: 'news' | 'academic' | 'documentation' | 'forum' | 'other';
+  metadata?: Record<string, unknown>;
 }
 
 export interface ResearchResult {
@@ -42,6 +44,11 @@ export interface ResearchResult {
 
 const CACHE_TTL = 3600000; // 1 hour
 const contentCache = new Map<string, { content: ResearchSource; timestamp: number }>();
+
+interface ScoreWeights {
+  recencyWeight: number;
+  authorityWeight: number;
+}
 
 /**
  * Extract domain from URL
@@ -79,10 +86,61 @@ function classifySourceType(url: string, title: string): ResearchSource['sourceT
 /**
  * Fetch readable content from URL (with caching)
  */
-async function fetchReadable(target: string, timeout = 10000): Promise<ResearchSource | null> {
+function normalizeUrl(url: string): string {
+  try {
+    return new URL(url).href;
+  } catch {
+    return url;
+  }
+}
+
+function parseMetadataTimestamp(meta?: HybridSearchResult): number | undefined {
+  if (!meta) return undefined;
+  if (typeof meta.timestamp === 'number') {
+    return meta.timestamp;
+  }
+  const metadata = meta.metadata as Record<string, unknown> | undefined;
+  const crawl = metadata?.dateLastCrawled;
+  if (typeof crawl === 'string' && !Number.isNaN(Date.parse(crawl))) {
+    return Date.parse(crawl);
+  }
+  const age = metadata?.age;
+  if (typeof age === 'string') {
+    const match = age.match(/(\d+)\s*(d|day|days|h|hr|hour|hours|m|min|minute|minutes)/i);
+    if (match) {
+      const value = Number(match[1]);
+      const unit = match[2].toLowerCase();
+      if (!Number.isNaN(value)) {
+        const now = Date.now();
+        if (unit.startsWith('d')) {
+          return now - value * 24 * 60 * 60 * 1000;
+        }
+        if (unit.startsWith('h')) {
+          return now - value * 60 * 60 * 1000;
+        }
+        if (unit.startsWith('m')) {
+          return now - value * 60 * 1000;
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+async function fetchReadable(target: string, timeout = 10000, meta?: HybridSearchResult): Promise<ResearchSource | null> {
   // Check cache
   const cached = contentCache.get(target);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    if (meta) {
+      cached.content.metadata = { ...(meta.metadata || {}), source: meta.source, score: meta.score };
+      if (meta.snippet) {
+        cached.content.snippet = meta.snippet;
+      }
+      const parsedTimestamp = parseMetadataTimestamp(meta);
+      if (parsedTimestamp) {
+        cached.content.timestamp = parsedTimestamp;
+      }
+    }
     return cached.content;
   }
 
@@ -108,17 +166,20 @@ async function fetchReadable(target: string, timeout = 10000): Promise<ResearchS
     
     const text = (article.textContent || '').replace(/[\t\r]+/g, ' ').trim();
     const title = article.title || dom.window.document.title || target;
-    const snippet = text.slice(0, 200) + (text.length > 200 ? '...' : '');
+    const defaultSnippet = text.slice(0, 200) + (text.length > 200 ? '...' : '');
+    const snippet = meta?.snippet?.trim() ? meta.snippet.trim() : defaultSnippet;
+    const timestamp = parseMetadataTimestamp(meta) ?? Date.now();
     
     const source: ResearchSource = {
       url: target,
       title,
       text,
       snippet,
-      timestamp: Date.now(),
+      timestamp,
       domain: getDomain(target),
       relevanceScore: 0,
       sourceType: classifySourceType(target, title),
+      metadata: meta ? { ...(meta.metadata || {}), source: meta.source, score: meta.score } : undefined,
     };
     
     // Cache result
@@ -133,7 +194,11 @@ async function fetchReadable(target: string, timeout = 10000): Promise<ResearchS
 /**
  * Parallel fetch multiple URLs
  */
-async function fetchMultipleParallel(urls: string[], maxConcurrent = 5): Promise<ResearchSource[]> {
+async function fetchMultipleParallel(
+  urls: string[],
+  metadataMap?: Map<string, HybridSearchResult>,
+  maxConcurrent = 5
+): Promise<ResearchSource[]> {
   const results: ResearchSource[] = [];
   const chunks: string[][] = [];
   
@@ -143,7 +208,10 @@ async function fetchMultipleParallel(urls: string[], maxConcurrent = 5): Promise
   }
   
   for (const chunk of chunks) {
-    const promises = chunk.map(url => fetchReadable(url));
+    const promises = chunk.map(url => {
+      const meta = metadataMap?.get(normalizeUrl(url));
+      return fetchReadable(url, 10000, meta);
+    });
     const chunkResults = await Promise.allSettled(promises);
     
     for (const result of chunkResults) {
@@ -159,33 +227,69 @@ async function fetchMultipleParallel(urls: string[], maxConcurrent = 5): Promise
 /**
  * Search multiple engines in parallel
  */
-async function searchMultipleEngines(query: string, maxResults = 12): Promise<string[]> {
+async function searchMultipleEngines(
+  query: string,
+  maxResults = 12,
+  region?: string
+): Promise<{ urls: string[]; metadata: Map<string, HybridSearchResult> }> {
   const urls: string[] = [];
-  
-  // DuckDuckGo search
+  const metadata = new Map<string, HybridSearchResult>();
+  const finalQuery = region && region.trim().length > 0 && region.toLowerCase() !== 'global'
+    ? `${query} ${region}`
+    : query;
+
   try {
-    const ddgUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    const res = await fetch(ddgUrl, { headers: { 'User-Agent': 'OmniBrowserBot/1.0' } });
-    const html = await res.text();
-    const links = Array.from(html.matchAll(/<a[^>]+class="result__a"[^>]+href="([^"]+)"/g))
-      .map(m => m[1])
-      .filter(Boolean)
-      .slice(0, Math.ceil(maxResults / 2));
-    urls.push(...links);
+    const hybrid = getHybridSearchService();
+    const hybridResults = await hybrid.search(finalQuery, { maxResults });
+    for (const result of hybridResults) {
+      const norm = normalizeUrl(result.url);
+      if (!metadata.has(norm)) {
+        metadata.set(norm, result);
+        urls.push(result.url);
+      }
+    }
   } catch (error) {
-    console.warn('DuckDuckGo search failed:', error);
+    console.warn('[Research] Hybrid search failed:', error);
   }
-  
-  // Add more search engines here (Google, Bing, etc.) if needed
-  // For now, we'll supplement with direct domain searches for diversity
-  
-  return urls.slice(0, maxResults);
+
+  // Fallback to DuckDuckGo if we still need more URLs
+  if (urls.length < maxResults) {
+    try {
+      const ddgUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(finalQuery)}`;
+      const res = await fetch(ddgUrl, { headers: { 'User-Agent': 'OmniBrowserBot/1.0' } });
+      const html = await res.text();
+      const links = Array.from(html.matchAll(/<a[^>]+class="result__a"[^>]+href="([^"]+)"/g))
+        .map(m => m[1])
+        .filter(Boolean);
+      for (const link of links) {
+        const norm = normalizeUrl(link);
+        if (!metadata.has(norm)) {
+          metadata.set(norm, {
+            title: link,
+            url: link,
+            snippet: '',
+            source: 'duckduckgo',
+            score: 0.5,
+          } as HybridSearchResult);
+          urls.push(link);
+          if (urls.length >= maxResults) break;
+        }
+      }
+    } catch (error) {
+      console.warn('DuckDuckGo search failed:', error);
+    }
+  }
+
+  return {
+    urls: urls.slice(0, maxResults),
+    metadata,
+  };
 }
 
 /**
  * Calculate relevance score for a source
  */
-function calculateRelevanceScore(source: ResearchSource, query: string): number {
+function calculateRelevanceScore(source: ResearchSource, query: string, weights: ScoreWeights): number {
   const queryTerms = query.toLowerCase().split(/\s+/).filter(Boolean);
   const textLower = source.text.toLowerCase();
   const titleLower = source.title.toLowerCase();
@@ -198,12 +302,31 @@ function calculateRelevanceScore(source: ResearchSource, query: string): number 
     if (textLower.includes(term)) score += 1;
   }
   
-  // Boost academic sources
-  if (source.sourceType === 'academic') score += 10;
+  const authorityMultiplier = 1 + Math.max(0, Math.min(1, weights.authorityWeight));
+  switch (source.sourceType) {
+    case 'academic':
+      score += 10 * authorityMultiplier;
+      break;
+    case 'documentation':
+      score += 6 * authorityMultiplier;
+      break;
+    case 'news':
+      score += 4 * authorityMultiplier * 0.8;
+      break;
+    default:
+      break;
+  }
   
-  // Boost recent sources (within last 30 days)
-  if (source.timestamp && Date.now() - source.timestamp < 30 * 24 * 60 * 60 * 1000) {
-    score += 3;
+  const recencyMultiplier = 1 + Math.max(0, Math.min(1, weights.recencyWeight));
+  if (source.timestamp) {
+    const ageMs = Date.now() - source.timestamp;
+    const ageDays = ageMs / (24 * 60 * 60 * 1000);
+    const recencyScore = Math.max(0, 1 - Math.min(ageDays, 90) / 90); // 0..1
+    score += recencyScore * 10 * recencyMultiplier;
+  }
+  
+  if (source.metadata && typeof source.metadata.score === 'number') {
+    score += Number(source.metadata.score) * 10;
   }
   
   // Penalize very short content
@@ -236,10 +359,10 @@ function extractSnippets(text: string, query: string, maxSnippets = 3): string[]
 /**
  * Source voting mechanism - rank sources by consensus
  */
-function voteOnSources(sources: ResearchSource[], query: string): ResearchSource[] {
+function voteOnSources(sources: ResearchSource[], query: string, weights: ScoreWeights): ResearchSource[] {
   // Calculate relevance scores
   for (const source of sources) {
-    source.relevanceScore = calculateRelevanceScore(source, query);
+    source.relevanceScore = calculateRelevanceScore(source, query, weights);
   }
   
   // Sort by relevance score
@@ -388,12 +511,16 @@ export async function researchQuery(
   }
 ): Promise<ResearchResult> {
   const maxSources = options?.maxSources || 12;
+  const weights: ScoreWeights = {
+    recencyWeight: options?.recencyWeight !== undefined ? Math.max(0, Math.min(1, options.recencyWeight)) : 0.5,
+    authorityWeight: options?.authorityWeight !== undefined ? Math.max(0, Math.min(1, options.authorityWeight)) : 0.5,
+  };
   
   // Step 1: Search multiple engines in parallel
-  const urls = await searchMultipleEngines(query, maxSources);
+  const { urls, metadata } = await searchMultipleEngines(query, maxSources, options?.region);
   
   // Step 2: Fetch content in parallel
-  const sources = await fetchMultipleParallel(urls, 5);
+  const sources = await fetchMultipleParallel(urls, metadata, 5);
   
   if (sources.length === 0) {
     return {
@@ -406,7 +533,7 @@ export async function researchQuery(
   }
   
   // Step 3: Vote on sources (rank and diversify)
-  const rankedSources = voteOnSources(sources, query);
+  const rankedSources = voteOnSources(sources, query, weights);
   
   // Step 4: Generate summary with citations
   const { summary, citations, confidence } = generateSummaryWithCitations(rankedSources, query);
