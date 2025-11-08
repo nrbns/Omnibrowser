@@ -26,13 +26,20 @@ export function OmniDesk() {
   // Load workspace and session data
   useEffect(() => {
     const loadData = async () => {
+      // Wait for IPC to be ready
+      if (!window.ipc || typeof window.ipc.invoke !== 'function') {
+        // Retry after a delay
+        setTimeout(loadData, 500);
+        return;
+      }
+      
       try {
         // Load recent workspaces
         const workspaceResult = await ipc.workspaceV2.list();
         const workspaces = (workspaceResult as any)?.workspaces || [];
         setRecentWorkspaces(workspaces.slice(0, 3));
-      } catch (error) {
-        console.warn('Failed to load workspaces:', error);
+      } catch {
+        // Silently handle - will retry if needed
       }
 
       try {
@@ -72,8 +79,8 @@ export function OmniDesk() {
             },
           ]);
         }
-      } catch (error) {
-        console.warn('Failed to load sessions:', error);
+      } catch {
+        // Silently handle - will retry if needed
         // Fallback to mock data
         setContinueSessions([
           { 
@@ -92,7 +99,10 @@ export function OmniDesk() {
       }
     };
 
-    loadData();
+    // Delay initial load to allow IPC to initialize
+    setTimeout(() => {
+      loadData();
+    }, 400);
 
     // Listen for workspace updates
     const unsubscribeWorkspace = ipcEvents.on('workspace:updated', () => {

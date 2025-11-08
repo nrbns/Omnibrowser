@@ -118,13 +118,25 @@ const typedApi = {
       // Handle both wrapped ({ok, data}) and direct responses
       if (response && typeof response === 'object' && 'ok' in response) {
         if (!response.ok) {
-          throw new Error((response as any).error || 'IPC call failed');
+          const errorMsg = (response as any).error || 'IPC call failed';
+          if (process.env.NODE_ENV === 'development') {
+            console.error(`[IPC] Error in ${channel}:`, errorMsg);
+          }
+          throw new Error(errorMsg);
         }
+        // Return unwrapped data for typed IPC channels
         return (response as any).data;
       }
+      // Direct response (legacy channels)
       return response;
     } catch (error) {
-      console.error(`[IPC] Error invoking ${channel}:`, error);
+      // Only log actual IPC errors, not validation errors (which are expected)
+      if (process.env.NODE_ENV === 'development' && error instanceof Error) {
+        // Don't log if it's a validation/expected error
+        if (!error.message.includes('IPC call failed') && !error.message.includes('Invalid')) {
+          console.error(`[IPC] Error invoking ${channel}:`, error);
+        }
+      }
       throw error;
     }
   },
@@ -179,6 +191,11 @@ contextBridge.exposeInMainWorld('ipc', typedApi);
 // Listen for fullscreen changes
 ipcRenderer.on('app:fullscreen-changed', (_e, data) => {
   window.dispatchEvent(new CustomEvent('app:fullscreen-changed', { detail: data }));
+});
+
+// Listen for IPC ready signal
+ipcRenderer.on('ipc:ready', () => {
+  window.dispatchEvent(new CustomEvent('ipc:ready'));
 });
 
 // Ensure window.ipc is available for legacy code

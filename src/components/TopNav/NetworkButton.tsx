@@ -20,11 +20,26 @@ export function NetworkButton() {
     setStatus(data);
   }, []);
 
-  // Load initial status
+  // Load initial status (wait for IPC)
   useEffect(() => {
-    ipc.dns.status().then(s => {
-      setStatus(prev => ({ ...prev, doh: s as any }));
-    }).catch(() => {});
+    const loadStatus = async () => {
+      // Wait for IPC to be ready
+      if (!window.ipc || typeof window.ipc.invoke !== 'function') {
+        // Retry after a delay
+        setTimeout(loadStatus, 500);
+        return;
+      }
+      
+      try {
+        const s = await ipc.dns.status();
+        setStatus(prev => ({ ...prev, doh: s as any }));
+      } catch {
+        // Silently handle - will retry if needed
+      }
+    };
+    
+    // Delay initial load to allow IPC to initialize
+    setTimeout(loadStatus, 300);
   }, []);
 
   const handleNewTorIdentity = async () => {

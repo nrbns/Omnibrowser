@@ -205,11 +205,21 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
     if (!activeId) {
       // Create a new tab if none exists
       try {
+        // Ensure IPC is ready
+        if (!window.ipc || typeof (window.ipc as any).invoke !== 'function') {
+          console.warn('IPC not ready for navigation, waiting...');
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        
         const newTab = await ipc.tabs.create(targetUrl);
-        if (newTab) {
+        if (newTab && newTab.id) {
           setFocused(false);
           setSuggestions([]);
+          // Wait a bit for tab to be ready
+          await new Promise(resolve => setTimeout(resolve, 300));
           return;
+        } else {
+          console.warn('Tab creation returned invalid result:', newTab);
         }
       } catch (error) {
         console.error('Failed to create tab for navigation:', error);
@@ -294,6 +304,12 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
     }
 
     try {
+      // Ensure IPC is ready
+      if (!window.ipc || typeof (window.ipc as any).invoke !== 'function') {
+        console.warn('IPC not ready for navigation, waiting...');
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      
       await ipc.tabs.navigate(activeId, finalUrl);
       setFocused(false);
       setSuggestions([]);
@@ -302,9 +318,21 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
       console.error('Navigation failed:', error);
       // Try creating a new tab if navigation to active tab fails
       try {
-        await ipc.tabs.create(finalUrl);
-        setFocused(false);
-        setSuggestions([]);
+        // Ensure IPC is ready
+        if (!window.ipc || typeof (window.ipc as any).invoke !== 'function') {
+          console.warn('IPC not ready for tab creation, waiting...');
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        
+        const newTab = await ipc.tabs.create(finalUrl);
+        if (newTab && newTab.id) {
+          setFocused(false);
+          setSuggestions([]);
+          // Wait a bit for tab to be ready
+          await new Promise(resolve => setTimeout(resolve, 300));
+        } else {
+          console.warn('Tab creation returned invalid result:', newTab);
+        }
       } catch (createError) {
         console.error('Failed to create new tab:', createError);
       }
@@ -354,16 +382,16 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
         <div className="relative flex items-center">
           {/* Site Info Icons */}
           {siteInfo && url && !focused && (
-            <div className="absolute left-3 flex items-center gap-2 z-10">
+            <div className="absolute left-3 flex items-center gap-2 z-10 pointer-events-none" aria-hidden="true">
               {siteInfo.secure ? (
-                <Lock size={14} className="text-green-400" />
+                <Lock size={14} className="text-green-400" aria-label="Secure connection" />
               ) : url.startsWith('http://') ? (
-                <AlertCircle size={14} className="text-amber-400" />
+                <AlertCircle size={14} className="text-amber-400" aria-label="Insecure connection" />
               ) : (
-                <Globe size={14} className="text-gray-400" />
+                <Globe size={14} className="text-gray-400" aria-label="Web page" />
               )}
               {siteInfo.shieldCount !== undefined && siteInfo.shieldCount > 0 && (
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1" aria-label={`${siteInfo.shieldCount} shields active`}>
                   <Shield size={14} className="text-blue-400" />
                   <span className="text-xs text-gray-400">{siteInfo.shieldCount}</span>
                 </div>
@@ -379,6 +407,9 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
             onFocus={() => setFocused(true)}
             onBlur={() => setTimeout(() => setFocused(false), 200)} // Delay for suggestion clicks
             onKeyDown={handleKeyDown}
+            aria-label="Address bar - Search or enter URL"
+            aria-autocomplete="list"
+            aria-expanded={focused && suggestions.length > 0}
             placeholder="Search, enter URL, or ? Ask Agent (⌘L to focus, ⌘K for commands)"
             className={`
               w-full h-9 px-4 ${siteInfo && !focused ? 'pl-20' : 'pl-4'} pr-10
@@ -427,9 +458,22 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
                   }
                 }}
                 onMouseEnter={() => setSelectedIndex(index)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    if (suggestion.url && suggestion.url !== 'about:blank') {
+                      handleNavigate(suggestion.url);
+                    } else if (url && url.trim().length > 0) {
+                      handleNavigate(url);
+                    }
+                  }
+                }}
+                role="option"
+                aria-selected={selectedIndex === index}
+                aria-label={`${suggestion.type} suggestion: ${suggestion.title}`}
                 className={`
                   w-full flex items-center gap-3 px-4 py-2.5 text-left
-                  transition-colors
+                  transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset
                   ${selectedIndex === index
                     ? 'bg-gray-800/60 text-gray-100'
                     : 'text-gray-300 hover:bg-gray-800/40'

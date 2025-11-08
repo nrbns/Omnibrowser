@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Search, Settings as SettingsIcon, Monitor, Shield, Download, Globe, Cpu, Bell, Palette, Power, ChevronRight, Lock, Eye, Trash2 } from 'lucide-react';
+import { Search, Settings as SettingsIcon, Monitor, Shield, Download, Globe, Cpu, Bell, Palette, Power, ChevronRight, Lock, Eye, Trash2, Video, Database, Cloud } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ipc } from '../lib/ipc-typed';
 import { ShieldsPanel } from '../components/privacy/ShieldsPanel';
@@ -53,8 +53,6 @@ type Section = {
   icon: any;
   category: string;
 };
-
-import { Video, Database, Search, Cloud, Lock } from 'lucide-react';
 
 const sections: Section[] = [
   { id: 'appearance', title: 'Appearance', icon: Palette, category: 'Basics' },

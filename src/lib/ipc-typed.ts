@@ -27,6 +27,87 @@ export interface Plan {
   estimatedDuration?: number;
 }
 
+// Track IPC readiness
+let ipcReady = false;
+let ipcReadyResolvers: Array<() => void> = [];
+
+// Set up IPC ready listener immediately when module loads
+if (typeof window !== 'undefined') {
+  // Listen for custom event from preload script
+  const handleIpcReady = () => {
+    ipcReady = true;
+    // Resolve all pending promises
+    const resolvers = [...ipcReadyResolvers];
+    ipcReadyResolvers = [];
+    resolvers.forEach(resolve => resolve());
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[IPC] Ready signal received');
+    }
+  };
+  
+  window.addEventListener('ipc:ready', handleIpcReady);
+  
+  // Also check if IPC is already available (in case event fired before listener was added)
+  if (window.ipc && typeof window.ipc.invoke === 'function') {
+    // Check if we can make a test call
+    setTimeout(() => {
+      if (!ipcReady) {
+        // If IPC is available but we haven't received the ready event yet,
+        // mark as ready after a short delay
+        handleIpcReady();
+      }
+    }, 100);
+  }
+}
+
+// Wait for IPC to be ready (with timeout)
+async function waitForIPC(timeout = 10000): Promise<boolean> {
+  // If already ready, return immediately
+  if (ipcReady && window.ipc && typeof window.ipc.invoke === 'function') {
+    return true;
+  }
+  
+  // Wait for ready signal
+  return new Promise((resolve) => {
+    const startTime = Date.now();
+    
+    // If already ready, resolve immediately
+    if (ipcReady && window.ipc && typeof window.ipc.invoke === 'function') {
+      resolve(true);
+      return;
+    }
+    
+    // Add resolver to list
+    const timeoutId = setTimeout(() => {
+      // Remove from list if timeout
+      ipcReadyResolvers = ipcReadyResolvers.filter(r => r !== resolver);
+      resolve(false);
+    }, timeout);
+    
+    const resolver = () => {
+      clearTimeout(timeoutId);
+      resolve(true);
+    };
+    
+    ipcReadyResolvers.push(resolver);
+    
+    // Also poll as fallback
+    const checkInterval = setInterval(() => {
+      if (ipcReady && window.ipc && typeof window.ipc.invoke === 'function') {
+        clearInterval(checkInterval);
+        clearTimeout(timeoutId);
+        ipcReadyResolvers = ipcReadyResolvers.filter(r => r !== resolver);
+        resolve(true);
+      } else if (Date.now() - startTime > timeout) {
+        clearInterval(checkInterval);
+        clearTimeout(timeoutId);
+        ipcReadyResolvers = ipcReadyResolvers.filter(r => r !== resolver);
+        resolve(false);
+      }
+    }, 100);
+  });
+}
+
 export async function ipcCall<TRequest, TResponse = unknown>(
   channel: string,
   request: TRequest,
@@ -34,27 +115,37 @@ export async function ipcCall<TRequest, TResponse = unknown>(
 ): Promise<TResponse> {
   const fullChannel = `ob://ipc/v1/${channel}`;
   
-  if (!window.ipc || typeof window.ipc.invoke !== 'function') {
-    console.warn('IPC not available, returning default response');
-    // Return empty array for array types, null for objects, empty string for strings
+  // Wait for IPC to be ready (with longer timeout for initial load)
+  const isReady = await waitForIPC(10000);
+  
+  if (!isReady || !window.ipc || typeof window.ipc.invoke !== 'function') {
+    // Silently return default response - don't spam console
+    // The app will retry when IPC becomes available
     return Promise.resolve((Array.isArray({} as TResponse) ? [] : null) as TResponse);
   }
   
-  const response = await window.ipc.invoke(fullChannel, request) as IPCResponse<TResponse>;
-  
-  if (!response.ok) {
-    throw new Error(response.error || 'IPC call failed');
-  }
-  
-  if (schema && response.data !== undefined) {
-    const parsed = schema.safeParse(response.data);
-    if (!parsed.success) {
-      throw new Error(`Invalid response: ${parsed.error.message}`);
+  try {
+    // typedApi.invoke already unwraps {ok, data} responses and returns just the data
+    // If there's an error, it throws, so if we get here, the response is valid
+    const response = await window.ipc.invoke(fullChannel, request);
+    
+    // Validate with schema if provided
+    if (schema && response !== undefined && response !== null) {
+      const parsed = schema.safeParse(response);
+      if (!parsed.success) {
+        throw new Error(`Invalid response: ${parsed.error.message}`);
+      }
+      return parsed.data;
     }
-    return parsed.data;
+    
+    return response as TResponse;
+  } catch (error) {
+    // Only log in development to avoid console spam
+    if (process.env.NODE_ENV === 'development') {
+      console.warn(`IPC call failed for ${channel}:`, error);
+    }
+    throw error;
   }
-  
-  return response.data as TResponse;
 }
 
 /**
@@ -64,18 +155,56 @@ export const ipc = {
   tabs: {
     create: async (url?: string) => {
       try {
-        return await ipcCall('tabs:create', { url: url || 'about:blank' });
+        // Wait for IPC to be ready
+        await waitForIPC(5000);
+        const result = await ipcCall('tabs:create', { url: url || 'about:blank' });
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[IPC] Tab created:', result);
+        }
+        return result;
       } catch (error) {
-        console.warn('Failed to create tab:', error);
-        return null;
+        if (process.env.NODE_ENV === 'development') {
+          console.error('Failed to create tab:', error);
+        }
+        // Return a mock result to prevent UI from breaking
+        return { id: `temp-${Date.now()}`, success: false };
       }
     },
-    close: (request: { id: string }) => ipcCall('tabs:close', request).catch(err => console.warn('Failed to close tab:', err)),
-    activate: (request: { id: string }) => ipcCall('tabs:activate', request).catch(err => console.warn('Failed to activate tab:', err)),
+    close: async (request: { id: string }) => {
+      try {
+        const response = await ipcCall('tabs:close', request);
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[IPC] tabs.close response:', response);
+        }
+        return response;
+      } catch (err) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('Failed to close tab:', err);
+        }
+        throw err;
+      }
+    },
+    activate: async (request: { id: string }) => {
+      try {
+        const response = await ipcCall('tabs:activate', request);
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[IPC] tabs.activate response:', response);
+        }
+        return response;
+      } catch (err) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('Failed to activate tab:', err);
+        }
+        throw err;
+      }
+    },
     navigate: (id: string, url: string) => ipcCall('tabs:navigate', { id, url }).catch(err => console.warn('Failed to navigate:', err)),
     goBack: (id: string) => ipcCall('tabs:goBack', { id }).catch(err => console.warn('Failed to go back:', err)),
     goForward: (id: string) => ipcCall('tabs:goForward', { id }).catch(err => console.warn('Failed to go forward:', err)),
     devtools: (id: string) => ipcCall('tabs:devtools', { id }),
+    zoomIn: (id: string) => ipcCall<{ id: string }, { success: boolean; error?: string }>('tabs:zoomIn', { id }),
+    zoomOut: (id: string) => ipcCall<{ id: string }, { success: boolean; error?: string }>('tabs:zoomOut', { id }),
+    zoomReset: (id: string) => ipcCall<{ id: string }, { success: boolean; error?: string }>('tabs:zoomReset', { id }),
     screenshot: (id?: string) => ipcCall<{ id?: string }, { success: boolean; path?: string; error?: string }>('tabs:screenshot', { id }),
     pip: (id?: string, enabled?: boolean) => ipcCall<{ id?: string; enabled?: boolean }, { success: boolean; error?: string }>('tabs:pip', { id, enabled }),
     find: (id?: string) => ipcCall<{ id?: string }, { success: boolean; error?: string }>('tabs:find', { id }),

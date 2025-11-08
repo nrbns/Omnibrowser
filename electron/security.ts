@@ -53,9 +53,11 @@ export function applySecurityPolicies() {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     const isDev = process.env.NODE_ENV === 'development';
     const vite = "http://localhost:5173";
+    // Allow external frames for embedded widgets (TradingView, YouTube, etc.)
+    // while maintaining security for scripts and other resources
     const csp = isDev
-      ? `default-src 'self' ${vite}; script-src 'self' 'unsafe-inline' 'unsafe-eval' ${vite}; style-src 'self' 'unsafe-inline' ${vite}; img-src 'self' data: blob: ${vite}; frame-src 'self' ${vite}; connect-src 'self' http: https: ws: wss: ${vite}`
-      : "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-src 'self'; connect-src 'self' http: https: ws: wss:";
+      ? `default-src 'self' ${vite}; script-src 'self' 'unsafe-inline' 'unsafe-eval' ${vite}; style-src 'self' 'unsafe-inline' ${vite}; img-src 'self' data: blob: https: ${vite}; frame-src 'self' https: ${vite}; connect-src 'self' http: https: ws: wss: ${vite}`
+      : "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; frame-src 'self' https:; connect-src 'self' http: https: ws: wss:";
 
     const headers = {
       ...details.responseHeaders,

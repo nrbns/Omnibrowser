@@ -155,7 +155,7 @@ function createMainWindow(restoreBounds?: { x: number; y: number; width: number;
   }
 
   // Increase max listeners to prevent warnings (some IPC handlers add multiple listeners)
-  mainWindow.setMaxListeners(50);
+  mainWindow.setMaxListeners(100);
   
   isCreatingWindow = false; // Window created successfully
 
@@ -225,47 +225,9 @@ app.whenReady().then(async () => {
     const { setMainWindow } = require('./services/windows');
     setMainWindow(mainWindow);
     
+    // Register ALL IPC handlers BEFORE window loads to ensure readiness
     registerRecorderIpc(mainWindow);
     registerTabIpc(mainWindow);
-    
-    // Restore tabs from session snapshot if available
-    if (shouldRestoreTabs && snapshot && snapshot.windows.length > 0) {
-      const firstWindow = snapshot.windows[0];
-      // Signal renderer that we're restoring tabs (prevents auto-creation)
-      mainWindow.webContents.once('did-finish-load', () => {
-        mainWindow.webContents.send('session:restoring', true);
-        
-        // Wait a bit for IPC to be ready, then restore tabs via IPC calls from renderer
-        setTimeout(async () => {
-          try {
-            // Send restore tab messages to renderer - it will create tabs via IPC
-            for (const tabState of firstWindow.tabs) {
-              mainWindow.webContents.send('session:restore-tab', {
-                url: tabState.url || 'about:blank',
-                id: tabState.id
-              });
-              // Small delay between tab creations to avoid race conditions
-              await new Promise(resolve => setTimeout(resolve, 100));
-            }
-            
-            // Signal renderer that restoration is complete
-            setTimeout(() => {
-              mainWindow.webContents.send('session:restoring', false);
-              
-              // Activate the previously active tab
-              if (firstWindow.activeTabId) {
-                setTimeout(() => {
-                  mainWindow.webContents.send('tabs:activate', { id: firstWindow.activeTabId });
-                }, 200);
-              }
-            }, 500);
-          } catch (error) {
-            console.error('Failed to restore tabs from session:', error);
-            mainWindow.webContents.send('session:restoring', false);
-          }
-        }, 1500);
-      });
-    }
     registerProxyIpc();
     registerDownloadsIpc();
     registerScrapingIpc();
@@ -307,6 +269,60 @@ app.whenReady().then(async () => {
     registerWorkerIpc();
     registerVideoCallIpc();
     registerSessionsIpc();
+    registerPrivateIpc();
+    registerCloudVectorIpc();
+    registerHybridSearchIpc();
+    registerE2EESyncIpc();
+    registerStreamingIpc();
+    
+    // Signal renderer that IPC is ready
+    mainWindow.webContents.once('did-finish-load', () => {
+      // Small delay to ensure all handlers are fully registered
+      setTimeout(() => {
+        // Send IPC ready signal
+        mainWindow.webContents.send('ipc:ready');
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[Main] IPC ready signal sent');
+        }
+      }, 100);
+      
+      // Restore tabs from session snapshot if available
+      if (shouldRestoreTabs && snapshot && snapshot.windows.length > 0) {
+        const firstWindow = snapshot.windows[0];
+        // Signal renderer that we're restoring tabs (prevents auto-creation)
+        mainWindow.webContents.send('session:restoring', true);
+        
+        // Wait a bit for IPC to be ready, then restore tabs via IPC calls from renderer
+        setTimeout(async () => {
+          try {
+            // Send restore tab messages to renderer - it will create tabs via IPC
+            for (const tabState of firstWindow.tabs) {
+              mainWindow.webContents.send('session:restore-tab', {
+                url: tabState.url || 'about:blank',
+                id: tabState.id
+              });
+              // Small delay between tab creations to avoid race conditions
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            
+            // Signal renderer that restoration is complete
+            setTimeout(() => {
+              mainWindow.webContents.send('session:restoring', false);
+              
+              // Activate the previously active tab
+              if (firstWindow.activeTabId) {
+                setTimeout(() => {
+                  mainWindow.webContents.send('tabs:activate', { id: firstWindow.activeTabId });
+                }, 200);
+              }
+            }, 500);
+          } catch (error) {
+            console.error('Failed to restore tabs from session:', error);
+            mainWindow.webContents.send('session:restoring', false);
+          }
+        }, 1500);
+      }
+    });
     registerPrivateIpc();
     
     // New architecture enhancements

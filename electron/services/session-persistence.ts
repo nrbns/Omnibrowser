@@ -30,39 +30,65 @@ export interface SessionSnapshot {
   sessions: BrowserSession[];
 }
 
-const SESSION_FILE = path.join(app.getPath('userData'), 'sessions.jsonl');
-const SNAPSHOT_FILE = path.join(app.getPath('userData'), 'session-snapshot.json');
-const USER_DATA_DIR = app.getPath('userData');
-let persistenceTimer: NodeJS.Timeout | null = null;
-let isShuttingDown = false;
-let directoryInitialized = false;
+// Get userData directory path - only if app is ready (main process only)
+let SESSION_FILE: string;
+let SNAPSHOT_FILE: string;
+let USER_DATA_DIR: string;
 
-/**
- * Ensure the userData directory exists (synchronous, called once)
- */
-function ensureDirectoryExists(): void {
-  if (directoryInitialized) return;
-  
+// Initialize paths only in main process
+function initializePaths(): void {
   try {
+    // Only initialize if app is available (main process check)
+    if (!app || !app.isReady()) {
+      return;
+    }
+    USER_DATA_DIR = app.getPath('userData');
+    SESSION_FILE = path.join(USER_DATA_DIR, 'sessions.jsonl');
+    SNAPSHOT_FILE = path.join(USER_DATA_DIR, 'session-snapshot.json');
+    
+    // Ensure directory exists synchronously immediately
     if (!existsSync(USER_DATA_DIR)) {
       mkdirSync(USER_DATA_DIR, { recursive: true });
     }
-    directoryInitialized = true;
   } catch (error: any) {
-    // Directory might already exist or creation might fail
-    // This is non-critical, we'll handle it in saveSessionState
-    console.warn('[Session] Failed to initialize directory:', error.message);
+    // Silently fail if not in main process or app not ready
+    if (process.env.NODE_ENV === 'development') {
+      console.warn('[Session] Failed to initialize paths:', error.message);
+    }
   }
 }
+
+// Initialize paths when app is ready (defer initialization to avoid issues)
+// Don't initialize at module load - wait for explicit call from startSessionPersistence
+
+let persistenceTimer: NodeJS.Timeout | null = null;
+let isShuttingDown = false;
+let isSaving = false; // Prevent concurrent saves
 
 /**
  * Save session state atomically (write to temp file, then rename)
  */
 async function saveSessionState(): Promise<void> {
-  if (isShuttingDown) return;
-
-  // Ensure directory exists (synchronous check first)
-  ensureDirectoryExists();
+  // Guard: only run in main process
+  if (typeof app === 'undefined' || !app.isReady()) {
+    return;
+  }
+  
+  // Guard: prevent concurrent saves
+  if (isSaving || isShuttingDown) {
+    return;
+  }
+  
+  // Ensure paths are initialized
+  if (!USER_DATA_DIR || !SNAPSHOT_FILE) {
+    initializePaths();
+    if (!USER_DATA_DIR || !SNAPSHOT_FILE) {
+      // Still not initialized - skip this save
+      return;
+    }
+  }
+  
+  isSaving = true;
 
   try {
     const sessionManager = getSessionManager();
@@ -111,30 +137,36 @@ async function saveSessionState(): Promise<void> {
       sessions,
     };
 
-    // Ensure directory exists - use synchronous mkdirSync with recursive flag
-    // This is the most reliable way to ensure the directory exists before file operations
-    const dir = path.dirname(SNAPSHOT_FILE);
-    
+    // Ensure directory exists - USER_DATA_DIR should already be initialized
+    // But double-check and create if needed (synchronous operation)
     try {
-      // Force create directory synchronously - mkdirSync with recursive will create all parent dirs
-      // and won't fail if directory already exists (no need to check existsSync first)
-      mkdirSync(dir, { recursive: true });
-    } catch (error: any) {
-      // Only fail if it's not EEXIST (directory already exists)
-      if (error.code !== 'EEXIST') {
-        // Directory creation failed - skip this save silently
+      // Create directory synchronously with recursive option
+      if (!existsSync(USER_DATA_DIR)) {
+        mkdirSync(USER_DATA_DIR, { recursive: true });
+      }
+      // Verify it exists now (synchronous check)
+      if (!existsSync(USER_DATA_DIR)) {
+        // Directory creation failed - skip this save
         if (process.env.NODE_ENV === 'development') {
-          console.warn('[Session] Failed to create directory:', error.message);
+          console.warn('[Session] Directory does not exist after creation attempt');
         }
         return;
       }
-    }
-    
-    // Double-check directory exists before proceeding
-    if (!existsSync(dir)) {
-      // Directory still doesn't exist after mkdirSync - this shouldn't happen but handle it
-      if (process.env.NODE_ENV === 'development') {
-        console.warn('[Session] Directory does not exist after creation attempt');
+      // Also verify we can write to it
+      try {
+        await fs.access(USER_DATA_DIR, fs.constants.W_OK);
+      } catch {
+        // No write permission - skip this save
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[Session] No write permission to directory');
+        }
+        return;
+      }
+    } catch (error: any) {
+      // Directory creation failed - skip this save silently
+      // Only log in dev mode for non-critical errors
+      if (process.env.NODE_ENV === 'development' && error.code !== 'EEXIST') {
+        console.warn('[Session] Failed to ensure directory exists:', error.message);
       }
       return;
     }
@@ -144,7 +176,7 @@ async function saveSessionState(): Promise<void> {
     const snapshotJson = JSON.stringify(snapshot, null, 2);
     
     try {
-      // Write temp file directly to the directory (which we know exists)
+      // Write temp file directly to the directory (which we know exists and is writable)
       await fs.writeFile(tempFile, snapshotJson, 'utf-8');
       
       // Verify temp file was created successfully
@@ -171,9 +203,24 @@ async function saveSessionState(): Promise<void> {
       if (error.code === 'ENOENT') {
         // Try one more time to create directory and retry
         try {
-          mkdirSync(dir, { recursive: true });
-          await fs.writeFile(tempFile, snapshotJson, 'utf-8');
-          await fs.rename(tempFile, SNAPSHOT_FILE);
+          // Ensure directory exists again
+          if (!existsSync(USER_DATA_DIR)) {
+            mkdirSync(USER_DATA_DIR, { recursive: true });
+          }
+          // Verify directory exists before retry
+          if (existsSync(USER_DATA_DIR)) {
+            await fs.writeFile(tempFile, snapshotJson, 'utf-8');
+            // Verify temp file exists before rename
+            try {
+              await fs.access(tempFile);
+              await fs.rename(tempFile, SNAPSHOT_FILE);
+            } catch (retryError: any) {
+              // Temp file doesn't exist or rename failed - clean up and skip
+              try {
+                await fs.unlink(tempFile).catch(() => {});
+              } catch {}
+            }
+          }
         } catch (retryError: any) {
           // Final failure - silent fail in production, log in dev
           if (process.env.NODE_ENV === 'development') {
@@ -186,6 +233,8 @@ async function saveSessionState(): Promise<void> {
           console.warn('[Session] Failed to save snapshot:', error.message);
         }
       }
+    } finally {
+      isSaving = false;
     }
 
     // Also append to JSONL for audit trail (keep last 100 entries)
@@ -227,6 +276,8 @@ async function saveSessionState(): Promise<void> {
     if (process.env.NODE_ENV === 'development') {
       console.error('[Session] Failed to save session state:', error.message || error);
     }
+  } finally {
+    isSaving = false;
   }
 }
 
@@ -234,6 +285,19 @@ async function saveSessionState(): Promise<void> {
  * Load session state from disk
  */
 export async function loadSessionState(): Promise<SessionSnapshot | null> {
+  // Guard: only run in main process
+  if (typeof app === 'undefined' || !app.isReady()) {
+    return null;
+  }
+  
+  // Ensure paths are initialized
+  if (!SNAPSHOT_FILE) {
+    initializePaths();
+    if (!SNAPSHOT_FILE) {
+      return null;
+    }
+  }
+  
   try {
     const content = await fs.readFile(SNAPSHOT_FILE, 'utf-8');
     const snapshot = JSON.parse(content) as SessionSnapshot;
@@ -241,7 +305,9 @@ export async function loadSessionState(): Promise<SessionSnapshot | null> {
   } catch (error) {
     // No saved state, return null
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      console.error('Failed to load session state:', error);
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Failed to load session state:', error);
+      }
     }
     return null;
   }
@@ -292,23 +358,38 @@ export async function restoreWindows(
 }
 
 /**
- * Start automatic persistence (every 2 seconds)
+ * Start automatic persistence (every 3 seconds)
  */
 export function startSessionPersistence(): void {
-  // Ensure directory exists synchronously before starting persistence
-  ensureDirectoryExists();
+  // Guard: only run in main process
+  if (typeof app === 'undefined' || !app.isReady()) {
+    // Wait for app to be ready
+    app.once('ready', startSessionPersistence);
+    return;
+  }
+  
+  // Ensure paths are initialized
+  initializePaths();
+  
+  if (!USER_DATA_DIR || !SNAPSHOT_FILE) {
+    // Paths not initialized - skip persistence
+    if (process.env.NODE_ENV === 'development') {
+      console.warn('[Session] Cannot start persistence - paths not initialized');
+    }
+    return;
+  }
 
   // Save immediately on start (but don't block if it fails)
   saveSessionState().catch(() => {
     // Silent fail - will retry on next interval
   });
 
-  // Save every 2 seconds (increased interval to reduce load)
+  // Save every 3 seconds (increased interval to reduce load)
   persistenceTimer = setInterval(() => {
     saveSessionState().catch(() => {
       // Silent fail - session persistence is non-critical
     });
-  }, 3000); // Increased from 2s to 3s to reduce file I/O
+  }, 3000);
 
   // Save on app close
   app.on('before-quit', () => {
@@ -318,12 +399,16 @@ export function startSessionPersistence(): void {
       persistenceTimer = null;
     }
     // Final save (synchronous to ensure it completes)
-    saveSessionState().catch(console.error);
+    saveSessionState().catch(() => {
+      // Silent fail on shutdown
+    });
   });
 
   // Save on window close
   app.on('window-all-closed', () => {
-    saveSessionState().catch(console.error);
+    saveSessionState().catch(() => {
+      // Silent fail
+    });
   });
 }
 

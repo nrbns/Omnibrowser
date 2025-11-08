@@ -98,6 +98,10 @@ export interface TabNavigationState {
 // Event bus for renderer-side state management
 class IPCEventBus {
   private listeners = new Map<string, Set<(data: any) => void>>();
+  private ipcListeners = new Map<string, WeakSet<(data: any) => void>>(); // Use WeakSet to track IPC listeners
+  private customEventHandlers = new Map<string, WeakMap<(data: any) => void, EventListener>>(); // Use WeakMap for custom handlers
+  private registeredChannels = new Set<string>(); // Track which IPC channels we've registered globally
+  private ipcHandlers = new Map<string, (event: any, data: any) => void>(); // Store IPC handlers in a Map instead of on window.ipc
 
   on<T>(event: string, callback: (data: T) => void): () => void {
     if (!this.listeners.has(event)) {
@@ -105,22 +109,68 @@ class IPCEventBus {
     }
     this.listeners.get(event)!.add(callback);
 
-    // Subscribe to IPC channel if window.ipc exists
+    // Subscribe to IPC channel if window.ipc exists (only once per event channel)
     if (window.ipc && (window.ipc as any).on) {
-      (window.ipc as any).on(event, callback);
+      if (!this.ipcListeners.has(event)) {
+        this.ipcListeners.set(event, new WeakSet());
+      }
+      const ipcCallbacks = this.ipcListeners.get(event)!;
+      
+      // Only register the channel once globally, not per callback
+      if (!this.registeredChannels.has(event)) {
+        this.registeredChannels.add(event);
+        const globalHandler = (_event: any, data: any) => {
+          // Emit to all listeners for this event
+          const callbacks = this.listeners.get(event);
+          if (callbacks) {
+            const eventData = data || _event;
+            callbacks.forEach(cb => {
+              try {
+                cb(eventData);
+              } catch (error) {
+                console.error(`Error in IPC event handler for ${event}:`, error);
+              }
+            });
+          }
+        };
+        (window.ipc as any).on(event, globalHandler);
+        // Store the handler in our Map instead of on window.ipc
+        this.ipcHandlers.set(event, globalHandler);
+      }
+      
+      // Track this callback (using WeakSet, so it's automatically cleaned up)
+      ipcCallbacks.add(callback);
     }
 
-    // Also listen for custom events
-    const handler = (e: CustomEvent) => callback(e.detail);
-    window.addEventListener(event, handler as EventListener);
+    // Also listen for custom events (only once per callback)
+    if (!this.customEventHandlers.has(event)) {
+      this.customEventHandlers.set(event, new WeakMap());
+    }
+    const customHandlers = this.customEventHandlers.get(event)!;
+    if (!customHandlers.has(callback)) {
+      const handler = (e: CustomEvent) => {
+        try {
+          callback(e.detail);
+        } catch (error) {
+          console.error(`Error in custom event handler for ${event}:`, error);
+        }
+      };
+      customHandlers.set(callback, handler);
+      window.addEventListener(event, handler as EventListener);
+    }
 
     // Return unsubscribe function
     return () => {
       this.listeners.get(event)?.delete(callback);
-      if (window.ipc && (window.ipc as any).removeListener) {
-        (window.ipc as any).removeListener(event, callback);
+      
+      // Remove custom event listener
+      const customHandlers = this.customEventHandlers.get(event);
+      if (customHandlers?.has(callback)) {
+        const handler = customHandlers.get(callback);
+        if (handler) {
+          window.removeEventListener(event, handler as EventListener);
+        }
       }
-      window.removeEventListener(event, handler as EventListener);
     };
   }
 
@@ -130,8 +180,24 @@ class IPCEventBus {
 
   off(event: string, callback: (data: any) => void) {
     this.listeners.get(event)?.delete(callback);
+    // Note: IPC listeners are managed globally, not per-callback
+    // They will be cleaned up when the channel is no longer needed
+  }
+  
+  // Cleanup all listeners for an event (call when component unmounts or event is no longer needed)
+  removeAllListeners(event: string) {
+    this.listeners.delete(event);
+    this.ipcListeners.delete(event);
+    this.customEventHandlers.delete(event);
+    this.registeredChannels.delete(event);
+    
+    // Remove global IPC handler if it exists
     if (window.ipc && (window.ipc as any).removeListener) {
-      (window.ipc as any).removeListener(event, callback);
+      const handler = this.ipcHandlers.get(event);
+      if (handler) {
+        (window.ipc as any).removeListener(event, handler);
+        this.ipcHandlers.delete(event);
+      }
     }
   }
 }

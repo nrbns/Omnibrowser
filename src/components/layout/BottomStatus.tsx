@@ -2,7 +2,7 @@
  * BottomStatus - Status bar with live indicators and AI prompt
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Lock, Send, Cpu, MemoryStick, Network, Brain, Shield, Activity } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { ipc } from '../../lib/ipc-typed';
@@ -34,18 +34,30 @@ export function BottomStatus() {
     }
   }, []);
 
-  // Update CPU and memory (throttled)
+  // Update CPU and memory (throttled) - use ref to prevent infinite loops
+  const statsUpdateRef = useRef<number>(0);
+  
   useEffect(() => {
-    const updateSystemStats = async () => {
+    const updateSystemStats = () => {
       try {
         // Would use actual IPC call to get process stats
         // const stats = await ipc.system.getStats();
         // setCpuUsage(stats.cpu);
         // setMemoryUsage(stats.memory);
         
-        // Mock for now
-        setCpuUsage(Math.floor(Math.random() * 30) + 5);
-        setMemoryUsage(Math.floor(Math.random() * 60) + 20);
+        // Mock for now - only update if interval has passed to prevent loops
+        const now = Date.now();
+        if (now - statsUpdateRef.current >= 1000) {
+          statsUpdateRef.current = now;
+          setCpuUsage(prev => {
+            const newVal = Math.floor(Math.random() * 30) + 5;
+            return prev !== newVal ? newVal : prev;
+          });
+          setMemoryUsage(prev => {
+            const newVal = Math.floor(Math.random() * 60) + 20;
+            return prev !== newVal ? newVal : prev;
+          });
+        }
       } catch {}
     };
 
@@ -55,21 +67,44 @@ export function BottomStatus() {
   }, []);
 
   useEffect(() => {
-    // Load DoH status
-    ipc.dns.status().then(status => {
-      if (status && typeof status === 'object') {
-        setDohStatus(status as any);
+    let isMounted = true;
+    
+    // Wait a bit for IPC to be ready before making calls
+    const initStatus = async () => {
+      if (!isMounted) return;
+      
+      // Wait for IPC to be ready
+      if (!window.ipc || typeof window.ipc.invoke !== 'function') {
+        // Retry after a delay
+        setTimeout(initStatus, 500);
+        return;
       }
-    }).catch((error) => {
-      console.warn('Failed to load DNS status:', error);
-      // Set default state on error
-      setDohStatus({ enabled: false, provider: 'cloudflare' });
-    });
+      
+      // Load DoH status
+      try {
+        const status = await ipc.dns.status();
+        if (isMounted && status && typeof status === 'object') {
+          setDohStatus(status as any);
+        }
+      } catch {
+        // Silently handle - set default state on error
+        if (isMounted) {
+          setDohStatus({ enabled: false, provider: 'cloudflare' });
+        }
+      }
 
-    // Check model status (would check Ollama heartbeat)
-    // ipc.agent.getModelStatus().then(status => {
-    //   setModelReady(status.ready);
-    // }).catch(() => {});
+      // Check model status (would check Ollama heartbeat)
+      // ipc.agent.getModelStatus().then(status => {
+      //   setModelReady(status.ready);
+      // }).catch(() => {});
+    };
+    
+    // Delay initial load to allow IPC to initialize
+    setTimeout(initStatus, 400);
+    
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const privacyModeColors = {

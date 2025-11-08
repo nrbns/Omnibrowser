@@ -101,20 +101,27 @@ export function MainView() {
       }
     });
 
-    // Load initial tab data
+    // Load initial tab data (wait for IPC to be ready)
     const loadInitialData = async () => {
       try {
+        // Wait for IPC to be ready before making calls
+        if (!window.ipc || typeof window.ipc.invoke !== 'function') {
+          // Wait a bit and retry
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        
         const tabList = await ipc.tabs.list();
-        if (Array.isArray(tabList)) {
+        if (Array.isArray(tabList) && tabList.length > 0) {
           handleTabUpdate(tabList);
-          // If we have tabs, ensure browser is marked as ready
-          if (tabList.length > 0) {
-            setBrowserReady(true);
-            setIsLoading(false);
-          }
+          setBrowserReady(true);
+          setIsLoading(false);
+        } else if (tabs.length > 0) {
+          // If store has tabs but IPC returned empty, use store data
+          setBrowserReady(true);
+          setIsLoading(false);
         }
       } catch (error) {
-        console.warn('Failed to load initial tabs:', error);
+        // Silently handle - will retry on next update
         // On error, if tabs exist in store, mark as ready to avoid stuck loading
         if (tabs.length > 0 && activeId) {
           setBrowserReady(true);
@@ -123,7 +130,10 @@ export function MainView() {
       }
     };
 
-    loadInitialData();
+    // Delay initial load slightly to allow IPC to initialize
+    setTimeout(() => {
+      loadInitialData();
+    }, 300);
 
     return () => {
       unsubscribe();

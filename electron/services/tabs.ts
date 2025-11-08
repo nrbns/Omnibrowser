@@ -38,6 +38,20 @@ const resizeTimers = new WeakMap<BrowserWindow, NodeJS.Timeout>();
 const pendingBoundsUpdateTimers = new Map<string, NodeJS.Timeout>();
 const cleanupRegistered = new WeakMap<BrowserWindow, boolean>(); // Track cleanup registration
 
+// Track warned tab IDs with timestamp to prevent spam (only warn once per tab ID per minute)
+const warnedTabIds = new Map<string, number>();
+const WARN_CLEAR_INTERVAL = 60000; // 1 minute
+
+// Clear old warnings periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [tabId, timestamp] of warnedTabIds.entries()) {
+    if (now - timestamp > WARN_CLEAR_INTERVAL) {
+      warnedTabIds.delete(tabId);
+    }
+  }
+}, WARN_CLEAR_INTERVAL);
+
 const clearPendingBoundsTimerForTab = (winId: number, tabId: string) => {
   const timerKey = `${winId}:${tabId}`;
   const timer = pendingBoundsUpdateTimers.get(timerKey);
@@ -65,7 +79,7 @@ export function registerTabIpc(win: BrowserWindow) {
   
   // Increase max listeners for this window to prevent warnings
   // Multiple IPC handlers and event listeners can add up quickly
-  win.setMaxListeners(50);
+  win.setMaxListeners(100);
   
   setupBrowserViewResize(win);
   const emit = () => {
@@ -117,6 +131,9 @@ export function registerTabIpc(win: BrowserWindow) {
   });
 
   registerHandler('tabs:create', TabCreateRequest, async (_event, request) => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[Tabs] Creating tab with request:', request);
+    }
     const id = randomUUID();
     
     // Get partition from active session or profile
@@ -289,7 +306,11 @@ export function registerTabIpc(win: BrowserWindow) {
       }
     });
     
-    return { id } as TabCreateResponse;
+    // Return the created tab ID
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[Tabs] Tab created successfully:', id);
+    }
+    return { id } as z.infer<typeof TabCreateResponse>;
   });
 
   registerHandler('tabs:createWithProfile', TabCreateWithProfileRequest, async (_event, request) => {
@@ -476,20 +497,55 @@ export function registerTabIpc(win: BrowserWindow) {
   });
 
   registerHandler('tabs:activate', TabActivateRequest, async (_event, request) => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[Main][tabs:activate] request received:', request);
+    }
+    // Validate request
+    if (!request.id || typeof request.id !== 'string') {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[Main][tabs:activate] invalid request id:', request.id);
+      }
+      return { success: false, error: 'Invalid tab ID' };
+    }
+    
+    // Check if tab exists before activating
+    const tabs = getTabs(win);
+    const rec = tabs.find(t => t.id === request.id);
+    if (!rec) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[Main][tabs:activate] tab not found:', request.id);
+      }
+      // Tab doesn't exist - return error instead of trying to activate
+      return { success: false, error: 'Tab not found' };
+    }
+    
+    // Verify the tab's view is still valid
+    if (!rec.view || rec.view.webContents.isDestroyed()) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[Main][tabs:activate] tab view destroyed:', request.id);
+      }
+      // Tab's view is destroyed - remove it
+      const idx = tabs.findIndex(t => t.id === request.id);
+      if (idx >= 0) {
+        tabs.splice(idx, 1);
+      }
+      return { success: false, error: 'Tab view is destroyed' };
+    }
+    
+    // Tab exists and is valid - activate it
     setActiveTab(win, request.id);
     
     // Wake tab if sleeping
     try {
       wakeTab(request.id);
     } catch (e) {
-      console.warn('Error waking tab:', e);
+      // Silent fail for wake - tab might not be in sleep registry
     }
     
-    const tabs = getTabs(win);
-    const rec = tabs.find(t => t.id === request.id);
     const active = activeTabIdByWindow.get(win.id);
     
-    // Send updated tab list with URLs
+    // Send updated tab list with URLs immediately
+    // This ensures the renderer gets the update right away
     const tabList = tabs.map(t => {
       try {
         const url = t.view.webContents.getURL();
@@ -509,31 +565,40 @@ export function registerTabIpc(win: BrowserWindow) {
       }
     });
     
+    // Send IPC events immediately (before emit()) to ensure renderer gets update
     try {
-      win.webContents.send('tabs:updated', tabList);
-      win.webContents.send('ob://ipc/v1/tabs:updated', tabList);
+      if (!win.isDestroyed() && win.webContents && !win.webContents.isDestroyed()) {
+        win.webContents.send('tabs:updated', tabList);
+        win.webContents.send('ob://ipc/v1/tabs:updated', tabList);
+        // Logging disabled to reduce console noise
+        // if (process.env.NODE_ENV === 'development') {
+        //   console.log('[Tabs] Sent tabs:updated event for activation:', { tabId: request.id, activeTab: active, tabCount: tabList.length });
+        // }
+      }
     } catch (e) {
       console.warn('Error sending tab update:', e);
     }
     
-    // Send navigation state for newly activated tab
-    if (rec) {
-      setTimeout(() => {
-        try {
-          win.webContents.send('tabs:navigation-state', {
-            tabId: request.id,
-            canGoBack: rec.view.webContents.canGoBack(),
-            canGoForward: rec.view.webContents.canGoForward(),
-          });
-        } catch (e) {
-          console.warn('Error sending navigation state:', e);
-        }
-      }, 100);
-    }
-    
-    // Force emit to ensure UI updates
+    // Also emit via the emit() function (which also sends events)
     emit();
     
+    // Send navigation state for newly activated tab
+    if (rec && !win.isDestroyed() && win.webContents && !win.webContents.isDestroyed()) {
+      // Send immediately, no delay needed
+      try {
+        win.webContents.send('tabs:navigation-state', {
+          tabId: request.id,
+          canGoBack: rec.view.webContents.canGoBack(),
+          canGoForward: rec.view.webContents.canGoForward(),
+        });
+      } catch (e) {
+        console.warn('Error sending navigation state:', e);
+      }
+    }
+    
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[Main][tabs:activate] succeeded for tab:', request.id);
+    }
     return { success: true };
   });
   
@@ -607,13 +672,33 @@ export function registerTabIpc(win: BrowserWindow) {
       
       try {
         await rec.view.webContents.loadURL(finalUrl);
-      } catch (err) {
-        console.error('Failed to navigate to URL:', finalUrl, err);
-        // Fallback to about:blank if load fails
-        try {
-          await rec.view.webContents.loadURL('about:blank');
-        } catch (e) {
-          console.error('Failed to load fallback URL:', e);
+      } catch (err: any) {
+        // ERR_ABORTED (-3) is common and often harmless - it occurs when:
+        // 1. A page redirects quickly (e.g., Google redirects)
+        // 2. Navigation is cancelled due to another navigation
+        // 3. The page loads but gets aborted for redirect reasons
+        const errorCode = err?.errno || err?.code;
+        const isAborted = errorCode === -3 || errorCode === 'ERR_ABORTED';
+        
+        if (!isAborted) {
+          // Only log non-aborted errors in development
+          if (process.env.NODE_ENV === 'development') {
+            console.error('[Tabs] Navigation error (non-aborted):', finalUrl, err);
+          }
+          // For real errors, try fallback
+          try {
+            await rec.view.webContents.loadURL('about:blank');
+          } catch (e) {
+            if (process.env.NODE_ENV === 'development') {
+              console.warn('[Tabs] Failed to load fallback URL:', e);
+            }
+          }
+        } else {
+          // ERR_ABORTED is often normal - navigation might still succeed via redirect
+          // Don't log or take action, just let it proceed
+          if (process.env.NODE_ENV === 'development') {
+            console.log('[Tabs] Navigation aborted (likely redirect):', finalUrl);
+          }
         }
       }
       
@@ -675,6 +760,38 @@ export function registerTabIpc(win: BrowserWindow) {
     const rec = tabs.find(t => t.id === activeTabIdByWindow.get(win.id));
     rec?.view.webContents.openDevTools({ mode: 'detach' });
     return { success: true };
+  });
+
+  registerHandler('tabs:zoomIn', z.object({ id: z.string() }), async (_event, request) => {
+    const tabs = getTabs(win);
+    const rec = tabs.find(t => t.id === request.id);
+    if (rec && !rec.view.webContents.isDestroyed()) {
+      const currentZoom = rec.view.webContents.getZoomLevel();
+      rec.view.webContents.setZoomLevel(Math.min(currentZoom + 0.5, 5)); // Max zoom 500%
+      return { success: true };
+    }
+    return { success: false, error: 'Tab not found' };
+  });
+
+  registerHandler('tabs:zoomOut', z.object({ id: z.string() }), async (_event, request) => {
+    const tabs = getTabs(win);
+    const rec = tabs.find(t => t.id === request.id);
+    if (rec && !rec.view.webContents.isDestroyed()) {
+      const currentZoom = rec.view.webContents.getZoomLevel();
+      rec.view.webContents.setZoomLevel(Math.max(currentZoom - 0.5, -5)); // Min zoom 25%
+      return { success: true };
+    }
+    return { success: false, error: 'Tab not found' };
+  });
+
+  registerHandler('tabs:zoomReset', z.object({ id: z.string() }), async (_event, request) => {
+    const tabs = getTabs(win);
+    const rec = tabs.find(t => t.id === request.id);
+    if (rec && !rec.view.webContents.isDestroyed()) {
+      rec.view.webContents.setZoomLevel(0); // Reset to 100%
+      return { success: true };
+    }
+    return { success: false, error: 'Tab not found' };
   });
 
   // Legacy handlers for backwards compatibility (wrap typed handlers)
@@ -958,34 +1075,45 @@ export function registerTabIpc(win: BrowserWindow) {
   });
 }
 
-// Track recently warned tab IDs to avoid spam
-const warnedTabIds = new Set<string>();
-const WARN_CLEAR_INTERVAL = 60000; // Clear warnings after 1 minute
-
-// Clear old warnings periodically
-setInterval(() => {
-  warnedTabIds.clear();
-}, WARN_CLEAR_INTERVAL);
-
 function setActiveTab(win: BrowserWindow, id: string) {
   // Skip if window is destroyed
   if (win.isDestroyed()) {
     return;
   }
   
+  // Validate tab ID
+  if (!id || typeof id !== 'string') {
+    return;
+  }
+  
   const tabs = getTabs(win);
   const rec = tabs.find(t => t.id === id);
   if (!rec) {
-    // Only warn once per tab ID to avoid spam
-    if (!warnedTabIds.has(id)) {
-      warnedTabIds.add(id);
-      console.warn(`Tab ${id} not found for activation`);
+    // Only warn once per tab ID per minute to avoid spam
+    const now = Date.now();
+    const lastWarned = warnedTabIds.get(id);
+    if (!lastWarned || (now - lastWarned) > WARN_CLEAR_INTERVAL) {
+      warnedTabIds.set(id, now);
+      // Only log in development mode to reduce console noise
+      if (process.env.NODE_ENV === 'development') {
+        console.warn(`Tab ${id} not found for activation`);
+      }
     }
     return;
   }
   
-  // Clear warning for this tab if it exists
+  // Clear warning for this tab if it exists and is successfully activated
   warnedTabIds.delete(id);
+  
+  // Verify the BrowserView and webContents are still valid
+  if (!rec.view || rec.view.webContents.isDestroyed()) {
+    // Tab's view is destroyed - remove it from the list
+    const idx = tabs.findIndex(t => t.id === id);
+    if (idx >= 0) {
+      tabs.splice(idx, 1);
+    }
+    return;
+  }
   
   try {
     // Remove all BrowserViews first

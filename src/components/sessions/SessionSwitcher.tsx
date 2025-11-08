@@ -3,7 +3,7 @@
  * UI for managing and switching between multiple browser sessions
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { User, Plus, X, Edit2, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ipc } from '../../lib/ipc-typed';
@@ -27,50 +27,60 @@ export function SessionSwitcher() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
 
+  // Track previous sessions to prevent unnecessary updates
+  const previousSessionsRef = useRef<string>('');
+  
   // Load sessions
   const loadSessions = async () => {
     try {
+      // Wait for IPC to be ready
+      if (!window.ipc || typeof window.ipc.invoke !== 'function') {
+        return; // Will retry on next interval
+      }
+      
       const [allSessions, active] = await Promise.all([
         ipc.sessions.list(),
         ipc.sessions.getActive(),
       ]);
-      // Ensure we have arrays
-      if (Array.isArray(allSessions)) {
-        setSessions(allSessions as BrowserSession[]);
-      } else {
-        setSessions([]);
+      
+      // Only update if sessions actually changed
+      const sessionsArray = Array.isArray(allSessions) ? allSessions as BrowserSession[] : [];
+      const sessionsKey = sessionsArray.map(s => s.id).sort().join(',');
+      
+      if (previousSessionsRef.current !== sessionsKey) {
+        previousSessionsRef.current = sessionsKey;
+        setSessions(sessionsArray);
       }
-      if (active && typeof active === 'object') {
-        setActiveSession(active as BrowserSession | null);
-      } else {
-        setActiveSession(null);
+      
+      // Update active session only if changed
+      const activeSessionObj = active && typeof active === 'object' ? active as BrowserSession : null;
+      const currentActiveId = activeSessionObj?.id || null;
+      const previousActiveId = activeSession?.id || null;
+      
+      if (currentActiveId !== previousActiveId) {
+        setActiveSession(activeSessionObj);
       }
     } catch (error) {
-      console.error('Failed to load sessions:', error);
-      // On error, at least show default session
-      setSessions([{
-        id: 'default',
-        name: 'Default',
-        profileId: 'default',
-        createdAt: Date.now(),
-        tabCount: 0,
-      }]);
-      setActiveSession({
-        id: 'default',
-        name: 'Default',
-        profileId: 'default',
-        createdAt: Date.now(),
-        tabCount: 0,
-      });
+      // Silently handle - will retry on next interval
+      // Only log if it's a real error, not just IPC not ready
+      if (process.env.NODE_ENV === 'development' && error instanceof Error && !error.message.includes('not available')) {
+        console.warn('Failed to load sessions:', error);
+      }
     }
   };
 
   useEffect(() => {
-    loadSessions();
+    // Delay initial load to allow IPC to initialize
+    const timeoutId = setTimeout(() => {
+      loadSessions();
+    }, 500);
     
-    // Refresh periodically
-    const interval = setInterval(loadSessions, 2000);
-    return () => clearInterval(interval);
+    // Refresh periodically (less frequent to reduce spam)
+    const interval = setInterval(loadSessions, 5000);
+    return () => {
+      clearTimeout(timeoutId);
+      clearInterval(interval);
+    };
   }, []);
 
   const handleCreateSession = async () => {

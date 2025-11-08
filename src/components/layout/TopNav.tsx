@@ -90,12 +90,27 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
     setAgentActive(true);
   }, []);
 
-  // Load initial download count
+  // Load initial download count (wait for IPC)
   useEffect(() => {
-    ipc.downloads.list().then((list: any) => {
-      const active = Array.isArray(list) ? list.filter((d: any) => d.status === 'in-progress').length : 0;
-      setDownloadCount(active);
-    }).catch(() => {});
+    const loadDownloads = async () => {
+      // Wait for IPC to be ready
+      if (!window.ipc || typeof window.ipc.invoke !== 'function') {
+        // Retry after a delay
+        setTimeout(loadDownloads, 500);
+        return;
+      }
+      
+      try {
+        const list = await ipc.downloads.list();
+        const active = Array.isArray(list) ? list.filter((d: any) => d.status === 'in-progress').length : 0;
+        setDownloadCount(active);
+      } catch {
+        // Silently handle - will retry if needed
+      }
+    };
+    
+    // Delay initial load to allow IPC to initialize
+    setTimeout(loadDownloads, 300);
   }, []);
 
   const handleBack = useCallback(async () => {
@@ -144,13 +159,19 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
     }
   }, []);
 
-  // Keyboard shortcuts for navigation
+  // Keyboard shortcuts for navigation and zoom
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const { activeId: currentActiveId, canGoBack: currentCanGoBack, canGoForward: currentCanGoForward } = navigationStateRef.current;
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
       const modifier = isMac ? e.metaKey : e.ctrlKey;
       const altModifier = e.altKey;
+
+      // Don't intercept if user is typing in an input field
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+        return;
+      }
 
       if ((modifier || altModifier) && e.key === 'ArrowLeft' && !e.shiftKey) {
         if (currentCanGoBack && currentActiveId) {
@@ -179,6 +200,34 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
       if (e.key === 'F5' && currentActiveId) {
         e.preventDefault();
         void handleRefresh();
+      }
+
+      // Zoom shortcuts
+      if (modifier && (e.key === '+' || e.key === '=') && currentActiveId) {
+        e.preventDefault();
+        ipc.tabs.zoomIn(currentActiveId).catch(console.error);
+        return;
+      }
+
+      if (modifier && e.key === '-' && currentActiveId) {
+        e.preventDefault();
+        ipc.tabs.zoomOut(currentActiveId).catch(console.error);
+        return;
+      }
+
+      if (modifier && e.key === '0' && currentActiveId) {
+        e.preventDefault();
+        ipc.tabs.zoomReset(currentActiveId).catch(console.error);
+        return;
+      }
+
+      // DevTools shortcuts: F12 or Cmd+Shift+I / Ctrl+Shift+I
+      if (e.key === 'F12' || (modifier && e.shiftKey && e.key.toLowerCase() === 'i')) {
+        if (currentActiveId) {
+          e.preventDefault();
+          ipc.tabs.devtools(currentActiveId).catch(console.error);
+        }
+        return;
       }
     };
 
@@ -262,9 +311,10 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
         {/* Home Button */}
         <motion.button
           onClick={() => navigate('/')}
+          aria-label="Go to home"
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          className="p-2.5 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-300 hover:text-blue-400 transition-all cursor-pointer"
+          className="p-2.5 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-300 hover:text-blue-400 transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
           title="Home (Go to home screen)"
         >
           <Home size={18} />
@@ -273,9 +323,11 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
         <motion.button
           onClick={handleBack}
           disabled={!canGoBack || !activeId}
+          aria-label="Go back"
+          aria-disabled={!canGoBack || !activeId}
           whileHover={{ scale: canGoBack && activeId ? 1.05 : 1 }}
           whileTap={{ scale: canGoBack && activeId ? 0.95 : 1 }}
-          className={`p-2.5 rounded-lg transition-all ${
+          className={`p-2.5 rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
             canGoBack && activeId
               ? 'bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-300 hover:text-gray-100 cursor-pointer'
               : 'text-gray-600 cursor-not-allowed opacity-50'
@@ -287,9 +339,11 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
         <motion.button
           onClick={handleForward}
           disabled={!canGoForward || !activeId}
+          aria-label="Go forward"
+          aria-disabled={!canGoForward || !activeId}
           whileHover={{ scale: canGoForward && activeId ? 1.05 : 1 }}
           whileTap={{ scale: canGoForward && activeId ? 0.95 : 1 }}
-          className={`p-2.5 rounded-lg transition-all ${
+          className={`p-2.5 rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
             canGoForward && activeId
               ? 'bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-300 hover:text-gray-100 cursor-pointer'
               : 'text-gray-600 cursor-not-allowed opacity-50'
@@ -301,9 +355,11 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
         <motion.button
           onClick={handleRefresh}
           disabled={!activeId}
+          aria-label="Refresh page"
+          aria-disabled={!activeId}
           whileHover={{ scale: activeId ? 1.05 : 1 }}
           whileTap={{ scale: activeId ? 0.95 : 1 }}
-          className={`p-2.5 rounded-lg transition-all ${
+          className={`p-2.5 rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
             activeId
               ? 'bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-300 hover:text-gray-100 cursor-pointer'
               : 'text-gray-600 cursor-not-allowed opacity-50'
@@ -341,9 +397,20 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
         <div className="relative">
           <motion.button
             onClick={() => setDropdownOpen(!dropdownOpen)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setDropdownOpen(!dropdownOpen);
+              } else if (e.key === 'Escape' && dropdownOpen) {
+                setDropdownOpen(false);
+              }
+            }}
+            aria-expanded={dropdownOpen}
+            aria-haspopup="true"
+            aria-label="Options menu"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            className="relative p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all"
+            className="relative p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
             title="Options"
           >
             <ChevronDown size={18} />
@@ -372,38 +439,77 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
                   <button
                     onClick={() => {
                       if (activeId) {
-                        ipc.tabs.devtools(activeId).catch(console.error);
+                        ipc.tabs.zoomIn(activeId).catch(console.error);
                       }
                       closeDropdown();
                     }}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors"
-                  >
-                    <Code size={16} />
-                    <span>Developer Tools</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (activeId) {
-                        // Zoom in - would implement via IPC
+                    disabled={!activeId}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        if (activeId) {
+                          ipc.tabs.zoomIn(activeId).catch(console.error);
+                          closeDropdown();
+                        }
                       }
-                      closeDropdown();
                     }}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors"
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:bg-gray-800/60"
+                    aria-label="Zoom in (Ctrl+Plus)"
+                    title="Zoom in (Ctrl+Plus)"
                   >
                     <ZoomIn size={16} />
                     <span>Zoom In</span>
+                    <kbd className="ml-auto text-xs text-gray-500">Ctrl+Plus</kbd>
                   </button>
                   <button
                     onClick={() => {
                       if (activeId) {
-                        // Zoom out - would implement via IPC
+                        ipc.tabs.zoomOut(activeId).catch(console.error);
                       }
                       closeDropdown();
                     }}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors"
+                    disabled={!activeId}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        if (activeId) {
+                          ipc.tabs.zoomOut(activeId).catch(console.error);
+                          closeDropdown();
+                        }
+                      }
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:bg-gray-800/60"
+                    aria-label="Zoom out (Ctrl+Minus)"
+                    title="Zoom out (Ctrl+Minus)"
                   >
                     <ZoomOut size={16} />
                     <span>Zoom Out</span>
+                    <kbd className="ml-auto text-xs text-gray-500">Ctrl+-</kbd>
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (activeId) {
+                        ipc.tabs.zoomReset(activeId).catch(console.error);
+                      }
+                      closeDropdown();
+                    }}
+                    disabled={!activeId}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        if (activeId) {
+                          ipc.tabs.zoomReset(activeId).catch(console.error);
+                          closeDropdown();
+                        }
+                      }
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:bg-gray-800/60"
+                    aria-label="Reset zoom (Ctrl+0)"
+                    title="Reset zoom (Ctrl+0)"
+                  >
+                    <Search size={16} className="rotate-45" />
+                    <span>Reset Zoom</span>
+                    <kbd className="ml-auto text-xs text-gray-500">Ctrl+0</kbd>
                   </button>
                   <div className="h-px bg-gray-700/50 my-1" />
                   <button
@@ -411,7 +517,15 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
                       navigate('/workspace');
                       closeDropdown();
                     }}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        navigate('/workspace');
+                        closeDropdown();
+                      }
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors focus:outline-none focus:bg-gray-800/60"
+                    aria-label="Open workspaces"
                   >
                     <FileText size={16} />
                     <span>Workspaces</span>
@@ -421,7 +535,15 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
                       navigate('/playbooks');
                       closeDropdown();
                     }}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        navigate('/playbooks');
+                        closeDropdown();
+                      }
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors focus:outline-none focus:bg-gray-800/60"
+                    aria-label="Open playbooks"
                   >
                     <Workflow size={16} />
                     <span>Playbooks</span>
@@ -436,9 +558,20 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
         <div className="relative">
           <motion.button
             onClick={() => setHierarchyOpen(!hierarchyOpen)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setHierarchyOpen(!hierarchyOpen);
+              } else if (e.key === 'Escape' && hierarchyOpen) {
+                setHierarchyOpen(false);
+              }
+            }}
+            aria-expanded={hierarchyOpen}
+            aria-haspopup="true"
+            aria-label="View hierarchy"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            className="relative p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all"
+            className="relative p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
             title="View Hierarchy"
           >
             <Workflow size={18} />
@@ -470,31 +603,56 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
                       navigate('/');
                       closeHierarchy();
                     }}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        navigate('/');
+                        closeHierarchy();
+                      }
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors focus:outline-none focus:bg-gray-800/60"
+                    aria-label="Open knowledge graph"
                   >
                     <Layers size={16} />
                     <span>Knowledge Graph</span>
                   </button>
                   <button
                     onClick={() => {
-                      // Would open history graph view
                       navigate('/history');
                       closeHierarchy();
                     }}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        navigate('/history');
+                        closeHierarchy();
+                      }
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors focus:outline-none focus:bg-gray-800/60"
+                    aria-label="Open history graph"
                   >
                     <Network size={16} />
                     <span>History Graph</span>
                   </button>
                   <button
                     onClick={() => {
-                      // Would open page structure view
                       if (activeId) {
                         ipc.tabs.devtools(activeId).catch(console.error);
                       }
                       closeHierarchy();
                     }}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors"
+                    disabled={!activeId}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        if (activeId) {
+                          ipc.tabs.devtools(activeId).catch(console.error);
+                          closeHierarchy();
+                        }
+                      }
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:bg-gray-800/60"
+                    aria-label="Open page structure in DevTools"
                   >
                     <Code size={16} />
                     <span>Page Structure</span>
@@ -505,7 +663,15 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
                       navigate('/runs');
                       closeHierarchy();
                     }}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        navigate('/runs');
+                        closeHierarchy();
+                      }
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors focus:outline-none focus:bg-gray-800/60"
+                    aria-label="Open automation runs"
                   >
                     <Workflow size={16} />
                     <span>Automation Runs</span>
@@ -519,9 +685,14 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
         {/* Camera/Screenshot Button */}
         <motion.button
           onClick={handleScreenshot}
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          className="p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all"
+          disabled={!activeId}
+          aria-label="Take screenshot"
+          aria-disabled={!activeId}
+          whileHover={{ scale: activeId ? 1.05 : 1 }}
+          whileTap={{ scale: activeId ? 0.95 : 1 }}
+          className={`p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
+            !activeId ? 'opacity-50 cursor-not-allowed' : ''
+          }`}
           title="Screenshot (⌘⇧S)"
         >
           <Camera size={18} />
@@ -530,9 +701,14 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
         {/* PIP Button */}
         <motion.button
           onClick={handlePIP}
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          className="p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all"
+          disabled={!activeId}
+          aria-label="Enter picture-in-picture"
+          aria-disabled={!activeId}
+          whileHover={{ scale: activeId ? 1.05 : 1 }}
+          whileTap={{ scale: activeId ? 0.95 : 1 }}
+          className={`p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
+            !activeId ? 'opacity-50 cursor-not-allowed' : ''
+          }`}
           title="Picture-in-Picture"
         >
           <PictureInPicture size={18} />
@@ -543,23 +719,45 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
           onClick={async () => {
             if (!activeId) return;
             try {
-              // Use IPC to trigger find in page for the active BrowserView
-              const tabs = await ipc.tabs.list();
-              const activeTab = tabs.find((t: any) => t.id === activeId);
-              if (activeTab) {
-                // Use IPC to trigger find in page
-                await ipc.tabs.find(activeId);
-              }
+              await ipc.tabs.find(activeId);
             } catch (error) {
               console.error('Failed to open find:', error);
             }
           }}
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          className="p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all"
-          title="Find in Page (⌘F)"
+          disabled={!activeId}
+          aria-label="Find in page"
+          aria-disabled={!activeId}
+          whileHover={{ scale: activeId ? 1.05 : 1 }}
+          whileTap={{ scale: activeId ? 0.95 : 1 }}
+          className={`p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
+            !activeId ? 'opacity-50 cursor-not-allowed' : ''
+          }`}
+          title="Find in Page (⌘F / Ctrl+F)"
         >
           <Search size={18} />
+        </motion.button>
+
+        {/* DevTools Toggle Button */}
+        <motion.button
+          onClick={async () => {
+            if (!activeId) return;
+            try {
+              await ipc.tabs.devtools(activeId);
+            } catch (error) {
+              console.error('Failed to toggle DevTools:', error);
+            }
+          }}
+          disabled={!activeId}
+          aria-label="Toggle developer tools"
+          aria-disabled={!activeId}
+          whileHover={{ scale: activeId ? 1.05 : 1 }}
+          whileTap={{ scale: activeId ? 0.95 : 1 }}
+          className={`p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-blue-400 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
+            !activeId ? 'opacity-50 cursor-not-allowed' : ''
+          }`}
+          title="Developer Tools (⌘⇧I / F12)"
+        >
+          <Code size={18} />
         </motion.button>
 
             {/* Download Button - Real-time count */}
@@ -567,10 +765,11 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
               onClick={() => {
                 navigate('/downloads');
               }}
+              aria-label={`Downloads${downloadCount > 0 ? ` (${downloadCount} active)` : ''}`}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          className="relative p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all"
-          title="Downloads"
+          className="relative p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
+          title={`Downloads${downloadCount > 0 ? ` (${downloadCount} active)` : ''}`}
         >
           <Download size={18} />
           {downloadCount > 0 && (
@@ -578,6 +777,7 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
               className="absolute -top-1 -right-1 w-4 h-4 bg-blue-500 text-white text-xs rounded-full flex items-center justify-center font-bold"
+              aria-label={`${downloadCount} active download${downloadCount > 1 ? 's' : ''}`}
             >
               {downloadCount > 9 ? '9+' : downloadCount}
             </motion.span>
@@ -589,9 +789,10 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
               onClick={() => {
                 navigate('/history');
               }}
+              aria-label="View history"
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          className="p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all"
+          className="p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
           title="History"
         >
           <History size={18} />
@@ -600,9 +801,10 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
         {/* Settings Button */}
         <motion.button
           onClick={() => navigate('/settings')}
+          aria-label="Open settings"
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          className="p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all"
+          className="p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
           title="Settings"
         >
           <Settings size={18} />
@@ -611,9 +813,10 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
         {/* Agent Console Button - With gradient and green dot */}
         <motion.button
           onClick={onAgentToggle}
+          aria-label={`Agent console${agentActive ? ' (active)' : ''}`}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          className="relative p-2 rounded-lg bg-gradient-to-br from-purple-600/60 to-blue-600/60 hover:from-purple-600/80 hover:to-blue-600/80 border border-purple-500/30 text-white transition-all shadow-lg shadow-purple-500/20"
+          className="relative p-2 rounded-lg bg-gradient-to-br from-purple-600/60 to-blue-600/60 hover:from-purple-600/80 hover:to-blue-600/80 border border-purple-500/30 text-white transition-all shadow-lg shadow-purple-500/20 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 focus:ring-offset-gray-900"
           title="Agent Console (⌘⇧A)"
         >
           <Bot size={18} />
@@ -622,6 +825,7 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
               className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-green-400 rounded-full border-2 border-gray-900"
               animate={{ scale: [1, 1.2, 1], opacity: [1, 0.8, 1] }}
               transition={{ duration: 2, repeat: Infinity }}
+              aria-label="Agent is active"
             />
           )}
         </motion.button>
@@ -629,3 +833,4 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
     </div>
   );
 }
+

@@ -132,99 +132,106 @@ function LoadingFallback() {
   );
 }
 
-// Router configuration
-const router = createBrowserRouter([
+// Router configuration with v7 future flags
+const router = createBrowserRouter(
+  [
+    {
+      path: '/',
+      element: (
+        <Suspense fallback={<LoadingFallback />}>
+          <AppShell />
+        </Suspense>
+      ),
+      children: [
+        { 
+          index: true, 
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <Home />
+            </Suspense>
+          ) 
+        },
+        { 
+          path: 'settings', 
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <Settings />
+            </Suspense>
+          ) 
+        },
+        { 
+          path: 'w/:id', 
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <Workspace />
+            </Suspense>
+          ) 
+        },
+        { 
+          path: 'agent', 
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <AgentConsole />
+            </Suspense>
+          ) 
+        },
+        { 
+          path: 'runs', 
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <Runs />
+            </Suspense>
+          ) 
+        },
+        { 
+          path: 'replay/:id', 
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <Replay />
+            </Suspense>
+          ) 
+        },
+        { 
+          path: 'playbooks', 
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <PlaybookForge />
+            </Suspense>
+          ) 
+        },
+        { 
+          path: 'history', 
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <HistoryPage />
+            </Suspense>
+          ) 
+        },
+        { 
+          path: 'downloads', 
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <DownloadsPage />
+            </Suspense>
+          ) 
+        },
+        { 
+          path: 'video', 
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <VideoPage />
+            </Suspense>
+          ) 
+        },
+      ]
+    }
+  ],
   {
-    path: '/',
-    element: (
-      <Suspense fallback={<LoadingFallback />}>
-        <AppShell />
-      </Suspense>
-    ),
-    children: [
-      { 
-        index: true, 
-        element: (
-          <Suspense fallback={<LoadingFallback />}>
-            <Home />
-          </Suspense>
-        ) 
-      },
-      { 
-        path: 'settings', 
-        element: (
-          <Suspense fallback={<LoadingFallback />}>
-            <Settings />
-          </Suspense>
-        ) 
-      },
-      { 
-        path: 'w/:id', 
-        element: (
-          <Suspense fallback={<LoadingFallback />}>
-            <Workspace />
-          </Suspense>
-        ) 
-      },
-      { 
-        path: 'agent', 
-        element: (
-          <Suspense fallback={<LoadingFallback />}>
-            <AgentConsole />
-          </Suspense>
-        ) 
-      },
-      { 
-        path: 'runs', 
-        element: (
-          <Suspense fallback={<LoadingFallback />}>
-            <Runs />
-          </Suspense>
-        ) 
-      },
-      { 
-        path: 'replay/:id', 
-        element: (
-          <Suspense fallback={<LoadingFallback />}>
-            <Replay />
-          </Suspense>
-        ) 
-      },
-      { 
-        path: 'playbooks', 
-        element: (
-          <Suspense fallback={<LoadingFallback />}>
-            <PlaybookForge />
-          </Suspense>
-        ) 
-      },
-      { 
-        path: 'history', 
-        element: (
-          <Suspense fallback={<LoadingFallback />}>
-            <HistoryPage />
-          </Suspense>
-        ) 
-      },
-      { 
-        path: 'downloads', 
-        element: (
-          <Suspense fallback={<LoadingFallback />}>
-            <DownloadsPage />
-          </Suspense>
-        ) 
-      },
-      { 
-        path: 'video', 
-        element: (
-          <Suspense fallback={<LoadingFallback />}>
-            <VideoPage />
-          </Suspense>
-        ) 
-      },
-    ]
+    future: {
+      v7_startTransition: true, // Opt-in to React.startTransition wrapping in v7
+    },
   }
-]);
+);
 
 // Mount the application
 const rootElement = document.getElementById('root');
@@ -241,19 +248,36 @@ if (!rootElement) {
 }
 
 try {
-  console.log('🚀 Mounting OmniBrowser...');
-  
-  ReactDOM.createRoot(rootElement).render(
+  if (process.env.NODE_ENV === 'development') {
+    console.log('🚀 Mounting OmniBrowser...');
+  }
+
+  const rootKey = '__OMNIBROWSER_REACT_ROOT__';
+  const existingRoot = (window as any)[rootKey];
+  const root = existingRoot || ReactDOM.createRoot(rootElement);
+
+  if (!existingRoot) {
+    (window as any)[rootKey] = root;
+  }
+
+  root.render(
     <React.StrictMode>
       <ErrorBoundary>
         <Suspense fallback={<LoadingFallback />}>
-          <RouterProvider router={router} />
+          <RouterProvider
+            router={router}
+            future={{
+              v7_startTransition: true,
+            }}
+          />
         </Suspense>
       </ErrorBoundary>
     </React.StrictMode>
   );
   
-  console.log('✅ OmniBrowser mounted successfully');
+  if (process.env.NODE_ENV === 'development') {
+    console.log('✅ OmniBrowser mounted successfully');
+  }
 } catch (error) {
   console.error('❌ Failed to mount application:', error);
   
