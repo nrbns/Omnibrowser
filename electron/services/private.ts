@@ -7,12 +7,14 @@ import { app, BrowserWindow, session } from 'electron';
 import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import { registerTabIpc } from './tabs';
+import { setActiveProfileForWindow, removeWindow as removeProfileWindow } from './profiles';
 
 export interface PrivateWindowOptions {
   url?: string;
   autoCloseAfter?: number; // milliseconds (e.g., 10 minutes = 600000)
   contentProtection?: boolean; // macOS: prevent screen recording
   ghostMode?: boolean; // Enhanced privacy: max fingerprint protection
+  profileId?: string;
 }
 
 const privateWindows = new Map<number, {
@@ -100,6 +102,8 @@ export function createPrivateWindow(options: PrivateWindowOptions = {}): Browser
     });
   }
 
+  setActiveProfileForWindow(win, options.profileId ?? 'default');
+
   // Cleanup on close
   win.on('closed', () => {
     const record = privateWindows.get(win.id);
@@ -113,6 +117,7 @@ export function createPrivateWindow(options: PrivateWindowOptions = {}): Browser
       sess.clearHostResolverCache();
       privateWindows.delete(win.id);
     }
+    removeProfileWindow(win.id);
   });
 
   const attemptInitialTab = () => {

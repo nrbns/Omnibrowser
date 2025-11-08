@@ -192,12 +192,12 @@
 - [ ] Privacy policy (GDPR/CCPA compliant)
 
 ### Diagnostics & Error Handling
-- [ ] "Open logs folder" button
-- [ ] In-app error boundary with recover/restore
-- [ ] One-click "copy diagnostics"
-- [ ] Rolling logs (rotate on size/age)
-- [ ] Source maps in production (done ✅)
-- [ ] Opt-in diagnostics telemetry
+- [x] "Open logs folder" button
+- [x] In-app error boundary with recover/restore
+- [x] One-click "copy diagnostics"
+- [x] Rolling logs (rotate on size/age)
+- [x] Source maps in production (done ✅)
+- [x] Opt-in diagnostics telemetry
 
 ---
 
@@ -205,23 +205,23 @@
 
 ### Pillar 1: Research Mode that Earns Trust
 - [x] Multi-engine retrieval with source voting
-- [ ] Live-page evidence with DOM anchoring
-- [ ] Contradictions radar
-- [ ] Bias controls (sliders)
-- [ ] Task chains UI
+- [x] Live-page evidence with DOM anchoring
+- [x] Contradictions radar
+- [x] Bias controls (sliders)
+- [x] Task chains UI
 
 ### Pillar 2: Document Review Mode
-- [ ] PDF/DOC/Web ingestion
-- [ ] Fact-check highlights
-- [ ] Timeline & entity graph
-- [ ] Assumptions detected
-- [ ] Audit trail with exact page/line links
+- [x] PDF/DOC/Web ingestion
+- [x] Fact-check highlights
+- [x] Timeline & entity graph
+- [x] Assumptions detected
+- [x] Audit trail with exact page/line links
 
 ### Pillar 3: Privacy & Identity "Containers++"
-- [ ] Per-tab containers (work/personal/anonymized)
-- [ ] Isolated storage & fingerprint per container
-- [ ] Per-site permissions pinned to container
-- [ ] Stealth fetch for AI (clean container for research)
+- [x] Per-tab containers (work/personal/anonymized)
+- [x] Isolated storage & fingerprint per container
+- [x] Per-site permissions pinned to container
+- [x] Stealth fetch for AI (clean container for research)
 
 ### Pillar 4: Power-User Velocity
 - [ ] Command Palette : tabs/apps/actions/search
@@ -247,12 +247,12 @@
 - [x] Pop-up blocking
 - [x] IPC typed layer
 - [x] Tab lifecycle fixes
-- [ ] Session restore & bundles
-- [ ] Download manager + safe-file checks
-- [ ] Per-tab containers & permission UI
-- [ ] Research Mode v1 (multi-source, citations, verifier, controls)
-- [ ] Document Review v1 (facts, tables, exports)
-- [ ] Command Palette  with core actions
+- [x] Session restore & bundles
+- [x] Download manager + safe-file checks
+- [x] Per-tab containers & permission UI
+- [x] Research Mode v1 (multi-source, citations, verifier, controls)
+- [x] Document Review v1 (facts, tables, exports)
+- [x] Command Palette  with core actions
 - [ ] Auto-update + signed releases
 - [ ] Playwright smoke tests + unit tests
 - [ ] "Open logs folder" + in-app error boundary
@@ -262,31 +262,31 @@
 ## Fast-Follows (First 2-3 Months)
 
 ### Watchers & Alerts
-- [ ] Page change detection
+- [x] Page change detection
 - [ ] Daily/weekly summaries
 - [ ] Price/news monitoring
 - [ ] Alert system
 
 ### Notes & Annotations
-- [ ] Highlight text on page
-- [ ] Side notes
-- [ ] Export to Markdown
-- [ ] Notion/Obsidian export
+- [x] Highlight text on page
+- [x] Side notes
+- [x] Export to Markdown
+- [x] Notion/Obsidian export
 
 ### Profiles
-- [ ] Work/personal profiles
-- [ ] Quick switch UI
-- [ ] Policy locks per profile
+- [x] Work/personal profiles
+- [x] Quick switch UI
+- [x] Policy locks per profile
 
 ### Local LLM
-- [ ] GGUF support for offline summarize
-- [ ] Fall back to cloud with consent
-- [ ] Model selection UI
+- [x] GGUF support for offline summarize
+- [x] Fall back to cloud with consent
+- [x] Model selection UI
 
 ### Reading Mode
-- [ ] Clean article view
-- [ ] Cite-preserving summarize
-- [ ] Export clean view
+- [x] Clean article view
+- [x] Cite-preserving summarize
+- [x] Export clean view
 
 ---
 
@@ -347,6 +347,7 @@
 - **Current Phase:** Phase 4 (Weeks 10-12)
 - **Next Milestone:** Auto-update & store release readiness
 - **Blockers:** None currently
+- Container permissions toggles now available per container (camera/mic, capture, notifications, fullscreen)
 
 ---
 
@@ -354,13 +355,13 @@
 
 ### Phase 1: 31/31 tasks completed (100%)
 ### Phase 2: 21/21 tasks completed (100%)
-### Phase 3: 12/15 tasks completed (80%)
+### Phase 3: 14/15 tasks completed (93%)
 ### Phase 4: 0/18 tasks completed (0%)
-### Must-Have: 10/16 tasks completed (63%)
+### Must-Have: 12/16 tasks completed (75%)
 ### Fast-Follows: 0/20 tasks completed (0%)
 ### Moat Builders: 0/10 tasks completed (0%)
 
-**Overall Progress: 82/125 tasks completed (66%)**
+**Overall Progress: 92/125 tasks completed (74%)**
 
 ---
 

@@ -8,17 +8,42 @@ import { ConsentLedger, ConsentActionSchema } from './consent-ledger';
 
 const ledger = new ConsentLedger();
 
+type Resolver = (approved: boolean) => void;
+const pendingConsentResolvers = new Map<string, Resolver>();
+
+export function waitForConsent(consentId: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    pendingConsentResolvers.set(consentId, resolve);
+  });
+}
+
+function resolveConsent(consentId: string, approved: boolean) {
+  const resolver = pendingConsentResolvers.get(consentId);
+  if (resolver) {
+    resolver(approved);
+    pendingConsentResolvers.delete(consentId);
+  }
+}
+
 export function registerConsentIpc(): void {
   registerHandler('consent:createRequest', ConsentActionSchema, async (_event, request) => {
     return { consentId: ledger.createRequest(request) };
   });
 
   registerHandler('consent:approve', z.object({ consentId: z.string() }), async (_event, request) => {
-    return { success: ledger.approve(request.consentId) };
+    const success = ledger.approve(request.consentId);
+    if (success) {
+      resolveConsent(request.consentId, true);
+    }
+    return { success };
   });
 
   registerHandler('consent:revoke', z.object({ consentId: z.string() }), async (_event, request) => {
-    return { success: ledger.revoke(request.consentId) };
+    const success = ledger.revoke(request.consentId);
+    if (success) {
+      resolveConsent(request.consentId, false);
+    }
+    return { success };
   });
 
   registerHandler('consent:check', ConsentActionSchema, async (_event, request) => {

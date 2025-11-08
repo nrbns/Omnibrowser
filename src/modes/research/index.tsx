@@ -1,4 +1,16 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Clipboard,
+  ExternalLink,
+  ShieldAlert,
+  Target,
+  CheckCircle2,
+  ArrowUpRight,
+  Sparkles,
+  Info,
+  RefreshCcw,
+  ChevronRight,
+} from 'lucide-react';
 import { useSettingsStore } from '../../state/settingsStore';
 import VoiceButton from '../../components/VoiceButton';
 import { ipc } from '../../lib/ipc-typed';
@@ -8,18 +20,41 @@ import {
   ResearchSource,
   ResearchSourceType,
   VerificationResult,
+  ResearchEvidence,
+  ResearchTaskChain,
+  BiasProfile,
+  ResearchInlineEvidence,
 } from '../../types/research';
+import { ContainerInfo } from '../../lib/ipc-events';
+import { useContainerStore } from '../../state/containerStore';
 
 export default function ResearchPanel() {
   const [query, setQuery] = useState('');
   const [result, setResult] = useState<ResearchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [activeSourceId, setActiveSourceId] = useState<string | null>(null);
   const [includeCounterpoints, setIncludeCounterpoints] = useState(false);
   const [authorityBias, setAuthorityBias] = useState(50); // 0 = recency, 100 = authority
   const [region, setRegion] = useState<RegionOption>('global');
   const { activeId } = useTabsStore();
   const useHybridSearch = useSettingsStore((s) => s.searchEngine !== 'mock');
+  const { containers, activeContainerId, setContainers } = useContainerStore();
+
+  useEffect(() => {
+    if (containers.length === 0) {
+      ipc.containers
+        .list()
+        .then((list) => {
+          if (Array.isArray(list)) {
+            setContainers(list as ContainerInfo[]);
+          }
+        })
+        .catch((err) => {
+          console.warn('[Research] Failed to load containers for badge', err);
+        });
+    }
+  }, [containers.length, setContainers]);
 
   const recencyWeight = useMemo(() => (100 - authorityBias) / 100, [authorityBias]);
   const authorityWeight = useMemo(() => authorityBias / 100, [authorityBias]);
@@ -31,6 +66,7 @@ export default function ResearchPanel() {
     setLoading(true);
     setError(null);
     setResult(null);
+    setActiveSourceId(null);
 
     try {
       if (!useHybridSearch) {
@@ -66,59 +102,116 @@ export default function ResearchPanel() {
     }
   };
 
+  const handleRunExample = (example: string) => {
+    setQuery(example);
+    void handleSearch(example);
+  };
+
   return (
-    <div className="p-3 space-y-2">
-      <form
-        onSubmit={async (e) => {
-          e.preventDefault();
-          await handleSearch();
-        }}
-        className="flex items-center gap-2"
-      >
-        <input
-          className="w-full bg-neutral-800 rounded px-3 py-2 text-sm"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Ask a question or search..."
-          disabled={loading}
-        />
-        <VoiceButton
-          onResult={(text) => {
-            setQuery(text);
-            setTimeout(() => handleSearch(text), 100);
-          }}
-          small
-        />
-      </form>
-
-      <ResearchControls
-        authorityBias={authorityBias}
-        includeCounterpoints={includeCounterpoints}
-        region={region}
-        loading={loading}
-        onAuthorityBiasChange={setAuthorityBias}
-        onIncludeCounterpointsChange={setIncludeCounterpoints}
-        onRegionChange={(value) => setRegion(value)}
-      />
-
-      {error && (
-        <div className="rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-          {error}
+    <div className="flex h-full w-full flex-col overflow-hidden bg-[#0f111a] text-gray-100">
+      <header className="border-b border-white/5 bg-black/20 backdrop-blur">
+        <div className="flex items-center justify-between px-6 pt-6 pb-3">
+          <div>
+            <h1 className="text-xl font-semibold text-white">Research Mode</h1>
+            <p className="text-sm text-gray-400">
+              Aggregate evidence, generate traceable answers, and surface counterpoints without leaving the browser.
+            </p>
+          </div>
+          <ActiveContainerBadge containers={containers} activeContainerId={activeContainerId} />
         </div>
-      )}
 
-      {loading && (
-        <div className="text-sm text-gray-400 text-center py-2">
-          Gathering sources and generating answer...
+        <div className="px-6 pb-5">
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              await handleSearch();
+            }}
+            className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 shadow-inner shadow-black/40 focus-within:border-blue-500/50 focus-within:ring-1 focus-within:ring-blue-500/20 transition-all"
+          >
+            <input
+              className="flex-1 bg-transparent text-base text-white placeholder:text-gray-500 focus:outline-none"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Ask a question, compare claims, or request a briefing…"
+              disabled={loading}
+            />
+            <div className="flex items-center gap-2">
+              <button
+                type="submit"
+                disabled={loading || !query.trim()}
+                className="rounded-lg border border-white/20 bg-white/10 px-3 py-1.5 text-sm text-gray-100 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {loading ? 'Researching…' : 'Run research'}
+              </button>
+              <VoiceButton
+                onResult={(text) => {
+                  setQuery(text);
+                  setTimeout(() => handleSearch(text), 120);
+                }}
+                small
+              />
+            </div>
+          </form>
         </div>
-      )}
+      </header>
 
-      {!loading && result && (
-        <ResearchResultView
+      <main className="flex h-[calc(100%-152px)] gap-6 overflow-hidden px-6 pb-6">
+        <section className="relative flex-1 overflow-hidden rounded-2xl border border-white/5 bg-[#111422] shadow-xl shadow-black/30">
+          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-blue-400/40 to-transparent" />
+          <div className="flex h-full flex-col space-y-4 p-5">
+            <ResearchControls
+              authorityBias={authorityBias}
+              includeCounterpoints={includeCounterpoints}
+              region={region}
+              loading={loading}
+              onAuthorityBiasChange={setAuthorityBias}
+              onIncludeCounterpointsChange={setIncludeCounterpoints}
+              onRegionChange={(value) => setRegion(value)}
+            />
+
+            {error && (
+              <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200 backdrop-blur">
+                {error}
+              </div>
+            )}
+
+            {loading && (
+              <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-gray-400">
+                <div className="inline-flex items-center gap-2 rounded-full border border-blue-400/20 bg-blue-400/10 px-4 py-2 text-blue-200">
+                  <Sparkles size={14} className="animate-pulse" />
+                  Gathering sources and evaluating evidence…
+                </div>
+                <p className="text-xs text-gray-500">
+                  Cross-checking accuracy, bias, and contradictions before presenting the answer.
+                </p>
+              </div>
+            )}
+
+            {!loading && result && (
+              <div className="flex-1 overflow-y-auto pr-1">
+                <ResearchResultView
+                  result={result}
+                  onOpenSource={handleOpenUrl}
+                  activeSourceId={activeSourceId}
+                  onActiveSourceChange={setActiveSourceId}
+                />
+              </div>
+            )}
+
+            {!loading && !result && !error && (
+              <EmptyState onRunExample={handleRunExample} />
+            )}
+          </div>
+        </section>
+
+        <InsightsSidebar
           result={result}
+          loading={loading}
           onOpenSource={handleOpenUrl}
+          activeSourceId={activeSourceId}
+          onSelectSource={setActiveSourceId}
         />
-      )}
+      </main>
     </div>
   );
 }
@@ -161,29 +254,35 @@ function ResearchControls({
   onRegionChange,
 }: ResearchControlsProps) {
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded border border-neutral-800 bg-neutral-900/40 px-3 py-2 text-xs text-gray-300">
-      <div className="flex flex-col gap-1">
-        <span className="font-semibold text-gray-400">Recency vs Authority</span>
-        <div className="flex items-center gap-2">
+    <div className="grid gap-4 rounded-2xl border border-white/10 bg-white/[0.04] px-5 py-4 text-xs text-gray-200 shadow-inner shadow-black/30 sm:grid-cols-[minmax(0,_1fr)_auto_auto]">
+      <div className="space-y-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+          Recency vs authority
+        </span>
+        <div className="flex items-center gap-3">
           <span className="text-[11px] text-gray-500">Recency</span>
-          <input
-            type="range"
-            min={0}
-            max={100}
-            value={authorityBias}
-            disabled={loading}
-            onChange={(e) => onAuthorityBiasChange(Number(e.target.value))}
-          />
+          <div className="relative flex-1">
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={authorityBias}
+              disabled={loading}
+              onChange={(e) => onAuthorityBiasChange(Number(e.target.value))}
+              className="h-1 w-full cursor-pointer accent-blue-500 disabled:opacity-40"
+            />
+          </div>
           <span className="text-[11px] text-gray-500">Authority</span>
-          <span className="text-[11px] text-indigo-300">
+          <span className="rounded border border-blue-500/40 bg-blue-500/10 px-2 py-0.5 text-[11px] text-blue-200">
             {authorityBias}%
           </span>
         </div>
       </div>
 
-      <label className="flex items-center gap-2">
+      <label className="flex items-center gap-2 rounded-lg border border-white/5 bg-white/5 px-3 py-2 text-[11px]">
         <input
           type="checkbox"
+          className="h-3.5 w-3.5 rounded border-white/20 bg-transparent text-blue-500 focus:ring-blue-500 disabled:opacity-40"
           checked={includeCounterpoints}
           disabled={loading}
           onChange={(e) => onIncludeCounterpointsChange(e.target.checked)}
@@ -191,13 +290,13 @@ function ResearchControls({
         Include counterpoints
       </label>
 
-      <label className="flex items-center gap-2">
+      <label className="flex items-center gap-2 rounded-lg border border-white/5 bg-white/5 px-3 py-2 text-[11px]">
         Region
         <select
           value={region}
           disabled={loading}
           onChange={(e) => onRegionChange(e.target.value as RegionOption)}
-          className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-gray-200"
+          className="rounded border border-white/10 bg-[#0c0e18] px-2 py-1 text-[11px] text-gray-200 focus:border-blue-500 focus:outline-none focus:ring-0 disabled:opacity-40"
         >
           {REGION_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
@@ -212,57 +311,122 @@ function ResearchControls({
 
 interface ResearchResultViewProps {
   result: ResearchResult;
+  activeSourceId: string | null;
+  onActiveSourceChange(sourceKey: string): void;
   onOpenSource(url: string): void;
 }
 
-function ResearchResultView({ result, onOpenSource }: ResearchResultViewProps) {
+function ResearchResultView({
+  result,
+  activeSourceId,
+  onActiveSourceChange,
+  onOpenSource,
+}: ResearchResultViewProps) {
   const confidencePercent = Math.round(result.confidence * 100);
   const verification = result.verification;
+  const [taskStatus, setTaskStatus] = useState<Record<string, 'pending' | 'in_progress' | 'done'>>(
+    () => buildInitialTaskStatus(result.taskChains)
+  );
+
+  useEffect(() => {
+    setTaskStatus(buildInitialTaskStatus(result.taskChains));
+  }, [result.taskChains]);
+
+  const getSourceKey = (sourceIndex: number) => {
+    const source = result.sources[sourceIndex];
+    return source?.url ?? `source-${sourceIndex}`;
+  };
+
+  const openSourceByIndex = (sourceIndex: number) => {
+    const source = result.sources[sourceIndex];
+    if (source) {
+      onActiveSourceChange(getSourceKey(sourceIndex));
+      onOpenSource(source.url);
+    }
+  };
+
+  const handleRunAction = (action?: ResearchTaskChain['steps'][number]['action']) => {
+    if (!action) return;
+    if (action.type === 'openEvidence') {
+      if (action.fragmentUrl) {
+        onOpenSource(action.fragmentUrl);
+      } else if (typeof action.sourceIndex === 'number') {
+        openSourceByIndex(action.sourceIndex);
+      }
+    } else if (action.type === 'openSource' && typeof action.sourceIndex === 'number') {
+      openSourceByIndex(action.sourceIndex);
+    }
+  };
+
+  const handleCompleteTask = (chain: ResearchTaskChain, taskId: string) => {
+    setTaskStatus(prev => {
+      const next = { ...prev, [taskId]: 'done' as const };
+      const pending = chain.steps.find(step => (next[step.id] ?? step.status) !== 'done');
+      if (pending && (next[pending.id] ?? pending.status) === 'pending') {
+        next[pending.id] = 'in_progress';
+      }
+      return next;
+    });
+  };
 
   return (
     <div className="space-y-4">
-      <section className="rounded border border-neutral-800 bg-neutral-900/60 p-4">
-        <header className="mb-3 flex flex-wrap items-center justify-between gap-3">
+      <section className="rounded-2xl border border-white/5 bg-white/5 px-6 py-5 shadow-inner shadow-black/30">
+        <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-sm font-semibold text-gray-200">
-              AI Answer
-            </h2>
-            <p className="text-xs text-gray-500">
+            <h2 className="text-base font-semibold text-white">AI answer with citations</h2>
+            <p className="text-xs text-gray-400">
               {result.sources.length} sources considered • Confidence {confidencePercent}%
             </p>
           </div>
           {verification && (
             <span
-              className={`text-xs font-medium px-2 py-1 rounded border ${
+              className={`rounded-full px-3 py-1 text-xs font-medium ${
                 verification.verified
-                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
-                  : 'border-amber-500/40 bg-amber-500/10 text-amber-200'
+                  ? 'border border-emerald-500/50 bg-emerald-500/10 text-emerald-200'
+                  : 'border border-amber-500/50 bg-amber-500/10 text-amber-200'
               }`}
             >
               {verification.verified ? 'Verified' : 'Needs review'}
             </span>
           )}
         </header>
-        <div className="space-y-3 text-sm text-gray-200 leading-relaxed">
-          {result.summary.split(/\n{2,}/).map((paragraph, idx) => (
-            <p key={idx}>{paragraph.trim()}</p>
-          ))}
-        </div>
+        <AnswerWithCitations
+          summary={result.summary}
+          citations={result.citations}
+          inlineEvidence={result.inlineEvidence}
+          sources={result.sources}
+          activeSourceId={activeSourceId}
+          onActivate={onActiveSourceChange}
+          onOpenSource={onOpenSource}
+        />
 
         {result.citations.length > 0 && (
-          <div className="mt-4 border-t border-neutral-800 pt-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">
+          <div className="mt-5 rounded-xl border border-white/5 bg-[#1a1d2a] px-4 py-3">
+            <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
               Citations
             </h3>
             <ul className="space-y-2">
               {result.citations.map((citation) => {
                 const source = result.sources[citation.sourceIndex];
+                const sourceKey = getSourceKey(citation.sourceIndex);
+                const isActive = activeSourceId === sourceKey;
                 if (!source) return null;
                 return (
-                  <li key={citation.index} className="text-xs text-gray-400">
+                  <li
+                    key={citation.index}
+                    className={`rounded-lg border px-3 py-2 text-xs transition-colors ${
+                      isActive
+                        ? 'border-blue-500/40 bg-blue-500/10 text-blue-100'
+                        : 'border-white/5 bg-white/[0.02] text-gray-300 hover:border-blue-400/40 hover:bg-blue-400/5'
+                    }`}
+                  >
                     <button
-                      className="font-medium text-indigo-300 hover:text-indigo-200"
-                      onClick={() => onOpenSource(source.url)}
+                      className="font-semibold text-indigo-300 hover:text-indigo-200"
+                      onClick={() => {
+                        onActiveSourceChange(sourceKey);
+                        onOpenSource(source.url);
+                      }}
                     >
                       [{citation.index}] {source.title}
                     </button>
@@ -278,83 +442,700 @@ function ResearchResultView({ result, onOpenSource }: ResearchResultViewProps) {
       </section>
 
       {verification && (
-        <VerificationSummary verification={verification} sources={result.sources} />
+        <VerificationSummary verification={verification} />
       )}
 
-      {result.contradictions && result.contradictions.length > 0 && (
-        <section className="rounded border border-neutral-800 bg-neutral-900/40 p-4">
-          <h3 className="text-sm font-semibold text-amber-300 mb-2">
-            Potential Counterpoints
-          </h3>
-          <ul className="space-y-2 text-xs text-gray-400">
-            {result.contradictions.map((item, idx) => (
-              <li key={`${item.claim}-${idx}`}>
-                <div className="font-medium text-gray-200">{item.claim}</div>
-                <div className="text-[11px] text-gray-500">
-                  Sources:{' '}
-                  {item.sources
-                    .map((sourceIndex) => result.sources[sourceIndex]?.domain)
-                    .filter(Boolean)
-                    .join(', ')}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      <section className="rounded border border-neutral-800 bg-neutral-900/40">
-        <header className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
-          <h3 className="text-sm font-semibold text-gray-200">
-            Sources ({result.sources.length})
-          </h3>
-          <span className="text-xs text-gray-500">
-            Ranked by relevance & consensus
-          </span>
-        </header>
-        <ul className="divide-y divide-neutral-800">
-          {result.sources.map((source, idx) => (
-            <li key={source.url || idx} className="p-4 space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex flex-col">
-                  <span className="font-medium text-gray-200">{source.title}</span>
-                  <span className="text-xs text-gray-500">{source.domain}</span>
-                </div>
-                <div className="flex items-center gap-2 text-xs">
-                  <span
-                    className={`px-2 py-0.5 rounded-full border ${SOURCE_BADGE_STYLES[source.sourceType]}`}
-                  >
-                    {source.sourceType}
-                  </span>
-                  <span className="text-gray-400">
-                    Relevance {source.relevanceScore.toFixed(0)}
-                  </span>
-                </div>
-              </div>
-              <p className="text-sm text-gray-400 leading-relaxed">
-                {source.snippet || source.text.slice(0, 200)}
-                {source.text.length > 200 ? '…' : ''}
-              </p>
-              <button
-                className="text-xs text-indigo-400 hover:text-indigo-300"
-                onClick={() => onOpenSource(source.url)}
-              >
-                Open source ↗
-              </button>
-            </li>
-          ))}
-        </ul>
-      </section>
+      <SourcesList
+        sources={result.sources}
+        activeSourceId={activeSourceId}
+        onActivate={onActiveSourceChange}
+        onOpenSource={onOpenSource}
+      />
     </div>
   );
 }
 
+function buildInitialTaskStatus(chains?: ResearchTaskChain[]): Record<string, 'pending' | 'in_progress' | 'done'> {
+  const status: Record<string, 'pending' | 'in_progress' | 'done'> = {};
+  if (!chains) return status;
+  chains.forEach(chain => {
+    let firstActiveSet = false;
+    chain.steps.forEach((step, idx) => {
+      if (!firstActiveSet && step.status !== 'done') {
+        status[step.id] = step.status === 'pending' ? 'in_progress' : step.status;
+        firstActiveSet = true;
+      } else {
+        status[step.id] = step.status;
+      }
+    });
+  });
+  return status;
+}
+
+function EvidenceBoard({
+  evidence,
+  sources,
+  activeSourceId,
+  onSelectSource,
+  onOpen,
+}: {
+  evidence: ResearchEvidence[];
+  sources: ResearchSource[];
+  activeSourceId: string | null;
+  onSelectSource(sourceKey: string): void;
+  onOpen(url: string): void;
+}) {
+  if (!evidence || evidence.length === 0) return null;
+  return (
+    <section className="rounded border border-indigo-700/40 bg-indigo-950/30 p-4">
+      <header className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-indigo-200">
+          <ExternalLink size={16} />
+          <h3 className="text-sm font-semibold">Live-page evidence</h3>
+        </div>
+        <span className="text-[11px] text-indigo-200/70">
+          Anchored via text fragments – highlighted when opened.
+        </span>
+      </header>
+      <div className="grid gap-3 md:grid-cols-2">
+        {evidence.map((item) => {
+          const source = sources[item.sourceIndex];
+          const importanceStyle = evidenceImportanceStyle[item.importance];
+          const sourceKey = source?.url ?? `source-${item.sourceIndex}`;
+          const isActive = activeSourceId === sourceKey;
+          return (
+            <div
+              key={item.id}
+              className={`rounded border ${importanceStyle.border} ${
+                isActive ? 'bg-indigo-900/60 ring-1 ring-indigo-400/40' : 'bg-neutral-950/60'
+              } p-3 space-y-2 transition-colors`}
+            >
+              <div className="flex items-center justify-between text-xs">
+                <span className={`font-semibold ${importanceStyle.text}`}>
+                  {importanceLabel[item.importance]}
+                </span>
+                <span className="text-[11px] text-gray-500">
+                  {source?.domain}
+                </span>
+              </div>
+              <p className="text-sm leading-relaxed text-gray-200">{item.quote}</p>
+              <div className="flex items-center gap-2 text-xs">
+                <button
+                  className="flex items-center gap-1 rounded border border-indigo-500/50 bg-indigo-500/10 px-2 py-1 text-indigo-200 hover:bg-indigo-500/20"
+                  onClick={() => {
+                    if (source) {
+                      onSelectSource(sourceKey);
+                    }
+                    onOpen(item.fragmentUrl || source?.url || '');
+                  }}
+                >
+                  <ExternalLink size={12} />
+                  View on page
+                </button>
+                <button
+                  className="flex items-center gap-1 rounded border border-neutral-700 px-2 py-1 text-gray-400 hover:text-gray-200"
+                  onClick={async () => {
+                    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                      await navigator.clipboard.writeText(`"${item.quote}" — ${item.context}`);
+                    }
+                  }}
+                >
+                  <Clipboard size={12} />
+                  Copy quote
+                </button>
+              </div>
+              <div className="text-[11px] text-gray-500">{item.context}</div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+const evidenceImportanceStyle = {
+  high: { border: 'border-emerald-500/40', text: 'text-emerald-200' },
+  medium: { border: 'border-blue-500/40', text: 'text-blue-200' },
+  low: { border: 'border-slate-500/40', text: 'text-slate-300' },
+} as const;
+
+const importanceLabel = {
+  high: 'Critical evidence',
+  medium: 'Supporting evidence',
+  low: 'Context',
+} as const;
+
+function ContradictionRadar({
+  contradictions,
+  sources,
+  activeSourceId,
+  onSelectSource,
+  onOpen,
+}: {
+  contradictions: NonNullable<ResearchResult['contradictions']>;
+  sources: ResearchSource[];
+  activeSourceId: string | null;
+  onSelectSource(sourceKey: string): void;
+  onOpen(url: string): void;
+}) {
+  if (!contradictions || contradictions.length === 0) return null;
+  return (
+    <section className="rounded border border-amber-700/40 bg-amber-950/20 p-4 space-y-3">
+      <header className="flex items-center gap-2 text-amber-200">
+        <ShieldAlert size={16} />
+        <h3 className="text-sm font-semibold">Contradictions radar</h3>
+      </header>
+      <div className="grid gap-3 md:grid-cols-2">
+        {contradictions.map((item, idx) => {
+          const severity = Math.min(100, (item.severityScore ?? 6) * 10);
+          const domains = item.sources
+            .map((sIdx) => sources[sIdx]?.domain)
+            .filter(Boolean)
+            .join(' • ');
+          return (
+            <div key={`${item.claim}-${idx}`} className="rounded border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-amber-200">
+                  {item.claim || 'Conflicting claim'}
+                </span>
+                <span className="text-[11px] text-amber-300">
+                  {item.disagreement === 'major' ? 'Major disagreement' : 'Minor tension'}
+                </span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded bg-amber-900/60">
+                <div
+                  className="h-full bg-amber-400 transition-all"
+                  style={{ width: `${severity}%` }}
+                />
+              </div>
+              <p className="text-[11px] text-amber-100/90">{item.summary || 'Investigate differing positions.'}</p>
+              <div className="text-[11px] text-amber-200/80">Sources: {domains || 'Unknown'}</div>
+              <div className="flex flex-wrap gap-2 text-[11px]">
+                {item.sources.map((sourceIndex, index) => {
+                  const source = sources[sourceIndex];
+                  if (!source) return null;
+                  const sourceKey = source.url ?? `source-${sourceIndex}`;
+                  const isActive = activeSourceId === sourceKey;
+                  return (
+                    <button
+                      key={`${item.claim}-src-${index}`}
+                      className={`rounded border px-2 py-1 text-amber-200 transition-colors ${
+                        isActive
+                          ? 'border-amber-300 bg-amber-400/10'
+                          : 'border-amber-500/40 hover:bg-amber-500/10'
+                      }`}
+                      onClick={() => {
+                        onSelectSource(sourceKey);
+                        onOpen(source.url);
+                      }}
+                    >
+                      Open {source.domain}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function BiasProfileView({ profile }: { profile: BiasProfile }) {
+  return (
+    <section className="rounded border border-sky-700/40 bg-sky-950/30 p-4 space-y-3">
+      <header className="flex items-center gap-2 text-sky-200">
+        <Target size={16} />
+        <h3 className="text-sm font-semibold">Bias controls snapshot</h3>
+      </header>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-2">
+          <span className="text-xs uppercase tracking-wide text-sky-300/80">Authority weighting</span>
+          <div className="relative h-2 rounded bg-neutral-900 overflow-hidden">
+            <div
+              className="absolute inset-y-0 left-0 bg-sky-400"
+              style={{ width: `${profile.authorityBias}%` }}
+            />
+          </div>
+          <div className="flex justify-between text-[11px] text-sky-100/80">
+            <span>Recency {100 - profile.authorityBias}%</span>
+            <span>Authority {profile.authorityBias}%</span>
+          </div>
+        </div>
+        <div className="space-y-2">
+          <span className="text-xs uppercase tracking-wide text-sky-300/80">Recency weighting</span>
+          <div className="relative h-2 rounded bg-neutral-900 overflow-hidden">
+            <div
+              className="absolute inset-y-0 left-0 bg-indigo-400"
+              style={{ width: `${profile.recencyBias}%` }}
+            />
+          </div>
+          <div className="flex justify-between text-[11px] text-sky-100/80">
+            <span>Low →</span>
+            <span>High recency</span>
+          </div>
+        </div>
+      </div>
+      <div>
+        <span className="text-xs uppercase tracking-wide text-sky-300/80">Source mix</span>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          {profile.domainMix.map((entry) => (
+            <div key={entry.type} className="space-y-1 rounded border border-sky-800/60 bg-neutral-950/60 p-2">
+              <div className="flex items-center justify-between text-xs text-sky-100">
+                <span className="capitalize">{entry.type}</span>
+                <span>{entry.percentage}%</span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded bg-neutral-900">
+                <div
+                  className="h-full bg-sky-500"
+                  style={{ width: `${entry.percentage}%` }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function TaskChainsView({
+  chains,
+  taskStatus,
+  onRunAction,
+  onComplete,
+}: {
+  chains: ResearchTaskChain[];
+  taskStatus: Record<string, 'pending' | 'in_progress' | 'done'>;
+  onRunAction(action?: ResearchTaskChain['steps'][number]['action']): void;
+  onComplete(chain: ResearchTaskChain, taskId: string): void;
+}) {
+  if (!chains || chains.length === 0) return null;
+  return (
+    <section className="rounded border border-purple-700/40 bg-purple-950/20 p-4 space-y-4">
+      <header className="flex items-center gap-2 text-purple-200">
+        <CheckCircle2 size={16} />
+        <h3 className="text-sm font-semibold">Task chains</h3>
+      </header>
+      <div className="grid gap-4 md:grid-cols-2">
+        {chains.map((chain) => {
+          let encounteredFirstOpen = false;
+          return (
+            <div key={chain.id} className="space-y-3 rounded border border-purple-700/40 bg-neutral-950/60 p-3">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-purple-200">
+                {chain.label}
+              </h4>
+              <ol className="space-y-2">
+                {chain.steps.map((step, idx) => {
+                  const status = taskStatus[step.id] ?? step.status;
+                  const isDone = status === 'done';
+                  const isActive = !isDone && !encounteredFirstOpen;
+                  if (!isDone) encounteredFirstOpen = true;
+                  return (
+                    <li
+                      key={step.id}
+                      className={`rounded border px-3 py-2 text-xs transition-colors ${
+                        isDone
+                          ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-100'
+                          : isActive
+                          ? 'border-purple-500/40 bg-purple-500/10 text-purple-100'
+                          : 'border-neutral-800 bg-neutral-900 text-gray-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-semibold">{idx + 1}. {step.title}</div>
+                        {isDone ? (
+                          <CheckCircle2 size={14} className="text-emerald-300" />
+                        ) : isActive ? (
+                          <ArrowUpRight size={14} className="text-purple-200" />
+                        ) : null}
+                      </div>
+                      <p className="mt-1 text-[11px] text-gray-200/80">{step.description}</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {step.action && (
+                          <button
+                            className="flex items-center gap-1 rounded border border-purple-500/40 px-2 py-1 text-purple-200 hover:bg-purple-500/20"
+                            onClick={() => onRunAction(step.action)}
+                          >
+                            <ExternalLink size={12} />
+                            Open
+                          </button>
+                        )}
+                        {!isDone && (
+                          <button
+                            className="rounded border border-emerald-500/40 px-2 py-1 text-emerald-200 hover:bg-emerald-500/20"
+                            onClick={() => onComplete(chain, step.id)}
+                          >
+                            Mark done
+                          </button>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+
+function InsightsSidebar({
+  result,
+  loading,
+  onOpenSource,
+  activeSourceId,
+  onSelectSource,
+}: {
+  result: ResearchResult | null;
+  loading: boolean;
+  onOpenSource(url: string): void;
+  activeSourceId: string | null;
+  onSelectSource(sourceKey: string): void;
+}) {
+  if (loading) {
+    return (
+      <aside className="w-[310px] shrink-0 space-y-4 overflow-y-auto rounded-2xl border border-white/5 bg-[#0f1220] p-4 shadow-inner shadow-black/50">
+        <div className="h-20 animate-pulse rounded-xl bg-white/5" />
+        <div className="h-32 animate-pulse rounded-xl bg-white/5" />
+        <div className="h-32 animate-pulse rounded-xl bg-white/5" />
+      </aside>
+    );
+  }
+
+  if (!result) {
+    return (
+      <aside className="w-[310px] shrink-0 overflow-y-auto rounded-2xl border border-white/5 bg-[#0f1220] p-5 shadow-inner shadow-black/50">
+        <div className="space-y-4 text-sm text-gray-400">
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-gray-300">
+            <p className="flex items-center gap-2 text-gray-200">
+              <Sparkles size={14} className="text-blue-300" />
+              Try questions that need multiple independent sources.
+            </p>
+          </div>
+          <EmptyState onRunExample={onSelectSource as unknown as (example: string) => void} minimal />
+        </div>
+      </aside>
+    );
+  }
+
+  const topEvidence = (result.evidence ?? []).slice(0, 3);
+  const contradictions = (result.contradictions ?? []).slice(0, 2);
+  const activeEvidenceKey = activeSourceId;
+
+  return (
+    <aside className="w-[310px] shrink-0 space-y-4 overflow-y-auto rounded-2xl border border-white/5 bg-[#0f1220] p-5 shadow-inner shadow-black/50">
+      <div className="space-y-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3">
+        <div className="flex items-center justify-between text-xs text-gray-400">
+          <span>Confidence</span>
+          <span className="text-sm font-semibold text-blue-200">
+            {(result.confidence * 100).toFixed(0)}%
+          </span>
+        </div>
+        <div className="h-1.5 w-full overflow-hidden rounded bg-white/10">
+          <div
+            className="h-full rounded bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500"
+            style={{ width: `${Math.min(100, Math.max(0, result.confidence * 100))}%` }}
+          />
+        </div>
+        <p className="text-[11px] text-gray-500">
+          {result.sources.length} vetted sources • {result.citations.length} inline citations
+        </p>
+        <button
+          className="inline-flex items-center gap-2 rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-[11px] text-gray-300 hover:border-blue-400/40 hover:text-blue-200"
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+        >
+          <RefreshCcw size={12} />
+          Adjust research settings
+        </button>
+      </div>
+
+      {topEvidence.length > 0 && (
+        <div className="space-y-3 rounded-xl border border-blue-500/20 bg-blue-500/[0.07] px-4 py-3">
+          <div className="flex items-center justify-between gap-2 text-xs text-blue-100">
+            <span className="font-semibold uppercase tracking-wide">Key evidence</span>
+            <span>{topEvidence.length} of {(result.evidence ?? []).length}</span>
+          </div>
+          <div className="space-y-2 text-xs text-blue-100/90">
+            {topEvidence.map((item) => {
+              const source = result.sources[item.sourceIndex];
+              if (!source) return null;
+              const sourceKey = source.url ?? `source-${item.sourceIndex}`;
+              const isActive = activeEvidenceKey === sourceKey;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    onSelectSource(sourceKey);
+                    onOpenSource(item.fragmentUrl || source.url);
+                  }}
+                  className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
+                    isActive ? 'border-blue-300 bg-blue-400/20' : 'border-blue-400/30 hover:bg-blue-400/15'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-wide text-blue-200/80">
+                    <span>{importanceLabel[item.importance]}</span>
+                    <span>{source.domain}</span>
+                  </div>
+                  <p className="mt-1 text-[11px] text-blue-50/90 line-clamp-3">{item.quote}</p>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {contradictions.length > 0 && (
+        <div className="space-y-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.07] px-4 py-3">
+          <div className="flex items-center justify-between text-xs text-amber-100">
+            <span className="font-semibold uppercase tracking-wide">Contradictions</span>
+            <span>{contradictions.length}</span>
+          </div>
+          <ul className="space-y-2 text-[11px] text-amber-50/90">
+            {contradictions.map((item, index) => {
+              const severity = item.disagreement === 'major' ? 'Major' : 'Minor';
+              return (
+                <li key={`${item.claim}-${index}`} className="rounded-lg border border-amber-400/30 bg-amber-500/10 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-amber-100">{item.claim}</span>
+                    <span className="text-amber-200">{severity}</span>
+                  </div>
+                  <p className="mt-1 text-amber-100/70">{item.summary || 'Investigate differing positions.'}</p>
+                  <button
+                    onClick={() => {
+                      const firstSource = item.sources[0];
+                      if (typeof firstSource === 'number') {
+                        const source = result.sources[firstSource];
+                        if (source) {
+                          onSelectSource(source.url ?? `source-${firstSource}`);
+                          onOpenSource(source.url);
+                        }
+                      }
+                    }}
+                    className="mt-2 inline-flex items-center gap-1 text-[11px] text-amber-200 hover:text-amber-100"
+                  >
+                    View sources
+                    <ChevronRight size={12} />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      {result.biasProfile && (
+        <div className="space-y-2 rounded-xl border border-sky-500/20 bg-sky-500/[0.06] px-4 py-3 text-xs text-sky-100">
+          <div className="flex items-center justify-between">
+            <span className="font-semibold uppercase tracking-wide">Bias snapshot</span>
+            <span>{result.biasProfile.authorityBias}% authority</span>
+          </div>
+          <div className="h-1.5 w-full overflow-hidden rounded bg-sky-500/20">
+            <div
+              className="h-full bg-gradient-to-r from-sky-500 via-blue-500 to-purple-500"
+              style={{ width: `${result.biasProfile.authorityBias}%` }}
+            />
+          </div>
+          <div className="space-y-1 pt-2">
+            {result.biasProfile.domainMix.slice(0, 3).map((entry) => (
+              <div key={entry.type} className="flex items-center justify-between text-[11px]">
+                <span>{capitalize(entry.type)}</span>
+                <span>{entry.percentage}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {result.taskChains && result.taskChains.length > 0 && (
+        <div className="space-y-2 rounded-xl border border-purple-500/20 bg-purple-500/[0.07] px-4 py-3">
+          <div className="flex items-center justify-between text-xs text-purple-100">
+            <span className="font-semibold uppercase tracking-wide">Next checks</span>
+            <span>{result.taskChains.length}</span>
+          </div>
+          <ol className="space-y-2 text-[11px] text-purple-50/80">
+            {result.taskChains.flatMap((chain) => chain.steps)
+              .filter((step) => step.status !== 'done')
+              .slice(0, 3)
+              .map((step) => (
+                <li key={step.id} className="rounded-lg border border-purple-400/30 bg-purple-400/10 px-3 py-2">
+                  <span className="font-semibold text-purple-100">{step.title}</span>
+                  <p className="text-purple-100/70">{step.description}</p>
+                </li>
+              ))}
+          </ol>
+        </div>
+      )}
+    </aside>
+  );
+}
+
+function ActiveContainerBadge({
+  containers,
+  activeContainerId,
+}: {
+  containers: ContainerInfo[];
+  activeContainerId: string;
+}) {
+  const activeContainer =
+    containers.find((container) => container.id === activeContainerId) ??
+    containers.find((container) => container.id === 'default');
+
+  if (!activeContainer) {
+    return null;
+  }
+
+  return (
+    <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-200 shadow-inner shadow-black/20">
+      <span
+        className="h-2.5 w-2.5 rounded-full"
+        style={{ backgroundColor: activeContainer.color ?? '#6366f1' }}
+      />
+      <span className="font-medium">{activeContainer.name}</span>
+      <span className="text-[10px] uppercase tracking-wide text-gray-400">
+        {capitalize(activeContainer.scope ?? 'session')}
+      </span>
+    </div>
+  );
+}
+
+function EmptyState({
+  onRunExample,
+  minimal = false,
+}: {
+  onRunExample: (example: string) => void;
+  minimal?: boolean;
+}) {
+  const examples = [
+    'Compare claims about Mediterranean diet heart benefits.',
+    'Does remote work hurt productivity? Provide counterpoints.',
+    'Summarize AI safety regulations as of 2025 with sources.',
+  ];
+
+  if (minimal) {
+    return (
+      <ul className="space-y-2 text-xs text-gray-400">
+        {examples.slice(0, 2).map((example) => (
+          <li key={example}>
+            <button
+              className="text-left text-gray-300 hover:text-blue-200"
+              onClick={() => onRunExample(example)}
+            >
+              {example}
+            </button>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-2xl border border-white/10 bg-white/[0.03] px-10 py-14 text-center text-sm text-gray-400">
+      <div className="flex h-12 w-12 items-center justify-center rounded-full border border-white/10 bg-white/5 text-blue-300">
+        <Info size={20} />
+      </div>
+      <div>
+        <p className="font-medium text-gray-200">Ready when you are.</p>
+        <p className="text-sm text-gray-400">
+          Ask for a briefing, compare opposing claims, or verify a statement with live evidence.
+        </p>
+      </div>
+      <div className="space-y-2 text-sm">
+        {examples.map((example) => (
+          <button
+            key={example}
+            onClick={() => onRunExample(example)}
+            className="block w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-gray-200 hover:border-blue-400/40 hover:bg-blue-400/10"
+          >
+            {example}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SourcesList({
+  sources,
+  activeSourceId,
+  onActivate,
+  onOpenSource,
+}: {
+  sources: ResearchSource[];
+  activeSourceId: string | null;
+  onActivate(sourceKey: string): void;
+  onOpenSource(url: string): void;
+}) {
+  if (!sources || sources.length === 0) return null;
+  return (
+    <section className="rounded-2xl border border-white/10 bg-white/[0.03]">
+      <header className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+        <h3 className="text-sm font-semibold text-white">
+          Sources ({sources.length})
+        </h3>
+        <span className="text-xs text-gray-500">
+          Ranked by relevance & consensus
+        </span>
+      </header>
+      <ul className="divide-y divide-white/5">
+        {sources.map((source, idx) => {
+          const sourceKey = source.url ?? `source-${idx}`;
+          const isActive = activeSourceId === sourceKey;
+          return (
+            <li
+              key={source.url || idx}
+              className={`p-4 space-y-2 transition-colors ${
+                isActive ? 'bg-blue-500/10' : 'hover:bg-white/5'
+              }`}
+            >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-col">
+                <span className="font-medium text-gray-200">{source.title}</span>
+                <span className="text-xs text-gray-500">{source.domain}</span>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <span
+                  className={`px-2 py-0.5 rounded-full border ${SOURCE_BADGE_STYLES[source.sourceType]}`}
+                >
+                  {source.sourceType}
+                </span>
+                <span className="text-gray-400">
+                  Relevance {source.relevanceScore.toFixed(0)}
+                </span>
+              </div>
+            </div>
+            <p className="text-sm text-gray-400 leading-relaxed">
+              {source.snippet || source.text.slice(0, 200)}
+              {source.text.length > 200 ? '…' : ''}
+            </p>
+            <button
+              className="text-xs font-medium text-indigo-300 hover:text-indigo-200"
+              onClick={() => {
+                onActivate(sourceKey);
+                onOpenSource(source.url);
+              }}
+            >
+              Open source ↗
+            </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+
 interface VerificationSummaryProps {
   verification: VerificationResult;
-  sources: ResearchSource[];
 }
 
 function VerificationSummary({ verification }: VerificationSummaryProps) {
+  if (!verification) return null;
   return (
     <section className="rounded border border-neutral-800 bg-neutral-900/40 p-4 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">

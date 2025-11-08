@@ -4,6 +4,7 @@
  */
 
 import { fetch } from 'undici';
+import { getCurrentSettings } from '../storage';
 
 export interface OllamaConfig {
   baseUrl?: string;
@@ -227,10 +228,31 @@ export class OllamaAdapter {
 
 // Singleton instance
 let ollamaInstance: OllamaAdapter | null = null;
+let adapterConfigKey: string | null = null;
 
 export function getOllamaAdapter(config?: OllamaConfig): OllamaAdapter {
-  if (!ollamaInstance) {
-    ollamaInstance = new OllamaAdapter(config);
+  const settings = getCurrentSettings();
+  const baseUrl =
+    config?.baseUrl ||
+    process.env.OLLAMA_BASE_URL ||
+    process.env.OMNIBROWSER_OLLAMA_URL ||
+    'http://localhost:11434';
+  const model = config?.model || settings.ai?.model || 'llama3.2';
+  const temperature =
+    config?.temperature ?? settings.ai?.temperature ?? 0.7;
+  const maxTokens =
+    config?.maxTokens ?? settings.ai?.maxTokens ?? 4096;
+
+  const key = JSON.stringify({ baseUrl, model, temperature, maxTokens });
+
+  if (!ollamaInstance || adapterConfigKey !== key) {
+    ollamaInstance = new OllamaAdapter({
+      baseUrl,
+      model,
+      temperature,
+      maxTokens,
+    });
+    adapterConfigKey = key;
   }
   return ollamaInstance;
 }

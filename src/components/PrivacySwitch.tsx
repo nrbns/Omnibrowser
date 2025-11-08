@@ -6,20 +6,30 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Lock, Eye, Network } from 'lucide-react';
 import { ipc } from '../lib/ipc-typed';
+import { useProfileStore } from '../state/profileStore';
 
 type PrivacyMode = 'Normal' | 'Private' | 'Ghost';
 
 export function PrivacySwitch() {
   const [mode, setMode] = useState<PrivacyMode>('Normal');
+  const policy = useProfileStore((state) => state.policies[state.activeProfileId]);
 
-  const modes: { value: PrivacyMode; icon: typeof Lock; label: string; color: string }[] = [
+  const privateDisabled = policy ? !policy.allowPrivateWindows : false;
+  const ghostDisabled = policy ? !policy.allowGhostTabs : false;
+
+  const modes: Array<{ value: PrivacyMode; icon: typeof Lock; label: string; color: string; disabled?: boolean }> = [
     { value: 'Normal', icon: Lock, label: 'Normal', color: 'text-gray-400' },
-    { value: 'Private', icon: Eye, label: 'Private', color: 'text-blue-400' },
-    { value: 'Ghost', icon: Network, label: 'Ghost', color: 'text-purple-400' },
+    { value: 'Private', icon: Eye, label: 'Private', color: 'text-blue-400', disabled: privateDisabled },
+    { value: 'Ghost', icon: Network, label: 'Ghost', color: 'text-purple-400', disabled: ghostDisabled },
   ];
 
   const handleModeChange = async (newMode: PrivacyMode) => {
     if (newMode === mode) return;
+
+    const target = modes.find((m) => m.value === newMode);
+    if (target?.disabled) {
+      return;
+    }
 
     if (newMode === 'Private') {
       try {
@@ -58,8 +68,16 @@ export function PrivacySwitch() {
             className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${
               isActive
                 ? `${m.color.replace('text-', 'bg-')} bg-opacity-20 text-white`
+                : m.disabled
+                ? 'text-gray-600 cursor-not-allowed'
                 : 'text-gray-400 hover:text-gray-300'
             }`}
+            disabled={m.disabled}
+            title={
+              m.disabled
+                ? `${m.label} disabled by profile policy`
+                : `Switch to ${m.label}`
+            }
           >
             <Icon size={14} />
             <span>{m.label}</span>

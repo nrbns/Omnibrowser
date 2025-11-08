@@ -4,20 +4,40 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Ghost, Flame, Clock, Copy, X } from 'lucide-react';
+import { Ghost, Flame, Clock, Copy, X, Boxes } from 'lucide-react';
 import { ipc } from '../../lib/ipc-typed';
+import { useProfileStore } from '../../state/profileStore';
+import { useContainerStore } from '../../state/containerStore';
+import { ContainerInfo } from '../../lib/ipc-events';
 
 interface TabContextMenuProps {
   tabId: string;
   url: string;
   containerId?: string;
+  containerName?: string;
+  containerColor?: string;
   mode?: 'normal' | 'ghost' | 'private';
   onClose: () => void;
 }
 
-export function TabContextMenu({ tabId, url, containerId, mode, onClose }: TabContextMenuProps) {
+export function TabContextMenu({
+  tabId,
+  url,
+  containerId,
+  containerName,
+  containerColor,
+  mode,
+  onClose,
+}: TabContextMenuProps) {
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
+  const policy = useProfileStore((state) => state.policies[state.activeProfileId]);
+  const ghostDisabled = policy ? !policy.allowGhostTabs : false;
+  const privateDisabled = policy ? !policy.allowPrivateWindows : false;
+  const { containers, setContainers } = useContainerStore((state) => ({
+    containers: state.containers,
+    setContainers: state.setContainers,
+  }));
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -35,7 +55,23 @@ export function TabContextMenu({ tabId, url, containerId, mode, onClose }: TabCo
     setPosition({ x: storedPos.x, y: storedPos.y });
   }, []);
 
+  useEffect(() => {
+    if (containers.length === 0) {
+      ipc.containers
+        .list()
+        .then((list) => {
+          if (Array.isArray(list)) {
+            setContainers(list as ContainerInfo[]);
+          }
+        })
+        .catch((error) => {
+          console.error('Failed to load containers for context menu:', error);
+        });
+    }
+  }, [containers.length, setContainers]);
+
   const handleOpenAsGhost = async () => {
+    if (ghostDisabled) return;
     try {
       await ipc.private.createGhostTab({ url });
       onClose();
@@ -56,6 +92,7 @@ export function TabContextMenu({ tabId, url, containerId, mode, onClose }: TabCo
   };
 
   const handleStartTimer = async () => {
+    if (privateDisabled) return;
     const minutes = prompt('Auto-close after (minutes):', '10');
     if (minutes) {
       try {
@@ -77,15 +114,49 @@ export function TabContextMenu({ tabId, url, containerId, mode, onClose }: TabCo
     }
   };
 
+  const handleMoveToContainer = async (targetId: string) => {
+    if (!targetId || targetId === containerId) {
+      onClose();
+      return;
+    }
+    try {
+      const result = await ipc.tabs.setContainer(tabId, targetId);
+      if (!result?.success) {
+        console.warn('Failed to switch container:', result?.error);
+      }
+    } catch (error) {
+      console.error('Failed to switch tab container:', error);
+    } finally {
+      onClose();
+    }
+  };
+
   const isGhost = mode === 'ghost';
   const isPrivate = mode === 'private';
 
   const menuItems = [
     { icon: Copy, label: 'Duplicate Tab', action: handleDuplicate, disabled: isGhost || isPrivate },
-    { icon: Ghost, label: 'Open as Ghost', action: handleOpenAsGhost, hide: isGhost },
+    {
+      icon: Ghost,
+      label: 'Open as Ghost',
+      action: handleOpenAsGhost,
+      hide: isGhost,
+      disabled: ghostDisabled,
+      disabledReason: 'Disabled by profile policy',
+    },
     { icon: Flame, label: 'Burn Tab', action: handleBurnTab, danger: true },
-    { icon: Clock, label: 'Start 10-min Timer', action: handleStartTimer },
+    {
+      icon: Clock,
+      label: 'Start 10-min Timer',
+      action: handleStartTimer,
+      disabled: privateDisabled,
+      disabledReason: 'Disabled by profile policy',
+    },
   ].filter(item => !item.hide);
+
+  const moveTargets = !isGhost && !isPrivate
+    ? containers.filter((c: ContainerInfo) => c.id !== containerId)
+    : [];
 
   return (
     <AnimatePresence>
@@ -101,23 +172,67 @@ export function TabContextMenu({ tabId, url, containerId, mode, onClose }: TabCo
           top: `${position.y}px`,
         }}
       >
+        {(containerId || containerName) && (
+          <div className="px-3 py-2 text-xs text-gray-400 border-b border-gray-800/50 flex items-center gap-2">
+            <div
+              className="w-2.5 h-2.5 rounded-full border border-gray-700/60"
+              style={{ backgroundColor: containerColor || '#6366f1' }}
+            />
+            <span>{containerName || (containerId === 'default' ? 'Default container' : containerId)}</span>
+          </div>
+        )}
+
         {menuItems.map((item, idx) => {
           const Icon = item.icon;
           return (
             <motion.button
               key={idx}
-              whileHover={item.disabled ? undefined : { backgroundColor: item.danger ? 'rgba(239, 68, 68, 0.2)' : 'rgba(59, 130, 246, 0.2)' }}
+              whileHover={item.disabled ? undefined : { scale: 1.01 }}
               onClick={item.action}
-              className={`w-full flex items-center gap-2 px-3 py-2 text-sm ${
-                item.danger ? 'text-red-400 hover:text-red-300' : item.disabled ? 'text-gray-500 cursor-not-allowed' : 'text-gray-300 hover:text-gray-100'
-              } transition-colors`}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors ${
+                item.danger
+                  ? 'text-red-400 hover:text-red-300'
+                  : item.disabled
+                  ? 'text-gray-500 cursor-not-allowed'
+                  : 'text-gray-300 hover:text-gray-100'
+              }`}
               disabled={item.disabled}
+              title={
+                item.disabled
+                  ? item.disabledReason || 'Disabled by profile policy'
+                  : undefined
+              }
             >
               <Icon size={16} />
               <span>{item.label}</span>
             </motion.button>
           );
         })}
+
+        {moveTargets.length > 0 && (
+          <div className="mt-1 border-t border-gray-800/60 pt-1.5">
+            <div className="px-3 py-1 text-[11px] uppercase tracking-wide text-gray-500 flex items-center gap-2">
+              <Boxes size={12} />
+              Move to container
+            </div>
+            <div className="flex flex-col">
+              {moveTargets.map((container) => (
+                <motion.button
+                  key={container.id}
+                  whileHover={{ scale: 1.01 }}
+                  onClick={() => handleMoveToContainer(container.id)}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-300 hover:text-gray-100 hover:bg-gray-800/40 transition-colors"
+                >
+                  <span
+                    className="w-2.5 h-2.5 rounded-full border border-gray-700/60"
+                    style={{ backgroundColor: container.color || '#6366f1' }}
+                  />
+                  <span className="truncate">{container.name}</span>
+                </motion.button>
+              ))}
+            </div>
+          </div>
+        )}
       </motion.div>
     </AnimatePresence>
   );

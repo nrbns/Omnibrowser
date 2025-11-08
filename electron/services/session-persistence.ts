@@ -7,27 +7,111 @@
 import { app, BrowserWindow } from 'electron';
 import { promises as fs, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { z } from 'zod';
+import { registerHandler } from '../shared/ipc/router';
 import { getSessionManager, BrowserSession } from './sessions';
-import { getTabs } from './tabs';
+import { getTabs, getActiveTabIdForWindow, closeAllTabs, createTabOnWindow, activateTabByWindowId } from './tabs';
+
+export interface SessionTabState {
+  id: string;
+  url: string;
+  title: string;
+  sessionId?: string;
+  partition: string;
+  containerId?: string;
+  createdAt: number;
+  lastActiveAt: number;
+  profileId?: string;
+}
 
 export interface WindowState {
   id: number;
   bounds: { x: number; y: number; width: number; height: number; isMaximized: boolean };
-  tabs: Array<{
-    id: string;
-    url: string;
-    title: string;
-    sessionId?: string;
-    partition: string;
-  }>;
+  tabs: SessionTabState[];
   activeTabId: string | null;
   activeSessionId: string | null;
+  createdAt: number;
+  lastFocusedAt: number | null;
 }
 
-export interface SessionSnapshot {
-  timestamp: number;
+export interface SessionState {
+  version: 1;
+  updatedAt: number;
   windows: WindowState[];
   sessions: BrowserSession[];
+}
+
+export interface SessionSummary {
+  updatedAt: number;
+  windowCount: number;
+  tabCount: number;
+}
+
+type LegacyTabState = {
+  id: string;
+  url: string;
+  title: string;
+  sessionId?: string;
+  partition: string;
+  containerId?: string;
+};
+
+type LegacyWindowState = {
+  id: number;
+  bounds: { x: number; y: number; width: number; height: number; isMaximized: boolean };
+  tabs: LegacyTabState[];
+  activeTabId: string | null;
+  activeSessionId: string | null;
+};
+
+type LegacySessionSnapshot = {
+  timestamp: number;
+  windows: LegacyWindowState[];
+  sessions: BrowserSession[];
+};
+
+function migrateLegacySnapshot(snapshot: LegacySessionSnapshot | SessionState): SessionState {
+  if ((snapshot as SessionState).version === 1) {
+    return snapshot as SessionState;
+  }
+
+  const legacy = snapshot as LegacySessionSnapshot;
+  const migratedUpdatedAt = legacy.timestamp ?? Date.now();
+
+  const windows: WindowState[] = (legacy.windows || []).map((win) => {
+    const createdAt = (win as any).createdAt ?? migratedUpdatedAt;
+    const lastFocusedAt = (win as any).lastFocusedAt ?? createdAt;
+    return {
+      id: win.id,
+      bounds: win.bounds,
+      tabs: (win.tabs || []).map((tab) => {
+        const tabCreated = (tab as any).createdAt ?? migratedUpdatedAt;
+        const tabLastActive = (tab as any).lastActiveAt ?? tabCreated;
+        return {
+          id: tab.id,
+          url: tab.url,
+          title: tab.title,
+          sessionId: tab.sessionId,
+          partition: tab.partition,
+          containerId: tab.containerId,
+          createdAt: tabCreated,
+          lastActiveAt: tabLastActive,
+          profileId: (tab as any).profileId,
+        };
+      }),
+      activeTabId: win.activeTabId ?? null,
+      activeSessionId: win.activeSessionId ?? null,
+      createdAt,
+      lastFocusedAt,
+    };
+  });
+
+  return {
+    version: 1,
+    updatedAt: migratedUpdatedAt,
+    windows,
+    sessions: legacy.sessions || [],
+  };
 }
 
 // Get userData directory path - only if app is ready (main process only)
@@ -110,6 +194,10 @@ async function saveSessionState(): Promise<void> {
             title: t.view.webContents.getTitle() || 'New Tab',
             sessionId: t.sessionId,
             partition: t.partition,
+            containerId: t.containerId,
+            createdAt: t.createdAt,
+            lastActiveAt: t.lastActiveAt,
+            profileId: t.profileId,
           };
         } catch {
           // Tab might be destroyed, skip
@@ -118,6 +206,9 @@ async function saveSessionState(): Promise<void> {
       }).filter(Boolean) as WindowState['tabs'];
 
       const bounds = win.getBounds();
+      const windowCreatedAt = (win as any).__ob_createdAt ?? Date.now();
+      const windowLastFocused = (win as any).__ob_lastFocusedAt ?? windowCreatedAt;
+
       windowsState.push({
         id: win.id,
         bounds: {
@@ -128,14 +219,17 @@ async function saveSessionState(): Promise<void> {
           isMaximized: win.isMaximized(),
         },
         tabs: tabsState,
-        activeTabId: null, // Will be set from tabs service
+        activeTabId: getActiveTabIdForWindow(win.id),
         activeSessionId: sessionManager.getActiveSession()?.id || null,
+        createdAt: windowCreatedAt,
+        lastFocusedAt: typeof windowLastFocused === 'number' ? windowLastFocused : windowCreatedAt,
       });
     }
 
     const sessions = sessionManager.listSessions();
-    const snapshot: SessionSnapshot = {
-      timestamp: Date.now(),
+    const snapshot: SessionState = {
+      version: 1,
+      updatedAt: Date.now(),
       windows: windowsState,
       sessions,
     };
@@ -287,7 +381,7 @@ async function saveSessionState(): Promise<void> {
 /**
  * Load session state from disk
  */
-export async function loadSessionState(): Promise<SessionSnapshot | null> {
+export async function loadSessionState(): Promise<SessionState | null> {
   // Guard: only run in main process
   if (typeof app === 'undefined' || !app.isReady()) {
     return null;
@@ -303,8 +397,8 @@ export async function loadSessionState(): Promise<SessionSnapshot | null> {
   
   try {
     const content = await fs.readFile(SNAPSHOT_FILE, 'utf-8');
-    const snapshot = JSON.parse(content) as SessionSnapshot;
-    return snapshot;
+    const parsed = JSON.parse(content);
+    return migrateLegacySnapshot(parsed);
   } catch (error) {
     // No saved state, return null
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
@@ -320,7 +414,7 @@ export async function loadSessionState(): Promise<SessionSnapshot | null> {
  * Restore windows from snapshot
  */
 export async function restoreWindows(
-  snapshot: SessionSnapshot,
+  snapshot: SessionState,
   createWindow: (bounds: WindowState['bounds']) => BrowserWindow
 ): Promise<void> {
   const sessionManager = getSessionManager();
@@ -341,23 +435,114 @@ export async function restoreWindows(
   for (const windowState of snapshot.windows) {
     try {
       const win = createWindow(windowState.bounds);
-      
+      if (!win || win.isDestroyed()) continue;
+      (win as any).__ob_createdAt = windowState.createdAt ?? Date.now();
+      (win as any).__ob_lastFocusedAt = windowState.lastFocusedAt ?? Date.now();
+
       // Restore tabs after a brief delay to ensure window is ready
-      setTimeout(async () => {
-        for (const tabState of windowState.tabs) {
-          try {
-            const { registerTabIpc } = await import('./tabs');
-            // Tab creation will be handled by tabs service
-            // We just need to ensure the window is ready
-          } catch (error) {
-            console.error('Failed to restore tab:', error);
-          }
-        }
-      }, 500);
+      setTimeout(() => {
+        void restoreWindowTabs(win, windowState);
+      }, 150);
     } catch (error) {
       console.error('Failed to restore window:', error);
     }
   }
+}
+
+export async function restoreWindowTabs(win: BrowserWindow, windowState: WindowState): Promise<void> {
+  if (!win || win.isDestroyed()) return;
+  try {
+    closeAllTabs(win);
+  } catch (error) {
+    if (process.env.NODE_ENV === 'development') {
+      console.warn('[Session] Failed to close existing tabs before restore', error);
+    }
+  }
+
+  for (const tabState of windowState.tabs) {
+    try {
+      await createTabOnWindow(win, {
+        id: tabState.id,
+        url: tabState.url || 'about:blank',
+        sessionId: tabState.sessionId,
+        containerId: tabState.containerId,
+        profileId: tabState.profileId,
+        createdAt: tabState.createdAt,
+        lastActiveAt: tabState.lastActiveAt,
+        activate: false,
+        fromSessionRestore: true,
+      });
+    } catch (error) {
+      console.error('[Session] Failed to create restored tab', error);
+    }
+  }
+
+  const targetTabId = windowState.activeTabId || windowState.tabs[0]?.id;
+  if (targetTabId) {
+    activateTabByWindowId(win.id, targetTabId);
+  }
+}
+
+export async function getLastSessionSummary(): Promise<SessionSummary | null> {
+  const snapshot = await loadSessionState();
+  if (!snapshot) return null;
+  const tabCount = snapshot.windows.reduce((total, win) => total + win.tabs.length, 0);
+  return {
+    updatedAt: snapshot.updatedAt,
+    windowCount: snapshot.windows.length,
+    tabCount,
+  };
+}
+
+export function registerSessionStateIpc(): void {
+  registerHandler('session:lastSnapshotSummary', z.object({}), async () => {
+    const summary = await getLastSessionSummary();
+    return { summary };
+  });
+
+  registerHandler('session:restoreLast', z.object({}), async (event) => {
+    const snapshot = await loadSessionState();
+    if (!snapshot || snapshot.windows.length === 0) {
+      return { restored: false };
+    }
+
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed()) {
+      return { restored: false };
+    }
+
+    const targetState =
+      snapshot.windows.find((w) => w.id === win.id) ?? snapshot.windows[0];
+
+    try {
+      if (targetState.bounds) {
+        try {
+          win.setBounds({
+            x: targetState.bounds.x,
+            y: targetState.bounds.y,
+            width: targetState.bounds.width,
+            height: targetState.bounds.height,
+          });
+          if (targetState.bounds.isMaximized) {
+            win.maximize();
+          } else if (win.isMaximized()) {
+            win.unmaximize();
+          }
+        } catch {}
+      }
+
+      win.webContents.send('session:restoring', true);
+      await restoreWindowTabs(win, targetState);
+      win.webContents.send('session:restoring', false);
+      return { restored: true, tabCount: targetState.tabs.length };
+    } catch (error) {
+      if (process.env.NODE_ENV === 'development') {
+        console.error('[Session] Failed to restore last snapshot via IPC', error);
+      }
+      win.webContents.send('session:restoring', false);
+      return { restored: false, error: (error as Error).message };
+    }
+  });
 }
 
 /**
@@ -387,12 +572,12 @@ export function startSessionPersistence(): void {
     // Silent fail - will retry on next interval
   });
 
-  // Save every 3 seconds (increased interval to reduce load)
+  // Save every 2 seconds
   persistenceTimer = setInterval(() => {
     saveSessionState().catch(() => {
       // Silent fail - session persistence is non-critical
     });
-  }, 3000);
+  }, 2000);
 
   // Save on app close
   app.on('before-quit', () => {
@@ -407,11 +592,20 @@ export function startSessionPersistence(): void {
     });
   });
 
-  // Save on window close
+  // Track focus to keep metadata fresh
+  app.on('browser-window-focus', (_event, focusedWindow) => {
+    if (focusedWindow) {
+      (focusedWindow as any).__ob_lastFocusedAt = Date.now();
+    }
+  });
+
+  // Save on window blur and when all windows closed
+  app.on('browser-window-blur', () => {
+    saveSessionState().catch(() => {});
+  });
+
   app.on('window-all-closed', () => {
-    saveSessionState().catch(() => {
-      // Silent fail
-    });
+    saveSessionState().catch(() => {});
   });
 }
 

@@ -4,7 +4,8 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { User, Plus, X, Edit2, Check } from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
+import { User, Plus, X, Edit2, Check, RotateCcw, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ipc } from '../../lib/ipc-typed';
 
@@ -26,6 +27,10 @@ export function SessionSwitcher() {
   const [newSessionName, setNewSessionName] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  const [snapshotSummary, setSnapshotSummary] = useState<{ updatedAt: number; windowCount: number; tabCount: number } | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [restoreFeedback, setRestoreFeedback] = useState<string | null>(null);
 
   // Track previous sessions to prevent unnecessary updates
   const previousSessionsRef = useRef<string>('');
@@ -99,6 +104,30 @@ export function SessionSwitcher() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setSummaryLoading(true);
+    ipc.sessionState.summary()
+      .then((res) => {
+        if (cancelled) return;
+        setSnapshotSummary(res?.summary ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSnapshotSummary(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSummaryLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
   const handleCreateSession = async () => {
     if (!newSessionName.trim()) return;
     
@@ -148,6 +177,30 @@ export function SessionSwitcher() {
       await loadSessions();
     } catch (error) {
       console.error('Failed to update session:', error);
+    }
+  };
+
+  const handleRestoreLastSession = async () => {
+    setRestoring(true);
+    setRestoreFeedback(null);
+    try {
+      const result = await ipc.sessionState.restore();
+      if (result?.restored) {
+        const restoredCount = result.tabCount ?? 0;
+        setRestoreFeedback(
+          `Restored ${restoredCount} tab${restoredCount === 1 ? '' : 's'} from last session.`,
+        );
+        await loadSessions();
+      } else if (result?.error) {
+        setRestoreFeedback(`Restore failed: ${result.error}`);
+      } else {
+        setRestoreFeedback('No session snapshot available to restore.');
+      }
+    } catch (error) {
+      console.error('Failed to restore session snapshot:', error);
+      setRestoreFeedback('Failed to restore session snapshot.');
+    } finally {
+      setRestoring(false);
     }
   };
 
@@ -344,9 +397,46 @@ export function SessionSwitcher() {
             </div>
 
             {/* Footer */}
-            <div className="p-3 border-t border-gray-800/50 bg-gray-900/50">
+            <div className="p-3 border-t border-gray-800/50 bg-gray-900/50 space-y-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-0.5">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Crash-safe snapshot</p>
+                  <p className="text-sm text-gray-300">
+                    {summaryLoading && (
+                      <span className="inline-flex items-center gap-1 text-gray-400">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Checking…
+                      </span>
+                    )}
+                    {!summaryLoading && snapshotSummary && (
+                      <span>
+                        {snapshotSummary.tabCount} tab{snapshotSummary.tabCount === 1 ? '' : 's'} saved{' '}
+                        {formatDistanceToNow(snapshotSummary.updatedAt, { addSuffix: true })}
+                      </span>
+                    )}
+                    {!summaryLoading && !snapshotSummary && (
+                      <span>No snapshot captured yet.</span>
+                    )}
+                  </p>
+                </div>
+                <button
+                  onClick={handleRestoreLastSession}
+                  disabled={restoring || summaryLoading || !snapshotSummary}
+                  className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                    restoring || summaryLoading || !snapshotSummary
+                      ? 'border-gray-700 text-gray-500 cursor-not-allowed'
+                      : 'border-blue-500/40 bg-blue-500/10 text-blue-200 hover:border-blue-500/60'
+                  }`}
+                >
+                  {restoring ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+                  Restore
+                </button>
+              </div>
+              {restoreFeedback && (
+                <p className="text-xs text-blue-300">{restoreFeedback}</p>
+              )}
               <p className="text-xs text-gray-500">
-                Each session has isolated cookies, storage, and login state
+                Each session keeps cookies, storage, and login state isolated. Autosave runs every few seconds.
               </p>
             </div>
           </motion.div>

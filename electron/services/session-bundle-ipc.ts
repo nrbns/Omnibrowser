@@ -23,6 +23,7 @@ export function registerSessionBundleIpc(): void {
     const filePath = await service.exportBundle(request.runId, globalAgentStore, {
       name: request.name,
       description: request.description,
+      includeWorkspace: request.includeWorkspace,
     });
     return { filePath };
   });

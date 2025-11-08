@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { getSessionManager } from './sessions';
 import { BrowserWindow } from 'electron';
 import { getTabs } from './tabs';
+import { setActiveProfileForWindow, getProfile } from './profiles';
 
 // Helper function to close tabs by session ID
 function closeTabsBySession(win: BrowserWindow, sessionId: string): void {
@@ -79,6 +80,37 @@ export function registerSessionsIpc() {
       // Notify renderer that session has changed
       const win = BrowserWindow.fromWebContents(event.sender);
       if (win) {
+        const session = sessionManager.getSession(request.sessionId);
+        if (session) {
+          const profile = setActiveProfileForWindow(win, session.profileId);
+          try {
+            const profileData = getProfile(profile.id);
+            win.webContents.send('profiles:active', {
+              profileId: profile.id,
+              profile: profileData
+                ? {
+                    id: profileData.id,
+                    name: profileData.name,
+                    color: profileData.color,
+                    kind: profileData.kind,
+                    system: profileData.system,
+                    policy: profileData.policy,
+                    description: profileData.description,
+                  }
+                : {
+                    id: profile.id,
+                    name: profile.name,
+                    color: profile.color,
+                    kind: profile.kind,
+                    system: profile.system,
+                    policy: profile.policy,
+                    description: profile.description,
+                  },
+            });
+          } catch (error) {
+            console.warn('[Sessions] Failed to emit profile activation on session switch', error);
+          }
+        }
         // Emit tab updates so UI refreshes
         win.webContents.send('session:switched', { sessionId: request.sessionId });
         

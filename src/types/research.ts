@@ -23,6 +23,61 @@ export interface ResearchContradiction {
   claim: string;
   sources: number[];
   disagreement: 'minor' | 'major';
+  summary?: string;
+  severityScore?: number;
+}
+
+export interface ResearchEvidence {
+  id: string;
+  sourceIndex: number;
+  quote: string;
+  context: string;
+  importance: 'high' | 'medium' | 'low';
+  fragmentUrl: string;
+}
+
+export interface ResearchInlineEvidence {
+  from: number;
+  to: number;
+  citationIndex: number;
+  sourceIndex: number;
+  quote?: string;
+}
+
+export interface ResearchTask {
+  id: string;
+  title: string;
+  description: string;
+  status: 'pending' | 'in_progress' | 'done';
+  action?: {
+    type: 'openSource' | 'openEvidence';
+    sourceIndex?: number;
+    evidenceId?: string;
+    fragmentUrl?: string;
+  };
+}
+
+export interface ResearchTaskChain {
+  id: string;
+  label: string;
+  steps: ResearchTask[];
+}
+
+export interface ResearchHighlight {
+  id: string;
+  text: string;
+  color: string;
+  createdAt: number;
+  note?: string;
+}
+
+export interface BiasProfile {
+  authorityBias: number;
+  recencyBias: number;
+  domainMix: Array<{
+    type: ResearchSourceType;
+    percentage: number;
+  }>;
 }
 
 export interface VerificationResult {
@@ -46,5 +101,9 @@ export interface ResearchResult {
   confidence: number;
   contradictions?: ResearchContradiction[];
   verification?: VerificationResult;
+  evidence?: ResearchEvidence[];
+  biasProfile?: BiasProfile;
+  taskChains?: ResearchTaskChain[];
+  inlineEvidence?: ResearchInlineEvidence[];
 }
 

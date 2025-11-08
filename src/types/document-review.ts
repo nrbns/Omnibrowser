@@ -23,6 +23,32 @@ export interface TimelineEvent {
   confidence: number;
 }
 
+export interface FactHighlight {
+  claimId: string;
+  text: string;
+  importance: 'verified' | 'disputed' | 'unverified';
+  section?: string;
+  position: number;
+  fragment?: string;
+}
+
+export interface AssumptionHighlight {
+  claimId: string;
+  text: string;
+  rationale: string;
+  severity: 'low' | 'medium' | 'high';
+  section?: string;
+}
+
+export interface AuditTrailEntry {
+  claimId: string;
+  section?: string;
+  page?: number;
+  line?: number;
+  status: 'verified' | 'disputed' | 'unverified';
+  link?: string;
+}
+
 export interface DocumentClaim {
   id: string;
   text: string;
@@ -51,6 +77,15 @@ export interface DocumentReview {
   entities: DocumentEntity[];
   timeline: TimelineEvent[];
   claims: DocumentClaim[];
+  factHighlights?: FactHighlight[];
+  assumptions?: AssumptionHighlight[];
+  auditTrail?: AuditTrailEntry[];
+  entityGraph?: Array<{
+    name: string;
+    count: number;
+    type: DocumentEntity['type'];
+    connections: string[];
+  }>;
   createdAt: number;
   updatedAt: number;
 }

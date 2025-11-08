@@ -14,6 +14,51 @@ export interface TabUpdate {
   progress?: number;
   isLoading?: boolean;
   mode?: 'normal' | 'ghost' | 'private';
+  containerId?: string;
+  containerName?: string;
+  containerColor?: string;
+  createdAt?: number;
+  lastActiveAt?: number;
+  sessionId?: string;
+  profileId?: string;
+}
+
+export interface ContainerInfo {
+  id: string;
+  name: string;
+  color: string;
+  icon?: string;
+  description?: string;
+  scope?: 'global' | 'session' | 'ephemeral';
+  persistent?: boolean;
+  system?: boolean;
+}
+
+export type ProfileKind = 'default' | 'work' | 'personal' | 'custom';
+
+export interface ProfilePolicy {
+  allowDownloads: boolean;
+  allowPrivateWindows: boolean;
+  allowGhostTabs: boolean;
+  allowScreenshots: boolean;
+  allowClipping: boolean;
+}
+
+export interface ProfileInfo {
+  id: string;
+  name: string;
+  color?: string;
+  kind?: ProfileKind;
+  system?: boolean;
+  policy?: ProfilePolicy;
+  description?: string;
+}
+
+export type ProfilePolicyAction = 'downloads' | 'private-window' | 'ghost-tab' | 'screenshot' | 'clip';
+
+export interface ProfilePolicyBlockedEvent {
+  profileId: string;
+  action: ProfilePolicyAction;
 }
 
 export interface ShieldsCounters {
@@ -46,16 +91,39 @@ export interface NetworkStatus {
   };
 }
 
+export interface PageWatcher {
+  id: string;
+  url: string;
+  createdAt: number;
+  intervalMinutes: number;
+  lastCheckedAt?: number;
+  lastHash?: string;
+  lastChangeAt?: number;
+  status: 'idle' | 'checking' | 'changed' | 'error';
+  error?: string;
+}
+
 export interface DownloadUpdate {
   id: string;
   url: string;
   filename: string;
-  status: 'pending' | 'downloading' | 'completed' | 'failed';
+  status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled' | 'in-progress' | 'blocked';
   progress?: number;
   receivedBytes?: number;
   totalBytes?: number;
   path?: string;
   checksum?: string;
+  createdAt?: number;
+  speedBytesPerSec?: number;
+  etaSeconds?: number;
+  safety?: {
+    status: 'pending' | 'clean' | 'warning' | 'blocked' | 'unknown';
+    threatLevel?: 'low' | 'medium' | 'high' | 'critical';
+    details?: string;
+    recommendations?: string[];
+    scannedAt?: number;
+    quarantinePath?: string;
+  };
 }
 
 export interface AgentStep {

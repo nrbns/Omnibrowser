@@ -8,8 +8,10 @@ import { AgentStore } from './services/agent/store';
 import { runAgent, DSL } from './services/agent/brain';
 import { registerRecorderIpc } from './automate/recorder';
 import { registerTabIpc } from './services/tabs';
+import { registerContainersIpc } from './services/containers';
 import { registerProxyIpc } from './services/proxy';
 import { registerDownloadsIpc } from './services/downloads-enhanced';
+import { registerWatchersIpc } from './services/watchers';
 import { registerScrapingIpc } from './services/scraping';
 import { registerVideoIpc } from './services/video';
 import { registerThreatsIpc } from './services/threats';
@@ -17,9 +19,11 @@ import { registerGraphIpc } from './services/graph';
 import { registerLedgerIpc } from './services/ledger';
 import { registerHistoryIpc } from './services/history';
 import { registerResearchIpc } from './services/research';
+import { registerReaderIpc } from './services/reader';
 import { registerStorageIpc } from './services/storage';
 import { registerPluginIpc } from './services/plugins/ipc';
-import { registerProfileIpc } from './services/profiles';
+import { registerProfileIpc, initializeProfiles, removeWindow as removeProfileWindow, setActiveProfileForWindow } from './services/profiles';
+import { initializeDiagnostics, registerDiagnosticsIpc } from './services/diagnostics';
 import { registerProtocolSchemes, initProtocols } from './services/protocol';
 import { registerAgentIpc } from './services/agent/ipc';
 import { registerConsentIpc } from './services/consent-ipc';
@@ -93,6 +97,18 @@ function createMainWindow(restoreBounds?: { x: number; y: number; width: number;
     }
   });
 
+  const createdAt = Date.now();
+  (mainWindow as any).__ob_createdAt = createdAt;
+  (mainWindow as any).__ob_lastFocusedAt = createdAt;
+  mainWindow.on('focus', () => {
+    (mainWindow as any).__ob_lastFocusedAt = Date.now();
+  });
+  mainWindow.on('blur', () => {
+    (mainWindow as any).__ob_lastFocusedAt = Date.now();
+  });
+
+  setActiveProfileForWindow(mainWindow, 'default');
+
   // In packaged builds, don't allow DevTools to stay open
   if (app.isPackaged) {
     mainWindow.webContents.on('devtools-opened', () => {
@@ -159,7 +175,9 @@ function createMainWindow(restoreBounds?: { x: number; y: number; width: number;
   
   isCreatingWindow = false; // Window created successfully
 
+  const windowId = mainWindow.id;
   mainWindow.on('closed', () => {
+    removeProfileWindow(windowId);
     mainWindow = null;
     isCreatingWindow = false;
   });
@@ -185,6 +203,9 @@ networkControls.initializeDefaults();
 
 app.whenReady().then(async () => {
   applySecurityPolicies();
+  initializeDiagnostics();
+
+  initializeProfiles();
 
   // Initialize observability (OpenTelemetry)
   initializeTelemetry({
@@ -201,7 +222,7 @@ app.whenReady().then(async () => {
   }
   
   // Start session persistence (auto-save every 2s)
-  const { startSessionPersistence, loadSessionState, restoreWindows } = await import('./services/session-persistence');
+  const { startSessionPersistence, loadSessionState, restoreWindowTabs, registerSessionStateIpc } = await import('./services/session-persistence');
   startSessionPersistence();
   
   // Try to restore previous session
@@ -228,16 +249,21 @@ app.whenReady().then(async () => {
     // Register ALL IPC handlers BEFORE window loads to ensure readiness
     registerRecorderIpc(mainWindow);
     registerTabIpc(mainWindow);
+    registerContainersIpc();
     registerProxyIpc();
     registerDownloadsIpc();
+    registerWatchersIpc();
     registerScrapingIpc();
     registerVideoIpc(mainWindow);
     registerThreatsIpc();
     registerStorageIpc();
+    registerSessionStateIpc();
+    registerDiagnosticsIpc();
     registerGraphIpc();
     registerLedgerIpc();
     registerHistoryIpc();
     registerResearchIpc();
+    registerReaderIpc();
     const { registerResearchEnhancedIpc } = await import('./services/research-enhanced');
     registerResearchEnhancedIpc();
     const { registerDocumentReviewIpc } = await import('./services/document-review');
@@ -286,41 +312,20 @@ app.whenReady().then(async () => {
         }
       }, 100);
       
-      // Restore tabs from session snapshot if available
       if (shouldRestoreTabs && snapshot && snapshot.windows.length > 0) {
         const firstWindow = snapshot.windows[0];
-        // Signal renderer that we're restoring tabs (prevents auto-creation)
         mainWindow.webContents.send('session:restoring', true);
         
-        // Wait a bit for IPC to be ready, then restore tabs via IPC calls from renderer
         setTimeout(async () => {
           try {
-            // Send restore tab messages to renderer - it will create tabs via IPC
-            for (const tabState of firstWindow.tabs) {
-              mainWindow.webContents.send('session:restore-tab', {
-                url: tabState.url || 'about:blank',
-                id: tabState.id
-              });
-              // Small delay between tab creations to avoid race conditions
-              await new Promise(resolve => setTimeout(resolve, 100));
-            }
-            
-            // Signal renderer that restoration is complete
-            setTimeout(() => {
-              mainWindow.webContents.send('session:restoring', false);
-              
-              // Activate the previously active tab
-              if (firstWindow.activeTabId) {
-                setTimeout(() => {
-                  mainWindow.webContents.send('tabs:activate', { id: firstWindow.activeTabId });
-                }, 200);
-              }
-            }, 500);
+            await restoreWindowTabs(mainWindow, firstWindow);
           } catch (error) {
             console.error('Failed to restore tabs from session:', error);
-            mainWindow.webContents.send('session:restoring', false);
+          } finally {
+            shouldRestoreTabs = false;
+            mainWindow?.webContents.send('session:restoring', false);
           }
-        }, 1500);
+        }, 400);
       }
     });
     registerPrivateIpc();

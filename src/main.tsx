@@ -109,6 +109,7 @@ const Replay = React.lazy(() => import('./routes/Replay'));
 const PlaybookForge = React.lazy(() => import('./routes/PlaybookForge'));
 const HistoryPage = React.lazy(() => import('./routes/History'));
 const DownloadsPage = React.lazy(() => import('./routes/Downloads'));
+const WatchersPage = React.lazy(() => import('./routes/Watchers'));
 const VideoPage = React.lazy(() => import('./routes/Video'));
 
 // Loading component
@@ -212,6 +213,14 @@ const router = createBrowserRouter(
           element: (
             <Suspense fallback={<LoadingFallback />}>
               <DownloadsPage />
+            </Suspense>
+          ) 
+        },
+        { 
+          path: 'watchers', 
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <WatchersPage />
             </Suspense>
           ) 
         },

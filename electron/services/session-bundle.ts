@@ -8,6 +8,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { AgentStore } from './agent/store';
+import { getTabs, getActiveTabIdForWindow, closeAllTabs, createTabOnWindow, activateTabByWindowId } from './tabs';
+import { getMainWindow } from './windows';
 
 export interface SessionBundle {
   version: '1.0';
@@ -25,8 +27,8 @@ export interface SessionBundle {
     finishedAt?: number;
   };
   workspace?: {
-    tabs: Array<{ id: string; url: string; title?: string }>;
-    notes?: Record<string, string>;
+    tabs: Array<{ id: string; url: string; title?: string; containerId?: string }>;
+    activeTabId?: string;
   };
   artifacts?: Array<{
     type: 'csv' | 'json' | 'markdown' | 'graphml';
@@ -73,7 +75,42 @@ export class SessionBundleService {
       },
     };
 
-    // TODO: Include workspace if requested
+    if (options?.includeWorkspace !== false) {
+      try {
+        const mainWindow = getMainWindow();
+        if (mainWindow) {
+          const tabs = getTabs(mainWindow);
+          const workspaceTabs = tabs.map(tab => {
+            try {
+              return {
+                id: tab.id,
+                url: tab.view.webContents.getURL() || 'about:blank',
+                title: tab.view.webContents.getTitle() || 'New Tab',
+                containerId: tab.containerId,
+              };
+            } catch {
+              return {
+                id: tab.id,
+                url: 'about:blank',
+                title: 'New Tab',
+                containerId: tab.containerId,
+              };
+            }
+          });
+          if (workspaceTabs.length > 0) {
+            bundle.workspace = {
+              tabs: workspaceTabs,
+              activeTabId: getActiveTabIdForWindow(mainWindow.id) ?? undefined,
+            };
+          }
+        }
+      } catch (error) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[SessionBundle] Unable to capture workspace for bundle export:', error);
+        }
+      }
+    }
+
     // TODO: Include artifacts
 
     const bundleJson = JSON.stringify(bundle, null, 2);
@@ -108,10 +145,41 @@ export class SessionBundleService {
   ): Promise<{ workspaceId?: string; runId?: string }> {
     const result: { workspaceId?: string; runId?: string } = {};
 
-    // Restore workspace if present
     if (bundle.workspace && options?.restoreWorkspace) {
-      // TODO: Create workspace from bundle.workspace
-      // result.workspaceId = workspaceId;
+      const mainWindow = getMainWindow();
+      if (!mainWindow) {
+        throw new Error('No window available to restore workspace');
+      }
+
+      try {
+        mainWindow.webContents.send('session:restoring', true);
+      } catch {}
+
+      try {
+        closeAllTabs(mainWindow);
+        const createdIds: string[] = [];
+        for (const tab of bundle.workspace.tabs) {
+          const created = await createTabOnWindow(mainWindow, {
+            id: tab.id,
+            url: tab.url,
+            containerId: tab.containerId,
+            activate: false,
+          });
+          createdIds.push(created.id);
+        }
+        const targetId =
+          (bundle.workspace.activeTabId && createdIds.includes(bundle.workspace.activeTabId)
+            ? bundle.workspace.activeTabId
+            : createdIds[0]) || null;
+        if (targetId) {
+          activateTabByWindowId(mainWindow.id, targetId);
+        }
+        result.workspaceId = 'main';
+      } finally {
+        try {
+          mainWindow.webContents.send('session:restoring', false);
+        } catch {}
+      }
     }
 
     // Replay agent if present

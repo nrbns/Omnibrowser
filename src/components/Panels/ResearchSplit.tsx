@@ -2,26 +2,22 @@
  * ResearchSplit - Reader + Notes split pane for Research mode
  */
 
-import { useState, useEffect, useRef } from 'react';
-import { FileText, BookOpen, Save, Highlighter, X } from 'lucide-react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { FileText, BookOpen, Save, X, PenLine, FileDown, Archive, Send } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useTabsStore } from '../../state/tabsStore';
 import { ipc } from '../../lib/ipc-typed';
 import { debounce } from 'lodash-es';
-
-interface Highlight {
-  id: string;
-  text: string;
-  color: string;
-  position: { start: number; end: number };
-}
+import { ResearchHighlight } from '../../types/research';
+import { ipcEvents } from '../../lib/ipc-events';
 
 export function ResearchSplit() {
   const { activeId } = useTabsStore();
   const [readerContent, setReaderContent] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
-  const [highlights, setHighlights] = useState<Highlight[]>([]);
+  const [highlights, setHighlights] = useState<ResearchHighlight[]>([]);
   const [currentUrl, setCurrentUrl] = useState<string>('');
+  const [exporting, setExporting] = useState<'markdown' | 'obsidian' | 'notion' | null>(null);
   const readerRef = useRef<HTMLDivElement>(null);
 
   // Load content for current tab
@@ -57,10 +53,21 @@ export function ResearchSplit() {
 
         // Load saved notes for this URL
         try {
-          const saved = await ipc.research.getNotes(url) as any;
+          const saved = (await ipc.research.getNotes(url)) as { notes?: string; highlights?: ResearchHighlight[] };
           if (saved) {
             setNotes(saved.notes || '');
-            setHighlights(saved.highlights || []);
+            if (Array.isArray(saved.highlights)) {
+              const mapped = saved.highlights.map((h) => ({
+                id: h.id || (crypto.randomUUID?.() ?? `hl-${Date.now()}`),
+                text: h.text || '',
+                color: h.color || '#facc15',
+                createdAt: h.createdAt || Date.now(),
+                note: h.note,
+              }));
+              setHighlights(mapped);
+            } else {
+              setHighlights([]);
+            }
           }
         } catch (error) {
           console.error('Failed to load notes:', error);
@@ -124,14 +131,79 @@ export function ResearchSplit() {
     }
   }, [notes, highlights, currentUrl, saveNotes]);
 
-  const addHighlight = (text: string, start: number, end: number) => {
-    const highlight: Highlight = {
-      id: crypto.randomUUID(),
-      text,
-      color: '#fef08a', // yellow
-      position: { start, end },
-    };
-    setHighlights(prev => [...prev, highlight]);
+  useEffect(() => {
+    const unsubscribe = ipcEvents.on<{ url: string; highlight: ResearchHighlight }>('research:highlight-added', (payload) => {
+      if (!payload?.url || payload.url !== currentUrl) return;
+      setHighlights((prev) => [
+        ...prev,
+        {
+          id: payload.highlight.id,
+          text: payload.highlight.text,
+          color: payload.highlight.color || '#facc15',
+          createdAt: payload.highlight.createdAt || Date.now(),
+          note: payload.highlight.note,
+        },
+      ]);
+    });
+    return unsubscribe;
+  }, [currentUrl]);
+
+  const handleHighlightNoteChange = (id: string, nextNote: string) => {
+    setHighlights((prev) =>
+      prev.map((highlight) =>
+        highlight.id === id
+          ? {
+              ...highlight,
+              note: nextNote,
+            }
+          : highlight,
+      ),
+    );
+  };
+
+  const sortedHighlights = useMemo(
+    () => [...highlights].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)),
+    [highlights],
+  );
+
+  const handleExport = async (format: 'markdown' | 'obsidian' | 'notion') => {
+    if (!currentUrl || currentUrl.startsWith('about:') || currentUrl.startsWith('chrome:')) {
+      return;
+    }
+
+    const maybeFlush = (saveNotes as any)?.flush;
+    if (typeof maybeFlush === 'function') {
+      maybeFlush();
+    }
+
+    try {
+      await ipc.research.saveNotes(currentUrl, notes, highlights);
+    } catch (error) {
+      console.error('Failed to sync notes before export:', error);
+    }
+
+    setExporting(format);
+    try {
+      const result = await ipc.research.export(format, [currentUrl], true);
+      if (result?.format === 'markdown' && result?.path) {
+        alert(`Markdown exported to ${result.path}`);
+      } else if (result?.format === 'obsidian' && result?.folder) {
+        alert(`Obsidian vault files saved to ${result.folder}`);
+      } else if (result?.format === 'notion' && Array.isArray(result?.notionPages)) {
+        const pages = result.notionPages
+          .map((page: any) => (page?.url ? `• ${page.title || 'Untitled'}\n  ${page.url}` : `• ${page.title || 'Untitled'}`))
+          .join('\n');
+        alert(`Synced to Notion:\n${pages}`);
+      } else {
+        alert('Export completed.');
+      }
+    } catch (error) {
+      console.error('Failed to export:', error);
+      const message = error instanceof Error ? error.message : 'Failed to export';
+      alert(message);
+    } finally {
+      setExporting(null);
+    }
   };
 
   return (
@@ -142,16 +214,6 @@ export function ResearchSplit() {
           <div className="flex items-center gap-2">
             <BookOpen size={16} className="text-blue-400" />
             <span className="text-sm font-medium text-gray-300">Reader</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className="p-1.5 rounded-lg hover:bg-gray-800/60 text-gray-400 hover:text-gray-200 transition-colors"
-              title="Add Highlight"
-            >
-              <Highlighter size={16} />
-            </motion.button>
           </div>
         </div>
         <div
@@ -165,14 +227,6 @@ export function ResearchSplit() {
             <div
               className="text-sm leading-relaxed"
               dangerouslySetInnerHTML={{ __html: readerContent }}
-              onMouseUp={() => {
-                const selection = window.getSelection();
-                if (selection && selection.toString().trim()) {
-                  const text = selection.toString();
-                  // Would get position and add highlight
-                  // addHighlight(text, start, end);
-                }
-              }}
             />
           ) : (
             <div className="text-center text-gray-500 py-12">
@@ -203,28 +257,41 @@ export function ResearchSplit() {
         </div>
 
         {/* Highlights List */}
-        {highlights.length > 0 && (
-          <div className="border-b border-gray-800/50 p-3 space-y-2 max-h-32 overflow-y-auto">
-            <div className="text-xs font-medium text-gray-400 mb-2">Highlights</div>
-            {highlights.map(highlight => (
-              <div
-                key={highlight.id}
-                className="flex items-start justify-between gap-2 p-2 bg-gray-800/40 rounded text-xs"
-              >
-                <div className="flex-1 min-w-0">
+        {sortedHighlights.length > 0 && (
+          <div className="border-b border-gray-800/50 p-3 space-y-3 max-h-52 overflow-y-auto">
+            <div className="text-xs font-semibold text-gray-400 mb-1 flex items-center gap-2">
+              <PenLine size={12} />
+              Highlights & notes
+            </div>
+            {sortedHighlights.map((highlight) => (
+              <div key={highlight.id} className="bg-gray-800/30 rounded-lg border border-gray-800/60 p-3 space-y-2">
+                <div className="flex items-start gap-2">
                   <div
-                    className="inline-block px-1.5 py-0.5 rounded"
-                    style={{ backgroundColor: highlight.color + '40', color: highlight.color }}
+                    className="px-2 py-1 rounded-md text-xs font-medium max-w-xs truncate"
+                    style={{ backgroundColor: `${highlight.color}20`, color: highlight.color }}
+                    title={highlight.text}
                   >
-                    {highlight.text.slice(0, 50)}...
+                    {highlight.text.slice(0, 120)}
+                    {highlight.text.length > 120 ? '…' : ''}
                   </div>
+                  <button
+                    onClick={() => setHighlights((prev) => prev.filter((h) => h.id !== highlight.id))}
+                    className="p-1 rounded-lg text-gray-500 hover:text-gray-300 hover:bg-gray-800/50 transition-colors"
+                    aria-label="Remove highlight"
+                  >
+                    <X size={12} />
+                  </button>
                 </div>
-                <button
-                  onClick={() => setHighlights(prev => prev.filter(h => h.id !== highlight.id))}
-                  className="p-0.5 hover:bg-gray-700/50 rounded text-gray-500 hover:text-gray-300"
-                >
-                  <X size={12} />
-                </button>
+                <textarea
+                  value={highlight.note ?? ''}
+                  onChange={(e) => handleHighlightNoteChange(highlight.id, e.target.value)}
+                  placeholder="Add a note for this highlight..."
+                  className="w-full text-xs bg-gray-900/40 border border-gray-800/60 rounded-md px-2 py-1.5 text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/60"
+                  rows={2}
+                />
+                <div className="text-[10px] text-gray-500">
+                  Saved {new Date(highlight.createdAt).toLocaleString()}
+                </div>
               </div>
             ))}
           </div>
@@ -261,20 +328,41 @@ export function ResearchSplit() {
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            onClick={async () => {
-              if (currentUrl && !currentUrl.startsWith('about:') && !currentUrl.startsWith('chrome:')) {
-                try {
-                  await ipc.research.export('markdown', [currentUrl], true);
-                  alert('Exported successfully!');
-                } catch (error) {
-                  console.error('Failed to export:', error);
-                }
-              }
-            }}
-            className="px-3 py-2 bg-green-600/20 hover:bg-green-600/30 border border-green-500/30 rounded text-xs text-green-400 transition-colors"
+            disabled={!!exporting}
+            onClick={() => handleExport('markdown')}
+            className={`px-3 py-2 bg-green-600/20 hover:bg-green-600/30 border border-green-500/30 rounded text-xs text-green-400 transition-colors flex items-center gap-2 ${
+              exporting ? 'opacity-60 cursor-wait' : ''
+            }`}
             title="Export to Markdown"
           >
-            Export
+            <FileDown size={14} />
+            {exporting === 'markdown' ? 'Exporting…' : 'Export Markdown'}
+          </motion.button>
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            disabled={!!exporting}
+            onClick={() => handleExport('obsidian')}
+            className={`px-3 py-2 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 rounded text-xs text-purple-300 transition-colors flex items-center gap-2 ${
+              exporting ? 'opacity-60 cursor-wait' : ''
+            }`}
+            title="Export notes and highlights to Obsidian-compatible markdown files"
+          >
+            <Archive size={14} />
+            {exporting === 'obsidian' ? 'Exporting…' : 'Obsidian Export'}
+          </motion.button>
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            disabled={!!exporting}
+            onClick={() => handleExport('notion')}
+            className={`px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 rounded text-xs text-emerald-300 transition-colors flex items-center gap-2 ${
+              exporting ? 'opacity-60 cursor-wait' : ''
+            }`}
+            title="Sync notes and highlights to Notion"
+          >
+            <Send size={14} />
+            {exporting === 'notion' ? 'Exporting…' : 'Sync to Notion'}
           </motion.button>
         </div>
       </div>

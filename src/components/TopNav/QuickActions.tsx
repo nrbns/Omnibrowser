@@ -3,19 +3,30 @@
  */
 
 import { useState } from 'react';
-import { Camera, Code, Cast, Languages, FileText, Pin, MoreVertical } from 'lucide-react';
+import { Camera, Code, Cast, Languages, FileText, Pin, MoreVertical, Highlighter } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTabsStore } from '../../state/tabsStore';
 import { ipc } from '../../lib/ipc-typed';
+import { useProfileStore } from '../../state/profileStore';
 
 interface QuickActionsProps {
   onReaderToggle?: () => void;
+  onClipperToggle?: () => void;
 }
 
-export function QuickActions({ onReaderToggle }: QuickActionsProps) {
+export function QuickActions({ onReaderToggle, onClipperToggle }: QuickActionsProps) {
   const { activeId } = useTabsStore();
   const [isPinned, setIsPinned] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const policy = useProfileStore((state) => state.policies[state.activeProfileId]);
+
+  const canClip = policy ? policy.allowClipping : true;
+  const canScreenshot = policy ? policy.allowScreenshots : true;
+
+  const handleClip = () => {
+    if (!activeId) return;
+    onClipperToggle?.();
+  };
 
   const handleScreenshot = async () => {
     if (!activeId) return;
@@ -58,7 +69,20 @@ export function QuickActions({ onReaderToggle }: QuickActionsProps) {
   };
 
   const actions = [
-    { icon: Camera, label: 'Screenshot', onClick: handleScreenshot, shortcut: 'Ctrl+Shift+S' },
+    {
+      icon: Highlighter,
+      label: 'Clip text',
+      onClick: handleClip,
+      shortcut: 'Ctrl+Shift+H',
+      disabled: !canClip,
+    },
+    {
+      icon: Camera,
+      label: 'Screenshot',
+      onClick: handleScreenshot,
+      shortcut: 'Ctrl+Shift+S',
+      disabled: !canScreenshot,
+    },
     { icon: Code, label: 'Inspect', onClick: handleInspect, shortcut: 'F12' },
     { icon: Cast, label: 'Cast', onClick: handleCast },
     { icon: Languages, label: 'Translate', onClick: handleTranslate },
@@ -76,10 +100,15 @@ export function QuickActions({ onReaderToggle }: QuickActionsProps) {
             onClick={action.onClick}
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            className={`p-1.5 rounded-md hover:bg-gray-700/50 transition-colors ${
-              action.active ? 'text-blue-400 bg-blue-500/20' : 'text-gray-400'
+            className={`p-1.5 rounded-md transition-colors ${
+              action.active ? 'text-blue-400 bg-blue-500/20' : action.disabled ? 'text-gray-600' : 'text-gray-400 hover:bg-gray-700/50'
             }`}
-            title={action.label + (action.shortcut ? ` (${action.shortcut})` : '')}
+            title={
+              action.disabled
+                ? `${action.label} disabled by profile policy`
+                : action.label + (action.shortcut ? ` (${action.shortcut})` : '')
+            }
+            disabled={action.disabled}
           >
             <Icon size={16} />
           </motion.button>
@@ -116,11 +145,17 @@ export function QuickActions({ onReaderToggle }: QuickActionsProps) {
                     <button
                       key={idx}
                       onClick={() => {
+                        if (action.disabled) return;
                         action.onClick();
                         setMenuOpen(false);
                       }}
-                      className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-700/50 transition-colors ${
-                        action.active ? 'text-blue-400 bg-blue-500/10' : 'text-gray-300'
+                      disabled={action.disabled}
+                      className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors ${
+                        action.active
+                          ? 'text-blue-400 bg-blue-500/10'
+                          : action.disabled
+                          ? 'text-gray-500 cursor-not-allowed'
+                          : 'text-gray-300 hover:bg-gray-700/50'
                       }`}
                     >
                       <Icon size={16} />

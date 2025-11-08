@@ -1,7 +1,24 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FilePlus, Globe, Loader2, Shield, UploadCloud, X } from 'lucide-react';
+import {
+  FilePlus,
+  Globe,
+  Loader2,
+  Shield,
+  UploadCloud,
+  X,
+  Highlighter,
+  AlertTriangle,
+  GitBranch,
+  Clock3,
+  BookOpenCheck,
+} from 'lucide-react';
 import { ipc } from '../../lib/ipc-typed';
-import { DocumentReview } from '../../types/document-review';
+import {
+  DocumentReview,
+  FactHighlight,
+  AssumptionHighlight,
+  AuditTrailEntry,
+} from '../../types/document-review';
 import { PDFViewer } from '../../components/DocumentViewer/PDFViewer';
 import { CommentsPanel, Comment } from '../../components/DocumentViewer/CommentsPanel';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -441,6 +458,27 @@ function DocumentReviewView({ review, onReverify, onExport, onDelete }: Document
   }, [review]);
 
   const timeline = review.timeline ?? [];
+  const factHighlights = review.factHighlights ?? [];
+  const assumptions = review.assumptions ?? [];
+  const auditTrail = review.auditTrail ?? [];
+  const entityGraph = useMemo(() => {
+    if (review.entityGraph) return review.entityGraph;
+    return review.entities.map((entity) => ({
+      name: entity.name,
+      count: entity.occurrences.length,
+      type: entity.type,
+      connections: review.claims
+        .filter((claim) => claim.text.toLowerCase().includes(entity.name.toLowerCase()))
+        .slice(0, 3)
+        .map((claim) => claim.id),
+    }));
+  }, [review.entityGraph, review.entities, review.claims]);
+
+  const highlightsBySection = useMemo(
+    () => groupHighlightsBySection(factHighlights, review.sections),
+    [factHighlights, review.sections]
+  );
+
   const verificationSummary = useMemo(() => {
     const total = review.claims.length;
     const verified = review.claims.filter(c => c.verification.status === 'verified').length;
@@ -453,6 +491,19 @@ function DocumentReviewView({ review, onReverify, onExport, onDelete }: Document
       unverified,
     };
   }, [review.claims]);
+
+  useEffect(() => {
+    if (!selectedClaimId) return;
+    const el = document.getElementById(`highlight-${selectedClaimId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('ring-2', 'ring-purple-400', 'ring-offset-1', 'ring-offset-[#1A1D28]');
+      const timeout = window.setTimeout(() => {
+        el.classList.remove('ring-2', 'ring-purple-400', 'ring-offset-1', 'ring-offset-[#1A1D28]');
+      }, 1800);
+      return () => window.clearTimeout(timeout);
+    }
+  }, [selectedClaimId]);
 
   return (
     <div className="flex h-full flex-col">
@@ -509,55 +560,43 @@ function DocumentReviewView({ review, onReverify, onExport, onDelete }: Document
             </div>
           </section>
 
-          <section className="border-b border-gray-800/40 p-4">
-            <span className="block text-xs uppercase tracking-wide text-gray-500 mb-3">
-              Entities
-            </span>
-            <ul className="space-y-2 text-xs text-gray-400">
-              {review.entities.map((entity) => (
-                <li key={entity.name}>
-                  <span className="font-medium text-gray-200">{entity.name}</span>
-                  <span className="ml-1 text-[10px] uppercase tracking-wide text-gray-500">{entity.type}</span>
-                  <span className="ml-1 text-[10px] text-gray-600">
-                    ({entity.occurrences.length})
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </section>
+          {factHighlights.length > 0 && (
+            <FactHighlightsPanel
+              highlights={factHighlights}
+              selectedId={selectedClaimId}
+              onSelect={setSelectedClaimId}
+            />
+          )}
 
-          <section className="p-4">
-            <span className="block text-xs uppercase tracking-wide text-gray-500 mb-3">
-              Timeline events
-            </span>
-            {timeline.length === 0 ? (
-              <div className="text-xs text-gray-500">No events detected.</div>
-            ) : (
-              <ul className="space-y-2 text-xs text-gray-400">
-                {timeline.map((event, idx) => (
-                  <li key={`${event.date}-${idx}`}>
-                    <div className="font-medium text-gray-200">{event.date}</div>
-                    <div className="text-[11px]">{event.description}</div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+          {assumptions.length > 0 && (
+            <AssumptionsPanel assumptions={assumptions} onSelect={setSelectedClaimId} />
+          )}
+
+          <EntityGraphPanel graph={entityGraph} onSelect={setSelectedClaimId} />
+          <TimelinePanel timeline={timeline} />
         </aside>
 
         <section className="flex-1 overflow-y-auto">
           <article className="space-y-6 p-8">
-            {review.sections.map((section, idx) => (
-              <div key={section.title + idx} className="space-y-2">
-                <h3 className={`font-semibold text-gray-100 text-${Math.max(2, 4 - Math.min(section.level, 3))}xl`}>
-                  {section.title}
-                </h3>
-                <p className="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">
-                  {section.content.trim()}
-                </p>
-              </div>
-            ))}
+            {review.sections.map((section, idx) => {
+              const sectionHighlights = highlightsBySection.get(section.title) ?? [];
+              const headingSize = Math.max(2, 4 - Math.min(section.level, 3));
+              return (
+                <div key={section.title + idx} className="space-y-2">
+                  <h3 className={`font-semibold text-gray-100 text-${headingSize}xl`}>
+                    {section.title}
+                  </h3>
+                  <p className="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">
+                    {renderSectionContent(section, sectionHighlights, selectedClaimId)}
+                  </p>
+                </div>
+              );
+            })}
           </article>
+
+          {auditTrail.length > 0 && (
+            <AuditTrailTable auditTrail={auditTrail} onSelect={setSelectedClaimId} />
+          )}
         </section>
 
         <aside className="w-96 border-l border-gray-800/40 bg-[#181C27] flex flex-col">
@@ -650,6 +689,305 @@ function DocumentReviewView({ review, onReverify, onExport, onDelete }: Document
         </AnimatePresence>
       )}
     </div>
+  );
+}
+
+function groupHighlightsBySection(highlights: FactHighlight[], sections: DocumentReview['sections']) {
+  const map = new Map<string, FactHighlight[]>();
+  if (highlights.length === 0) return map;
+
+  highlights.forEach((highlight) => {
+    const section =
+      sections.find(
+        (sec) =>
+          highlight.position >= sec.startPosition && highlight.position < sec.endPosition
+      ) || sections.find((sec) => sec.title === highlight.section);
+    const key = section?.title || highlight.section || 'Document';
+    const list = map.get(key) ?? [];
+    list.push(highlight);
+    map.set(key, list);
+  });
+
+  return map;
+}
+
+const highlightTone: Record<FactHighlight['importance'], string> = {
+  verified: 'bg-emerald-500/20 text-emerald-100 border border-emerald-500/30',
+  disputed: 'bg-amber-500/20 text-amber-100 border border-amber-500/30',
+  unverified: 'bg-slate-500/20 text-slate-100 border border-slate-500/30',
+};
+
+function renderSectionContent(
+  section: DocumentReview['sections'][number],
+  highlights: FactHighlight[],
+  activeClaimId: string | null
+) {
+  if (highlights.length === 0) return section.content.trim();
+
+  const content = section.content;
+  const lower = content.toLowerCase();
+  const sorted = [...highlights].sort((a, b) => a.position - b.position);
+  const nodes: Array<string | JSX.Element> = [];
+  let cursor = 0;
+
+  sorted.forEach((highlight) => {
+    const needle = highlight.text.trim();
+    if (!needle) return;
+
+    const search = needle.toLowerCase();
+    let index = lower.indexOf(search, cursor);
+    if (index === -1) {
+      index = lower.indexOf(search, 0);
+      if (index === -1) return;
+    }
+
+    if (index > cursor) {
+      nodes.push(content.slice(cursor, index));
+    }
+
+    const markedText = content.slice(index, index + needle.length);
+    nodes.push(
+      <mark
+        key={`${highlight.claimId}-${index}`}
+        id={`highlight-${highlight.claimId}`}
+        className={`rounded px-1 ${highlightTone[highlight.importance]} ${
+          activeClaimId === highlight.claimId ? 'ring-2 ring-purple-400 ring-offset-1 ring-offset-[#1A1D28]' : ''
+        }`}
+      >
+        {markedText}
+      </mark>
+    );
+    cursor = index + needle.length;
+  });
+
+  if (cursor < content.length) {
+    nodes.push(content.slice(cursor));
+  }
+
+  return nodes;
+}
+
+function FactHighlightsPanel({
+  highlights,
+  selectedId,
+  onSelect,
+}: {
+  highlights: FactHighlight[];
+  selectedId: string | null;
+  onSelect(id: string): void;
+}) {
+  const ordered = [...highlights].sort((a, b) => {
+    const rank = { verified: 0, disputed: 1, unverified: 2 } as const;
+    return rank[a.importance] - rank[b.importance];
+  });
+
+  return (
+    <section className="border-b border-gray-800/40 p-4 space-y-3">
+      <div className="flex items-center gap-2 text-emerald-200">
+        <Highlighter size={14} />
+        <span className="text-xs uppercase tracking-wide">Fact highlights</span>
+      </div>
+      <ul className="space-y-2 text-xs">
+        {ordered.map((highlight) => (
+          <li key={highlight.claimId}>
+            <button
+              onClick={() => onSelect(highlight.claimId)}
+              className={`w-full rounded border px-2 py-2 text-left transition-colors ${
+                selectedId === highlight.claimId
+                  ? 'border-purple-500/40 bg-purple-500/10 text-purple-100'
+                  : 'border-emerald-500/30 bg-emerald-500/5 text-emerald-100 hover:bg-emerald-500/10'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold">{highlight.section || 'Document'}</span>
+                <span className="text-[10px] uppercase tracking-wide">
+                  {highlight.importance}
+                </span>
+              </div>
+              <p className="mt-1 text-[11px] text-emerald-100/90 line-clamp-3">{highlight.text}</p>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+const assumptionTone: Record<AssumptionHighlight['severity'], string> = {
+  low: 'border-sky-500/30 bg-sky-500/5 text-sky-100',
+  medium: 'border-amber-500/30 bg-amber-500/10 text-amber-100',
+  high: 'border-red-500/40 bg-red-500/10 text-red-100',
+};
+
+function AssumptionsPanel({
+  assumptions,
+  onSelect,
+}: {
+  assumptions: AssumptionHighlight[];
+  onSelect(id: string): void;
+}) {
+  return (
+    <section className="border-b border-gray-800/40 p-4 space-y-3">
+      <div className="flex items-center gap-2 text-amber-200">
+        <AlertTriangle size={14} />
+        <span className="text-xs uppercase tracking-wide">Assumptions & gaps</span>
+      </div>
+      <ul className="space-y-2 text-xs">
+        {assumptions.map((assumption) => (
+          <li key={assumption.claimId}>
+            <button
+              onClick={() => onSelect(assumption.claimId)}
+              className={`w-full rounded border px-2 py-2 text-left ${assumptionTone[assumption.severity]} hover:opacity-90 transition-opacity`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold">{assumption.section || 'Document'}</span>
+                <span className="text-[10px] uppercase tracking-wide">{assumption.severity}</span>
+              </div>
+              <p className="mt-1 text-[11px] opacity-90">{assumption.text}</p>
+              <p className="mt-1 text-[10px] opacity-70">{assumption.rationale}</p>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function EntityGraphPanel({
+  graph,
+  onSelect,
+}: {
+  graph: NonNullable<DocumentReview['entityGraph']>;
+  onSelect(id: string): void;
+}) {
+  return (
+    <section className="border-b border-gray-800/40 p-4 space-y-3">
+      <div className="flex items-center gap-2 text-blue-200">
+        <GitBranch size={14} />
+        <span className="text-xs uppercase tracking-wide">Entity graph</span>
+      </div>
+      <ul className="space-y-2 text-xs text-gray-300">
+        {graph.slice(0, 12).map((node) => (
+          <li
+            key={node.name}
+            className="rounded border border-blue-500/30 bg-blue-500/5 px-2 py-2"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-semibold text-blue-100">{node.name}</span>
+              <span className="text-[10px] uppercase tracking-wide text-blue-200">
+                {node.type} • {node.count}
+              </span>
+            </div>
+            {node.connections.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {node.connections.map((connection) => (
+                  <button
+                    key={connection}
+                    onClick={() => onSelect(connection)}
+                    className="rounded-full border border-blue-500/30 px-2 py-0.5 text-[10px] text-blue-100 hover:bg-blue-500/20"
+                  >
+                    Jump to claim
+                  </button>
+                ))}
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function TimelinePanel({ timeline }: { timeline: DocumentReview['timeline'] }) {
+  return (
+    <section className="p-4 space-y-3">
+      <div className="flex items-center gap-2 text-gray-300">
+        <Clock3 size={14} />
+        <span className="text-xs uppercase tracking-wide">Timeline events</span>
+      </div>
+      {timeline.length === 0 ? (
+        <div className="text-xs text-gray-500">No events detected.</div>
+      ) : (
+        <ul className="space-y-3 text-xs text-gray-300">
+          {timeline.map((event, idx) => (
+            <li key={`${event.date}-${idx}`} className="relative pl-4">
+              <span className="absolute left-0 top-1 h-2 w-2 rounded-full bg-purple-400" />
+              <div className="font-semibold text-gray-200">{event.date}</div>
+              <div className="text-[11px] text-gray-400">{event.description}</div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function AuditTrailTable({
+  auditTrail,
+  onSelect,
+}: {
+  auditTrail: AuditTrailEntry[];
+  onSelect(id: string): void;
+}) {
+  return (
+    <section className="px-8 pb-8">
+      <div className="rounded border border-gray-800 bg-neutral-900/40">
+        <header className="flex items-center justify-between border-b border-gray-800 px-4 py-3">
+          <div className="flex items-center gap-2 text-gray-200">
+            <BookOpenCheck size={16} />
+            <h3 className="text-sm font-semibold">Audit trail</h3>
+          </div>
+          <span className="text-[11px] text-gray-500">Linked to source evidence</span>
+        </header>
+        <div className="max-h-64 overflow-y-auto">
+          <table className="min-w-full divide-y divide-gray-800 text-xs text-gray-300">
+            <thead className="bg-neutral-900/80 text-[11px] uppercase tracking-wide text-gray-500">
+              <tr>
+                <th className="px-3 py-2 text-left">Claim</th>
+                <th className="px-3 py-2 text-left">Location</th>
+                <th className="px-3 py-2 text-left">Status</th>
+                <th className="px-3 py-2 text-left">Source</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-800">
+              {auditTrail.map((entry) => (
+                <tr key={entry.claimId} className="hover:bg-neutral-800/40">
+                  <td className="px-3 py-2">
+                    <button
+                      className="text-indigo-200 hover:text-indigo-100"
+                      onClick={() => onSelect(entry.claimId)}
+                    >
+                      Claim {entry.claimId.split('_').pop()}
+                    </button>
+                  </td>
+                  <td className="px-3 py-2 text-[11px] text-gray-400">
+                    {entry.section || '—'}
+                    {entry.page !== undefined && (
+                      <span className="ml-1">• p.{entry.page}</span>
+                    )}
+                    {entry.line !== undefined && (
+                      <span className="ml-1">• line {entry.line}</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    <StatusPill status={entry.status} />
+                  </td>
+                  <td className="px-3 py-2 text-[11px] text-gray-400">
+                    {entry.link ? (
+                      <a href={entry.link} target="_blank" rel="noreferrer" className="text-indigo-300 hover:text-indigo-100">
+                        Open source
+                      </a>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
   );
 }
 

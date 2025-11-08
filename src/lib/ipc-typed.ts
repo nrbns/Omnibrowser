@@ -154,11 +154,17 @@ export async function ipcCall<TRequest, TResponse = unknown>(
  */
 export const ipc = {
   tabs: {
-    create: async (url?: string) => {
+    create: async (input?: string | { url?: string; profileId?: string; mode?: 'normal' | 'ghost' | 'private'; containerId?: string }) => {
       try {
         // Wait for IPC to be ready
         await waitForIPC(5000);
-        const result = await ipcCall('tabs:create', { url: url || 'about:blank' });
+        const payload = typeof input === 'string' ? { url: input } : (input || {});
+        const result = await ipcCall('tabs:create', {
+          url: payload.url || 'about:blank',
+          profileId: payload.profileId,
+          mode: payload.mode,
+          containerId: payload.containerId,
+        });
         if (process.env.NODE_ENV === 'development') {
           console.log('[IPC] Tab created:', result);
         }
@@ -212,7 +218,23 @@ export const ipc = {
     reload: (id: string) => ipcCall('tabs:reload', { id }).catch(err => console.warn('Failed to reload:', err)),
     list: async () => {
       try {
-        const result = await ipcCall<unknown, Array<{ id: string; title: string; active: boolean; url?: string; mode?: 'normal' | 'ghost' | 'private' }>>('tabs:list', {});
+        const result = await ipcCall<
+          unknown,
+          Array<{
+            id: string;
+            title: string;
+            active: boolean;
+            url?: string;
+            mode?: 'normal' | 'ghost' | 'private';
+            containerId?: string;
+            containerName?: string;
+            containerColor?: string;
+            createdAt?: number;
+            lastActiveAt?: number;
+            sessionId?: string;
+            profileId?: string;
+          }>
+        >('tabs:list', {});
         return Array.isArray(result) ? result : [];
       } catch (error) {
         console.warn('Failed to list tabs:', error);
@@ -221,11 +243,34 @@ export const ipc = {
     },
     hibernate: (id: string) => ipcCall('tabs:hibernate', { id }),
     burn: (id: string) => ipcCall('tabs:burn', { id }),
-    onUpdated: (callback: (tabs: Array<{ id: string; title: string; active: boolean; url?: string; mode?: 'normal' | 'ghost' | 'private' }>) => void) => {
+    onUpdated: (callback: (tabs: Array<{ id: string; title: string; active: boolean; url?: string; mode?: 'normal' | 'ghost' | 'private'; containerId?: string; containerName?: string; containerColor?: string; createdAt?: number; lastActiveAt?: number; sessionId?: string; profileId?: string }>) => void) => {
       if ((window.ipc as any)?.on) {
         (window.ipc as any).on('tabs:updated', (_event: any, tabs: any[]) => callback(tabs));
       }
     },
+    setContainer: (id: string, containerId: string) =>
+      ipcCall<{ id: string; containerId: string }, { success: boolean; error?: string }>('tabs:setContainer', {
+        id,
+        containerId,
+      }),
+  },
+  containers: {
+    list: () =>
+      ipcCall<unknown, Array<{ id: string; name: string; color: string; icon?: string; description?: string; scope: string; persistent: boolean; system?: boolean }>>('containers:list', {}),
+    getActive: () =>
+      ipcCall<unknown, { id: string; name: string; color: string; icon?: string; description?: string; scope?: string; persistent?: boolean; system?: boolean }>('containers:getActive', {}),
+    setActive: (containerId: string) =>
+      ipcCall<{ containerId: string }, { id: string; name: string; color: string; icon?: string; description?: string; scope?: string; persistent?: boolean; system?: boolean }>('containers:setActive', { containerId }),
+    create: (payload: { name: string; color?: string; icon?: string }) =>
+      ipcCall<{ name: string; color?: string; icon?: string }, { id: string; name: string; color: string; icon?: string; description?: string; scope?: string; persistent?: boolean; system?: boolean }>('containers:create', payload),
+    getPermissions: (containerId: string) =>
+      ipcCall<{ containerId: string }, { containerId: string; permissions: string[] }>('containers:getPermissions', { containerId }),
+    setPermission: (containerId: string, permission: 'media' | 'display-capture' | 'notifications' | 'fullscreen', enabled: boolean) =>
+      ipcCall<{ containerId: string; permission: 'media' | 'display-capture' | 'notifications' | 'fullscreen'; enabled: boolean }, { containerId: string; permissions: string[] }>('containers:setPermission', { containerId, permission, enabled }),
+    getSitePermissions: (containerId: string) =>
+      ipcCall<{ containerId: string }, Array<{ permission: 'media' | 'display-capture' | 'notifications' | 'fullscreen'; origins: string[] }>>('containers:getSitePermissions', { containerId }),
+    revokeSitePermission: (containerId: string, permission: 'media' | 'display-capture' | 'notifications' | 'fullscreen', origin: string) =>
+      ipcCall<{ containerId: string; permission: 'media' | 'display-capture' | 'notifications' | 'fullscreen'; origin: string }, Array<{ permission: 'media' | 'display-capture' | 'notifications' | 'fullscreen'; origins: string[] }>>('containers:revokeSitePermission', { containerId, permission, origin }),
   },
   proxy: {
     set: (config: { type: 'socks5' | 'http'; host: string; port: number; username?: string; password?: string; tabId?: string; profileId?: string }) =>
@@ -234,16 +279,125 @@ export const ipc = {
     getForTab: (tabId: string) => ipcCall<unknown, { proxy: { type: string; host: string; port: number } | null }>('proxy:getForTab', { tabId }),
   },
   profiles: {
-    create: (name: string, proxy?: unknown) =>
-      ipcCall('profiles:create', { name, proxy }),
-    list: () => ipcCall<unknown, Array<{ id: string; name: string; createdAt: number; proxy?: unknown }>>('profiles:list', {}),
-    get: (id: string) => ipcCall('profiles:get', { id }),
+    create: (
+      input: string | { name: string; proxy?: unknown; color?: string },
+      proxy?: unknown,
+    ) => {
+      if (typeof input === 'string') {
+        return ipcCall('profiles:create', { name: input, proxy });
+      }
+      return ipcCall('profiles:create', input);
+    },
+    list: () =>
+      ipcCall<
+        unknown,
+        Array<{
+          id: string;
+          name: string;
+          createdAt: number;
+          proxy?: unknown;
+          kind?: 'default' | 'work' | 'personal' | 'custom';
+          color?: string;
+          system?: boolean;
+          policy?: {
+            allowDownloads: boolean;
+            allowPrivateWindows: boolean;
+            allowGhostTabs: boolean;
+            allowScreenshots: boolean;
+            allowClipping: boolean;
+          };
+          description?: string;
+        }>
+      >('profiles:list', {}),
+    get: (id: string) =>
+      ipcCall<
+        { id: string },
+        {
+          id: string;
+          name: string;
+          createdAt: number;
+          proxy?: unknown;
+          kind?: 'default' | 'work' | 'personal' | 'custom';
+          color?: string;
+          system?: boolean;
+          policy?: {
+            allowDownloads: boolean;
+            allowPrivateWindows: boolean;
+            allowGhostTabs: boolean;
+            allowScreenshots: boolean;
+            allowClipping: boolean;
+          };
+          description?: string;
+        }
+      >('profiles:get', { id }),
     delete: (id: string) => ipcCall('profiles:delete', { id }),
     updateProxy: (profileId: string, proxy?: unknown) => ipcCall('profiles:updateProxy', { profileId, proxy }),
+    setActive: (profileId: string) =>
+      ipcCall<
+        { profileId: string },
+        {
+          id: string;
+          name: string;
+          color?: string;
+          kind?: 'default' | 'work' | 'personal' | 'custom';
+          system?: boolean;
+          policy?: {
+            allowDownloads: boolean;
+            allowPrivateWindows: boolean;
+            allowGhostTabs: boolean;
+            allowScreenshots: boolean;
+            allowClipping: boolean;
+          };
+          description?: string;
+        }
+      >('profiles:setActive', { profileId }),
+    getActive: () =>
+      ipcCall<
+        unknown,
+        {
+          id: string;
+          name: string;
+          color?: string;
+          kind?: 'default' | 'work' | 'personal' | 'custom';
+          system?: boolean;
+          policy?: {
+            allowDownloads: boolean;
+            allowPrivateWindows: boolean;
+            allowGhostTabs: boolean;
+            allowScreenshots: boolean;
+            allowClipping: boolean;
+          };
+          description?: string;
+        }
+      >('profiles:getActive', {}),
+    getPolicy: (profileId?: string) =>
+      ipcCall<
+        { profileId?: string },
+        {
+          allowDownloads: boolean;
+          allowPrivateWindows: boolean;
+          allowGhostTabs: boolean;
+          allowScreenshots: boolean;
+          allowClipping: boolean;
+        }
+      >('profiles:getPolicy', profileId ? { profileId } : {}),
   },
   settings: {
     get: () => ipcCall<unknown, unknown>('settings:get', {}),
     set: (path: string[], value: unknown) => ipcCall('settings:set', { path, value }),
+    exportFile: () =>
+      ipcCall<unknown, { success: boolean; path?: string; canceled?: boolean }>('settings:exportAll', {}),
+    importFile: () =>
+      ipcCall<
+        unknown,
+        { success: boolean; path?: string; settings?: unknown; canceled?: boolean }
+      >('settings:importAll', {}),
+  },
+  diagnostics: {
+    openLogs: () =>
+      ipcCall<unknown, { success: boolean }>('diagnostics:openLogs', {}),
+    copyDiagnostics: () =>
+      ipcCall<unknown, { diagnostics: string }>('diagnostics:copy', {}),
   },
   agent: {
     createTask: (task: unknown) => ipcCall('agent:createTask', task),
@@ -335,8 +489,22 @@ export const ipc = {
       ipcCall('research:saveNotes', { url, notes, highlights }),
     getNotes: (url: string) =>
       ipcCall<{ url: string }, { notes: string; highlights: any[] }>('research:getNotes', { url }),
-    export: (format: 'markdown' | 'csv' | 'json', sources: string[], includeNotes?: boolean) =>
-      ipcCall('research:export', { format, sources, includeNotes: includeNotes ?? true }),
+    export: (
+      format: 'markdown' | 'obsidian' | 'notion',
+      sources: string[],
+      includeNotes?: boolean,
+    ) =>
+      ipcCall<
+        { format: 'markdown' | 'obsidian' | 'notion'; sources: string[]; includeNotes?: boolean },
+        {
+          success: boolean;
+          format: 'markdown' | 'obsidian' | 'notion';
+          path?: string;
+          folder?: string;
+          paths?: string[];
+          notionPages?: Array<{ id: string; url: string; title: string }>;
+        }
+      >('research:export', { format, sources, includeNotes: includeNotes ?? true }),
     queryEnhanced: (query: string, options?: {
       maxSources?: number;
       includeCounterpoints?: boolean;
@@ -355,6 +523,21 @@ export const ipc = {
       ResearchResult
     >('research:queryEnhanced', { query, ...options }),
     clearCache: () => ipcCall('research:clearCache', {}),
+  },
+  reader: {
+    summarize: (request: { url?: string; title?: string; content: string; html?: string }) =>
+      ipcCall<
+        { url?: string; title?: string; content: string; html?: string },
+        {
+          mode: 'local' | 'cloud' | 'extractive';
+          bullets: Array<{ summary: string; citation?: { text: string; url?: string } }>;
+        }
+      >('reader:summarize', request),
+    export: (request: { url?: string; title?: string; html: string }) =>
+      ipcCall<
+        { url?: string; title?: string; html: string },
+        { success: boolean; path?: string }
+      >('reader:export', request),
   },
   document: {
     ingest: (source: string, type: 'pdf' | 'docx' | 'web', title?: string) =>
@@ -384,6 +567,17 @@ export const ipc = {
     pause: (id: string) => ipcCall<{ id: string }, { success: boolean; error?: string }>('downloads:pause', { id }),
     resume: (id: string) => ipcCall<{ id: string }, { success: boolean; error?: string }>('downloads:resume', { id }),
     cancel: (id: string) => ipcCall<{ id: string }, { success: boolean; error?: string }>('downloads:cancel', { id }),
+  },
+  watchers: {
+    list: () => ipcCall<unknown, Array<{ id: string; url: string; createdAt: number; intervalMinutes: number; lastCheckedAt?: number; lastHash?: string; lastChangeAt?: number; status: string; error?: string }>>('watchers:list', {}),
+    add: (request: { url: string; intervalMinutes?: number }) =>
+      ipcCall<{ url: string; intervalMinutes?: number }, { id: string; url: string; createdAt: number; intervalMinutes: number; status: string }>('watchers:add', request),
+    remove: (id: string) =>
+      ipcCall<{ id: string }, { success: boolean }>('watchers:remove', { id }),
+    trigger: (id: string) =>
+      ipcCall<{ id: string }, { success: boolean; error?: string }>('watchers:trigger', { id }),
+    updateInterval: (id: string, intervalMinutes: number) =>
+      ipcCall<{ id: string; intervalMinutes: number }, { success: boolean; error?: string }>('watchers:updateInterval', { id, intervalMinutes }),
   },
   history: {
     list: () => ipcCall<unknown, any[]>('history:list', {}),
@@ -465,6 +659,14 @@ export const ipc = {
     replay: (bundleId: string, options?: { restoreWorkspace?: boolean; replayAgent?: boolean }) =>
       ipcCall('session-bundle:replay', { bundleId, ...options }),
     list: () => ipcCall<unknown, { bundles: any[] }>('session-bundle:list', {}),
+  },
+  sessionState: {
+    summary: () =>
+      ipcCall<unknown, { summary: { updatedAt: number; windowCount: number; tabCount: number } | null }>(
+        'session:lastSnapshotSummary',
+        {},
+      ),
+    restore: () => ipcCall<unknown, { restored: boolean; tabCount?: number; error?: string }>('session:restoreLast', {}),
   },
   historyGraph: {
     recordNavigation: (fromUrl: string | null, toUrl: string, title?: string) =>

@@ -11,6 +11,7 @@ import { getShieldsService } from './shields';
 import { tabProxies } from './proxy';
 import { getVideoCallOptimizer } from './video-call-optimizer';
 import { getSessionManager } from './sessions';
+import { getContainerManager, ContainerPermission } from './containers';
 import {
   TabCreateRequest,
   TabCreateResponse,
@@ -22,6 +23,7 @@ import {
   TabGoForwardRequest,
   TabReloadRequest,
   TabListResponse,
+  TabSetContainerRequest,
 } from '../shared/ipc/schema';
 
 type TabMode = 'normal' | 'ghost' | 'private';
@@ -32,6 +34,13 @@ type TabRecord = {
   partition: string;
   sessionId?: string; // Track which session this tab belongs to
   mode: TabMode;
+  containerId?: string;
+  containerName?: string;
+  containerColor?: string;
+  containerIcon?: string;
+  createdAt: number;
+  lastActiveAt: number;
+  profileId?: string;
 };
 
 const windowIdToTabs = new Map<number, TabRecord[]>();
@@ -41,6 +50,14 @@ const resizeTimers = new WeakMap<BrowserWindow, NodeJS.Timeout>();
 const pendingBoundsUpdateTimers = new Map<string, NodeJS.Timeout>();
 const cleanupRegistered = new WeakMap<BrowserWindow, boolean>(); // Track cleanup registration
 
+const findTabByWebContents = (wc: Electron.WebContents): TabRecord | undefined => {
+  for (const tabs of windowIdToTabs.values()) {
+    const found = tabs.find(tab => tab.view.webContents === wc);
+    if (found) return found;
+  }
+  return undefined;
+};
+
 interface CreateTabOptions {
   url?: string;
   profileId?: string;
@@ -49,6 +66,10 @@ interface CreateTabOptions {
   mode?: TabMode;
   activate?: boolean;
   fromSessionRestore?: boolean;
+  containerId?: string;
+  id?: string;
+  createdAt?: number;
+  lastActiveAt?: number;
 }
 
 // Track warned tab IDs with timestamp to prevent spam (only warn once per tab ID per minute)
@@ -89,6 +110,12 @@ export function registerTabIpc(win: BrowserWindow) {
     return;
   }
   registeredWindows.add(win);
+  const containerManager = getContainerManager();
+  const activeContainer = containerManager.getActiveForWindow(win);
+  (win as any).__ob_defaultContainerId = activeContainer.id;
+  win.once('closed', () => {
+    containerManager.removeWindow(win.id);
+  });
   
   // Increase max listeners for this window to prevent warnings
   // Multiple IPC handlers and event listeners can add up quickly
@@ -107,6 +134,13 @@ export function registerTabIpc(win: BrowserWindow) {
         url,
         active: t.id === active,
         mode: t.mode,
+        containerId: t.containerId,
+        containerName: t.containerName,
+        containerColor: t.containerColor,
+        createdAt: t.createdAt,
+        lastActiveAt: t.lastActiveAt,
+        sessionId: t.sessionId,
+        profileId: t.profileId,
       };
     });
     // Send to both legacy and typed IPC listeners
@@ -120,44 +154,79 @@ export function registerTabIpc(win: BrowserWindow) {
   };
 
   const createTabInternal = async (options: CreateTabOptions = {}) => {
-    const id = randomUUID();
+    const id = options.id ?? randomUUID();
     const defaultMode: TabMode = (win as any).__ob_tabModeDefault ?? 'normal';
     const mode: TabMode = options.mode ?? defaultMode;
     const targetUrl = options.url || 'about:blank';
     let partition = options.partitionOverride;
-    let basePartition: string | undefined;
     let sessionId: string | undefined = mode === 'normal' ? options.sessionId : undefined;
     let sess: Electron.Session;
-
+    let partitionOptions: Electron.FromPartitionOptions | undefined = mode === 'normal' ? undefined : { cache: false };
+    let containerIdResolved: string | undefined = options.containerId;
     const sessionManager = getSessionManager();
     const activeSession = sessionManager.getActiveSession();
+    const defaultContainerId: string = (win as any).__ob_defaultContainerId ?? 'default';
+    const activeProfileId: string = (win as any).__ob_activeProfileId ?? 'default';
+    const resolvedProfileId = options.profileId ?? (activeProfileId !== 'default' ? activeProfileId : undefined);
+
+    if (mode === 'ghost') {
+      containerIdResolved = 'stealth';
+    } else if (mode === 'private') {
+      containerIdResolved = (win as any).__ob_defaultContainerId || 'default';
+    }
+
+    let containerMeta = containerManager.getContainer(containerIdResolved || defaultContainerId);
+    containerIdResolved = containerMeta.id;
+    let deriveSitePartition = mode === 'normal';
 
     if (!partition) {
       if (mode === 'ghost') {
         partition = `temp:ghost:${randomUUID()}`;
+        partitionOptions = { cache: false };
+        sessionId = undefined;
+        deriveSitePartition = false;
       } else if (mode === 'private') {
-        basePartition = (win as any).__ob_defaultPartitionOverride || `temp:private:${randomUUID()}`;
+        partition = (win as any).__ob_defaultPartitionOverride || `temp:private:${randomUUID()}`;
+        partitionOptions = { cache: false };
+        sessionId = undefined;
+        deriveSitePartition = false;
       } else {
-        if (options.profileId) {
-          basePartition = `persist:profile:${options.profileId}`;
+        let sessionPartition: string | undefined;
+        if (resolvedProfileId) {
+          sessionPartition = `persist:profile:${resolvedProfileId}`;
         } else if (sessionId) {
-          basePartition = sessionManager.getSessionPartition(sessionId);
+          sessionPartition = sessionManager.getSessionPartition(sessionId);
         } else if (activeSession) {
-          basePartition = sessionManager.getSessionPartition(activeSession.id);
+          sessionPartition = sessionManager.getSessionPartition(activeSession.id);
           sessionId = activeSession.id;
         } else {
-          basePartition = `ephemeral:${randomUUID()}`;
+          sessionPartition = sessionManager.getSessionPartition('default');
           sessionId = 'default';
         }
-      }
 
-      if (!partition && basePartition) {
-        try {
-          const urlObj = new URL(targetUrl);
-          const origin = urlObj.origin;
-          const originHash = createHash('sha256').update(origin).digest('hex').slice(0, 16);
-          partition = `${basePartition}:site:${originHash}`;
-        } catch {
+        const resolution = containerManager.resolvePartition({
+          containerId: containerIdResolved || defaultContainerId,
+          sessionPartition,
+          sessionId,
+          tabId: id,
+        });
+
+        containerMeta = resolution.container;
+        containerIdResolved = containerMeta.id;
+        partitionOptions = resolution.partitionOptions;
+        deriveSitePartition = resolution.deriveSitePartition;
+        const basePartition = resolution.basePartition;
+
+        if (deriveSitePartition) {
+          try {
+            const urlObj = new URL(targetUrl);
+            const origin = urlObj.origin;
+            const originHash = createHash('sha256').update(origin).digest('hex').slice(0, 16);
+            partition = `${basePartition}:site:${originHash}`;
+          } catch {
+            partition = basePartition;
+          }
+        } else {
           partition = basePartition;
         }
       }
@@ -167,7 +236,6 @@ export function registerTabIpc(win: BrowserWindow) {
       partition = `temp:default:${randomUUID()}`;
     }
 
-    const partitionOptions = mode === 'normal' ? undefined : { cache: false };
     sess = session.fromPartition(partition, partitionOptions);
     if (mode !== 'normal') {
       sessionId = undefined;
@@ -212,16 +280,38 @@ export function registerTabIpc(win: BrowserWindow) {
     });
 
     // Permission handlers
-    sess.setPermissionRequestHandler((_wc, permission, callback) => {
-      if (['media', 'display-capture', 'notifications', 'fullscreen'].includes(permission)) {
-        callback(true);
-      } else {
+    sess.setPermissionRequestHandler((wc, permission, callback) => {
+      const record = findTabByWebContents(wc);
+      const containerId = record?.containerId ?? containerIdResolved ?? 'default';
+      const allowed = containerManager.isPermissionAllowed(containerId, permission);
+      if (!allowed) {
         callback(false);
+        return;
       }
+      let origin: string | undefined;
+      try {
+        origin = new URL(wc.getURL()).origin;
+      } catch {
+        origin = undefined;
+      }
+      if (origin) {
+        containerManager.recordSitePermission(containerId, permission as ContainerPermission, origin);
+      }
+      callback(true);
     });
-    sess.setPermissionCheckHandler((_wc, permission) => {
-      if (permission === 'media' || permission === 'fullscreen') {
-        return true;
+    sess.setPermissionCheckHandler((wc, permission) => {
+      const record = findTabByWebContents(wc);
+      const containerId = record?.containerId ?? containerIdResolved ?? 'default';
+      if (!containerManager.isPermissionAllowed(containerId, permission)) {
+        return false;
+      }
+      try {
+        const origin = new URL(wc.getURL()).origin;
+        if (origin) {
+          return containerManager.hasSitePermission(containerId, permission as ContainerPermission, origin);
+        }
+      } catch {
+        return false;
       }
       return false;
     });
@@ -312,7 +402,20 @@ export function registerTabIpc(win: BrowserWindow) {
     }
 
     const tabs = getTabs(win);
-    tabs.push({ id, view, partition: partition!, sessionId: sessionId || undefined, mode });
+    tabs.push({
+      id,
+      view,
+      partition: partition!,
+      sessionId: sessionId || undefined,
+      mode,
+      containerId: containerMeta.id,
+      containerName: containerMeta.name,
+      containerColor: containerMeta.color,
+      containerIcon: containerMeta.icon,
+      createdAt: options.createdAt ?? Date.now(),
+      lastActiveAt: options.lastActiveAt ?? Date.now(),
+      profileId: resolvedProfileId ?? activeProfileId,
+    });
 
     if (options.activate !== false) {
       setActiveTab(win, id);
@@ -341,6 +444,12 @@ export function registerTabIpc(win: BrowserWindow) {
   };
 
   (win as any).__ob_createTab = createTabInternal;
+  (win as any).__ob_closeAllTabs = () => {
+    const tabs = [...getTabs(win)];
+    for (const tab of tabs) {
+      void closeTabInternal(tab.id);
+    }
+  };
 
   // Typed IPC handlers
   registerHandler('tabs:list', z.object({}), async () => {
@@ -355,6 +464,13 @@ export function registerTabIpc(win: BrowserWindow) {
           active: t.id === active,
           url: url || 'about:blank',
           mode: t.mode,
+          containerId: t.containerId,
+          containerName: t.containerName,
+          containerColor: t.containerColor,
+          createdAt: t.createdAt,
+          lastActiveAt: t.lastActiveAt,
+          sessionId: t.sessionId,
+          profileId: t.profileId,
         };
       } catch (e) {
         // If webContents is destroyed, return basic info
@@ -364,6 +480,13 @@ export function registerTabIpc(win: BrowserWindow) {
           active: t.id === active,
           url: 'about:blank',
           mode: t.mode,
+          containerId: t.containerId,
+          containerName: t.containerName,
+          containerColor: t.containerColor,
+          createdAt: t.createdAt,
+          lastActiveAt: t.lastActiveAt,
+          sessionId: t.sessionId,
+          profileId: t.profileId,
         };
       }
     }) as z.infer<typeof TabListResponse>;
@@ -377,7 +500,8 @@ export function registerTabIpc(win: BrowserWindow) {
     return createTabInternal({
       url: request.url,
       profileId: request.profileId,
-      mode: defaultMode,
+      mode: request.mode ?? defaultMode,
+      containerId: request.containerId,
     }) as Promise<z.infer<typeof TabCreateResponse>>;
   });
 
@@ -391,26 +515,94 @@ export function registerTabIpc(win: BrowserWindow) {
     }) as Promise<z.infer<typeof TabCreateResponse>>;
   });
 
-  registerHandler('tabs:close', TabCloseRequest, async (_event, request) => {
+  registerHandler('tabs:setContainer', TabSetContainerRequest, async (_event, request) => {
     const tabs = getTabs(win);
-    const idx = tabs.findIndex(t => t.id === request.id);
+    const index = tabs.findIndex(t => t.id === request.id);
+    if (index === -1) {
+      return { success: false, error: 'Tab not found' };
+    }
+
+    const record = tabs[index];
+    if (!record || record.mode !== 'normal') {
+      return { success: false, error: 'Only normal tabs can switch containers' };
+    }
+
+    if (record.containerId === request.containerId) {
+      return { success: true, unchanged: true };
+    }
+
+    const wasActive = activeTabIdByWindow.get(win.id) === record.id;
+    let currentUrl = 'about:blank';
+    try {
+      currentUrl = record.view.webContents.getURL() || 'about:blank';
+    } catch {}
+
+    const createdAt = record.createdAt;
+    const sessionId = record.sessionId;
+    const profileId = record.profileId;
+
+    try {
+      win.removeBrowserView(record.view);
+    } catch {}
+    try {
+      record.view.webContents.removeAllListeners();
+      record.view.webContents.destroy?.();
+    } catch {}
+    try {
+      record.view.destroy?.();
+    } catch {}
+
+    clearPendingBoundsTimerForTab(win.id, record.id);
+    unregisterTab(record.id);
+    unregisterTabMemory(record.id);
+
+    tabs.splice(index, 1);
+
+    await createTabInternal({
+      id: record.id,
+      url: currentUrl,
+      sessionId,
+      profileId,
+      containerId: request.containerId,
+      activate: false,
+      createdAt,
+      lastActiveAt: Date.now(),
+    });
+
+    const updatedTabs = getTabs(win);
+    const newIndex = updatedTabs.findIndex(t => t.id === record.id);
+    if (newIndex > -1 && newIndex !== index) {
+      const [newRecord] = updatedTabs.splice(newIndex, 1);
+      updatedTabs.splice(index, 0, newRecord);
+    }
+
+    if (wasActive) {
+      setActiveTab(win, record.id);
+    } else {
+      emit();
+    }
+
+    return { success: true };
+  });
+
+  const closeTabInternal = async (tabId: string) => {
+    const tabs = getTabs(win);
+    const idx = tabs.findIndex(t => t.id === tabId);
     if (idx < 0) {
       return { success: false, error: 'Tab not found' };
     }
-    
+
     const [rec] = tabs.splice(idx, 1);
-    const wasActive = activeTabIdByWindow.get(win.id) === request.id;
-    clearPendingBoundsTimerForTab(win.id, request.id);
-    
-    // Unregister from sleep and memory monitoring
+    const wasActive = activeTabIdByWindow.get(win.id) === tabId;
+    clearPendingBoundsTimerForTab(win.id, tabId);
+
     try {
-      unregisterTab(request.id);
-      unregisterTabMemory(request.id);
+      unregisterTab(tabId);
+      unregisterTabMemory(tabId);
     } catch (e) {
       console.warn('Error unregistering tab:', e);
     }
-    
-    // Update session tab count
+
     if (rec.sessionId) {
       try {
         const sessionManager = getSessionManager();
@@ -420,19 +612,16 @@ export function registerTabIpc(win: BrowserWindow) {
         console.warn('Error updating session tab count:', e);
       }
     }
-    
-    // Close BrowserView and webContents
+
     try {
       win.removeBrowserView(rec.view);
       rec.view.webContents.close();
     } catch (e) {
       console.error('Error closing tab BrowserView:', e);
     }
-    
-    // If the closed tab was active, activate another tab
+
     if (wasActive) {
       if (tabs.length > 0) {
-        // Activate the tab at the same index, or the last tab if at the end
         const nextTab = tabs[Math.min(idx, tabs.length - 1)];
         if (nextTab) {
           setActiveTab(win, nextTab.id);
@@ -440,15 +629,16 @@ export function registerTabIpc(win: BrowserWindow) {
           activeTabIdByWindow.set(win.id, null);
         }
       } else {
-        // No tabs left, clear active tab
         activeTabIdByWindow.set(win.id, null);
       }
     }
-    
-    // Emit tab update immediately
+
     emit();
-    
     return { success: true };
+  };
+
+  registerHandler('tabs:close', TabCloseRequest, async (_event, request) => {
+    return closeTabInternal(request.id);
   });
 
   registerHandler('tabs:activate', TabActivateRequest, async (_event, request) => {
@@ -757,101 +947,40 @@ export function registerTabIpc(win: BrowserWindow) {
     const result = await (async () => {
       const tabs = getTabs(win);
       const active = activeTabIdByWindow.get(win.id);
-      return tabs.map(t => ({ id: t.id, title: t.view.webContents.getTitle() || 'New Tab', active: t.id === active }));
+      return tabs.map(t => {
+        let url = 'about:blank';
+        try {
+          url = t.view.webContents.getURL() || 'about:blank';
+        } catch {}
+        return {
+          id: t.id,
+          title: t.view.webContents.getTitle() || 'New Tab',
+          active: t.id === active,
+          url,
+          mode: t.mode,
+          containerId: t.containerId,
+          containerName: t.containerName,
+          containerColor: t.containerColor,
+          createdAt: t.createdAt,
+          lastActiveAt: t.lastActiveAt,
+          sessionId: t.sessionId,
+          profileId: t.profileId,
+        };
+      });
     })();
     return result;
   });
 
-  ipcMain.handle('tabs:create', async (_e, url: string) => {
-    // Convert legacy format to typed format
-    const request = TabCreateRequest.parse({ url });
-    const response = await (async () => {
-      const id = randomUUID();
-      const partition = request.profileId ? `persist:profile:${request.profileId}` : 'persist:default';
-      const sess = session.fromPartition(partition);
-      
-      const view = new BrowserView({ 
-        webPreferences: { 
-          session: sess, 
-          contextIsolation: true, 
-          sandbox: false, // Required for video playback
-          nodeIntegration: false,
-          webSecurity: true,
-          plugins: true,
-          autoplayPolicy: 'no-user-gesture-required',
-        } 
-      });
-      
-      view.webContents.on('enter-html-full-screen', () => { 
-        try { 
-          win.setFullScreen(true);
-          win.webContents.send('app:fullscreen-changed', { fullscreen: true });
-          setTimeout(() => {
-            const display = screen.getPrimaryDisplay();
-            const { width, height } = display.workAreaSize;
-            view.setBounds({ x: 0, y: 0, width, height });
-          }, 100);
-        } catch {} 
-      });
-      view.webContents.on('leave-html-full-screen', () => { 
-        try { 
-          win.setFullScreen(false);
-          win.webContents.send('app:fullscreen-changed', { fullscreen: false });
-          setTimeout(() => {
-            updateBrowserViewBounds(win, id);
-          }, 100);
-        } catch {} 
-      });
-      
-      // Set up media permissions
-      sess.setPermissionRequestHandler((_wc, permission, callback) => {
-        if (['media', 'display-capture', 'notifications', 'fullscreen'].includes(permission)) {
-          callback(true);
-        } else {
-          callback(false);
-        }
-      });
-      
-      sess.setPermissionCheckHandler((_wc, permission, _origin) => {
-        if (permission === 'media' || permission === 'fullscreen') {
-          return true;
-        }
-        return false;
-      });
-      
-      view.webContents.loadURL(request.url || 'about:blank').catch(()=>{});
-      view.webContents.on('page-title-updated', () => emit());
-      view.webContents.on('did-navigate', async (_e2, navUrl) => {
-        emit();
-        try {
-          const title = view.webContents.getTitle();
-          const hostname = new URL(navUrl).hostname;
-          pushHistory(navUrl, title || navUrl);
-          win.webContents.send('history:updated');
-          const text: string = await view.webContents.executeJavaScript('document.body.innerText.slice(0,5000)', true).catch(()=> '');
-          const entities = Array.from(new Set((text.match(/\b[A-Z][a-zA-Z]{2,}\b/g) || []).slice(0, 10)));
-          addToGraph({ key: navUrl, title, type: 'page' }, [ { src: hostname, dst: navUrl, rel: 'contains', weight: 1 } ]);
-          addToGraph({ key: hostname, title: hostname, type: 'site' });
-          for (const ent of entities) addToGraph({ key: `ent:${ent}`, title: ent, type: 'entity' }, [{ src: navUrl, dst: `ent:${ent}`, rel: 'mentions', weight: 1 }]);
-        } catch {}
-      });
-      
-      // Setup video call optimizer
-      const optimizer = getVideoCallOptimizer();
-      view.webContents.once('did-finish-load', () => {
-        const url = view.webContents.getURL();
-        if (url) {
-          optimizer.setupForWebContents(view.webContents, url);
-        }
-      });
-      
-      const tabs = getTabs(win);
-      tabs.push({ id, view, partition });
-      setActiveTab(win, id);
-      emit();
-      return id;
-    })();
-    return response;
+  ipcMain.handle('tabs:create', async (_e, payload: string | { url?: string; containerId?: string; profileId?: string; mode?: TabMode }) => {
+    const request = typeof payload === 'string' ? { url: payload } : (payload || {});
+    const defaultMode: TabMode = (win as any).__ob_tabModeDefault ?? 'normal';
+    return createTabInternal({
+      url: request.url,
+      profileId: request.profileId,
+      containerId: request.containerId,
+      mode: request.mode ?? defaultMode,
+      activate: true,
+    });
   });
 
   ipcMain.handle('tabs:close', async (_e, id: string) => {
@@ -898,88 +1027,13 @@ export function registerTabIpc(win: BrowserWindow) {
 
   ipcMain.handle('tabs:createWithProfile', async (_e, { url, accountId }: { url: string; accountId: string }) => {
     const request = TabCreateWithProfileRequest.parse({ url, accountId });
-    const result = await (async () => {
-      const id = randomUUID();
-      const partition = `persist:acct:${request.accountId}`;
-      const sess = session.fromPartition(partition);
-      
-      const view = new BrowserView({ 
-        webPreferences: { 
-          session: sess, 
-          contextIsolation: true, 
-          sandbox: false, // Required for video playback
-          nodeIntegration: false,
-          webSecurity: true,
-          plugins: true,
-          autoplayPolicy: 'no-user-gesture-required',
-        } 
-      });
-      
-      view.webContents.on('enter-html-full-screen', () => { 
-        try { 
-          win.setFullScreen(true);
-          win.webContents.send('app:fullscreen-changed', { fullscreen: true });
-          setTimeout(() => {
-            const display = screen.getPrimaryDisplay();
-            const { width, height } = display.workAreaSize;
-            view.setBounds({ x: 0, y: 0, width, height });
-          }, 100);
-        } catch {} 
-      });
-      view.webContents.on('leave-html-full-screen', () => { 
-        try { 
-          win.setFullScreen(false);
-          win.webContents.send('app:fullscreen-changed', { fullscreen: false });
-          setTimeout(() => {
-            updateBrowserViewBounds(win, id);
-          }, 100);
-        } catch {} 
-      });
-      
-      // Set up media permissions
-      sess.setPermissionRequestHandler((_wc, permission, callback) => {
-        if (['media', 'display-capture', 'notifications', 'fullscreen'].includes(permission)) {
-          callback(true);
-        } else {
-          callback(false);
-        }
-      });
-      
-      sess.setPermissionCheckHandler((_wc, permission, _origin) => {
-        if (permission === 'media' || permission === 'fullscreen') {
-          return true;
-        }
-        return false;
-      });
-      
-      view.webContents.loadURL(request.url || 'about:blank').catch(()=>{});
-      view.webContents.on('page-title-updated', () => emit());
-      view.webContents.on('did-navigate', async (_e2, navUrl) => {
-        emit();
-        try {
-          const title = view.webContents.getTitle();
-          const hostname = new URL(navUrl).hostname;
-          pushHistory(navUrl, title || navUrl);
-          win.webContents.send('history:updated');
-          const text: string = await view.webContents.executeJavaScript('document.body.innerText.slice(0,5000)', true).catch(()=> '');
-          const entities = Array.from(new Set((text.match(/\b[A-Z][a-zA-Z]{2,}\b/g) || []).slice(0, 10)));
-          addToGraph({ key: navUrl, title, type: 'page' }, [ { src: hostname, dst: navUrl, rel: 'contains', weight: 1 } ]);
-          addToGraph({ key: hostname, title: hostname, type: 'site' });
-          for (const ent of entities) addToGraph({ key: `ent:${ent}`, title: ent, type: 'entity' }, [{ src: navUrl, dst: `ent:${ent}`, rel: 'mentions', weight: 1 }]);
-        } catch {}
-      });
-      const tabs = getTabs(win);
-      tabs.push({ id, view, partition });
-      setActiveTab(win, id);
-      
-      // Register for sleep and memory monitoring
-      registerTab(id, view);
-      registerTabMemory(id, view);
-      
-      emit();
-      return id;
-    })();
-    return result;
+    const defaultMode: TabMode = (win as any).__ob_tabModeDefault ?? 'normal';
+    return createTabInternal({
+      url: request.url,
+      partitionOverride: `persist:acct:${request.accountId}`,
+      mode: defaultMode,
+      activate: true,
+    });
   });
 
   // Phantom overlay: highlight + pick
@@ -1086,6 +1140,7 @@ function setActiveTab(win: BrowserWindow, id: string) {
     
     // Set active tab ID
     activeTabIdByWindow.set(win.id, id);
+    rec.lastActiveAt = Date.now();
     
     // Add the active BrowserView
     win.addBrowserView(rec.view);
@@ -1124,6 +1179,9 @@ function setActiveTab(win: BrowserWindow, id: string) {
           url: url || 'about:blank',
           active: t.id === active,
           mode: t.mode,
+          containerId: t.containerId,
+          containerName: t.containerName,
+          containerColor: t.containerColor,
         };
       } catch (e) {
         return {
@@ -1132,6 +1190,9 @@ function setActiveTab(win: BrowserWindow, id: string) {
           url: 'about:blank',
           active: t.id === active,
           mode: t.mode,
+          containerId: t.containerId,
+          containerName: t.containerName,
+          containerColor: t.containerColor,
         };
       }
     });
@@ -1292,5 +1353,37 @@ ipcMain.handle('ui:setRightDock', (_e, px: number) => {
   if (active) setActiveTab(win, active);
   return true;
 });
+
+export async function createTabOnWindow(win: BrowserWindow, options: CreateTabOptions = {}) {
+  const createFn = (win as any).__ob_createTab as ((opts: CreateTabOptions) => Promise<{ id: string }>) | undefined;
+  if (!createFn) {
+    throw new Error('Tab IPC not registered for this window');
+  }
+  return createFn(options);
+}
+
+export function closeAllTabs(win: BrowserWindow) {
+  const closeFn = (win as any).__ob_closeAllTabs as (() => void) | undefined;
+  if (closeFn) {
+    closeFn();
+  }
+}
+
+export function getActiveTabIdForWindow(winId: number): string | null {
+  return activeTabIdByWindow.get(winId) ?? null;
+}
+
+export function activateTabByWindowId(winId: number, tabId: string) {
+  try {
+    const win = BrowserWindow.fromId(winId);
+    if (win && !win.isDestroyed()) {
+      setActiveTab(win, tabId);
+    }
+  } catch (error) {
+    if (process.env.NODE_ENV === 'development') {
+      console.warn('activateTabByWindowId failed:', error);
+    }
+  }
+}
 
 

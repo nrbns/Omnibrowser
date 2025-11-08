@@ -1,294 +1,389 @@
-import { app, BrowserWindow } from 'electron';
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
+import { BrowserWindow } from 'electron';
+import { EventEmitter } from 'events';
 import { randomUUID } from 'node:crypto';
-import { registerHandler } from '../shared/ipc/router';
 import { z } from 'zod';
+import { registerHandler } from '../shared/ipc/router';
 import {
-  ContainerSchema,
-  ContainerListResponse,
   ContainerCreateRequest,
+  ContainerPermissionSetRequest,
+  ContainerPermissionsResponse,
   ContainerSetActiveRequest,
 } from '../shared/ipc/schema';
 
-export interface Container {
+export type ContainerScope = 'global' | 'session' | 'ephemeral';
+export type ContainerPermission = 'media' | 'display-capture' | 'notifications' | 'fullscreen';
+
+const DEFAULT_ALLOWED_PERMISSIONS: ContainerPermission[] = [
+  'media',
+  'display-capture',
+  'notifications',
+  'fullscreen',
+];
+
+export interface ContainerProfile {
   id: string;
   name: string;
   color: string;
   icon?: string;
-  partition: string;
-  createdAt: number;
+  description?: string;
+  scope: ContainerScope;
+  persistent: boolean;
+  system?: boolean;
 }
 
-const CONTAINERS_FILE = path.join(app.getPath('userData'), 'containers.json');
-const containers = new Map<string, Container>();
-const activeContainerByWindow = new Map<number, string>();
-let initialized = false;
+export interface ResolveContainerPartitionParams {
+  containerId?: string;
+  sessionPartition?: string;
+  sessionId?: string;
+  tabId: string;
+}
 
-function broadcastContainers() {
-  const payload = { containers: listContainers() };
-  BrowserWindow.getAllWindows().forEach((win) => {
-    if (!win.isDestroyed()) {
-      try {
-        win.webContents.send('containers:list', payload);
-      } catch {}
+export interface ContainerPartitionResult {
+  container: ContainerProfile;
+  basePartition: string;
+  deriveSitePartition: boolean;
+  partitionOptions?: Electron.FromPartitionOptions;
+}
+
+const BUILT_IN_CONTAINERS: ContainerProfile[] = [
+  {
+    id: 'default',
+    name: 'Default',
+    color: '#3b82f6',
+    icon: 'globe',
+    description: 'Shared browsing context',
+    scope: 'session',
+    persistent: true,
+    system: true,
+  },
+  {
+    id: 'work',
+    name: 'Work',
+    color: '#6366f1',
+    icon: 'briefcase',
+    description: 'Isolated work logins and apps',
+    scope: 'session',
+    persistent: true,
+    system: true,
+  },
+  {
+    id: 'personal',
+    name: 'Personal',
+    color: '#f472b6',
+    icon: 'user',
+    description: 'Personal browsing with separate cookies',
+    scope: 'session',
+    persistent: true,
+    system: true,
+  },
+  {
+    id: 'stealth',
+    name: 'Stealth',
+    color: '#f97316',
+    icon: 'eye-off',
+    description: 'Ephemeral container for sensitive or AI fetches',
+    scope: 'ephemeral',
+    persistent: false,
+    system: true,
+  },
+];
+
+class ContainerManager extends EventEmitter {
+  private containers = new Map<string, ContainerProfile>();
+  private permissions = new Map<string, Set<ContainerPermission>>();
+  private sitePermissions = new Map<string, Map<ContainerPermission, Set<string>>>();
+  private activeByWindow = new Map<number, string>();
+
+  constructor() {
+    super();
+    BUILT_IN_CONTAINERS.forEach((container) => {
+      this.containers.set(container.id, container);
+      this.ensurePermissions(container.id);
+    });
+  }
+
+  private ensurePermissions(containerId: string): Set<ContainerPermission> {
+    if (!this.permissions.has(containerId)) {
+      this.permissions.set(containerId, new Set(DEFAULT_ALLOWED_PERMISSIONS));
     }
-  });
-}
+    return this.permissions.get(containerId)!;
+  }
 
-function ensureDefaults() {
-  if (containers.size === 0) {
-    const defaults: Container[] = [
-      {
-        id: 'default',
-        name: 'Default',
-        color: '#6366f1',
-        partition: 'persist:default-container',
-        createdAt: Date.now(),
-      },
-      {
-        id: 'work',
-        name: 'Work',
-        color: '#0ea5e9',
-        partition: 'persist:container-work',
-        createdAt: Date.now(),
-      },
-      {
-        id: 'personal',
-        name: 'Personal',
-        color: '#f97316',
-        partition: 'persist:container-personal',
-        createdAt: Date.now(),
-      },
-      {
-        id: 'private',
-        name: 'Private',
-        color: '#22c55e',
-        partition: 'persist:container-private',
-        createdAt: Date.now(),
-      },
-    ];
-
-    defaults.forEach((container) => {
-      if (!containers.has(container.id)) {
-        containers.set(container.id, container);
+  private ensureSitePermissions(containerId: string): Map<ContainerPermission, Set<string>> {
+    if (!this.sitePermissions.has(containerId)) {
+      const map = new Map<ContainerPermission, Set<string>>();
+      DEFAULT_ALLOWED_PERMISSIONS.forEach((permission) => {
+        map.set(permission, new Set());
+      });
+      this.sitePermissions.set(containerId, map);
+    }
+    const map = this.sitePermissions.get(containerId)!;
+    DEFAULT_ALLOWED_PERMISSIONS.forEach((permission) => {
+      if (!map.has(permission)) {
+        map.set(permission, new Set());
       }
     });
+    return map;
   }
-}
 
-async function loadContainersFromDisk() {
-  try {
-    const buffer = await fs.readFile(CONTAINERS_FILE, 'utf-8');
-    const parsed = JSON.parse(buffer);
-    if (Array.isArray(parsed)) {
-      parsed.forEach((entry) => {
-        const result = ContainerSchema.safeParse(entry);
-        if (result.success) {
-          containers.set(result.data.id, {
-            ...result.data,
-          });
-        }
+  getContainer(containerId?: string): ContainerProfile {
+    if (containerId && this.containers.has(containerId)) {
+      return this.containers.get(containerId)!;
+    }
+    return this.containers.get('default')!;
+  }
+
+  list(): ContainerProfile[] {
+    return Array.from(this.containers.values());
+  }
+
+  createContainer(name: string, color?: string, icon?: string): ContainerProfile {
+    const id = randomUUID();
+    const container: ContainerProfile = {
+      id,
+      name,
+      color: color || '#22d3ee',
+      icon,
+      scope: 'session',
+      persistent: false,
+    };
+    this.containers.set(container.id, container);
+    this.ensurePermissions(container.id);
+    this.ensureSitePermissions(container.id);
+    this.emit('containers:updated', this.list());
+    return container;
+  }
+
+  getPermissions(containerId: string): ContainerPermission[] {
+    return Array.from(this.ensurePermissions(containerId));
+  }
+
+  setPermission(containerId: string, permission: ContainerPermission, enabled: boolean): ContainerPermission[] {
+    const set = this.ensurePermissions(containerId);
+    if (enabled) {
+      set.add(permission);
+    } else {
+      set.delete(permission);
+    }
+    const permissions = Array.from(set);
+    this.emit('containers:permissionsChanged', { containerId, permissions });
+    return permissions;
+  }
+
+  isPermissionAllowed(containerId: string | undefined, permission: string): boolean {
+    if (!permission) return false;
+    const set = this.ensurePermissions(containerId || 'default');
+    return set.has(permission as ContainerPermission);
+  }
+
+  hasSitePermission(containerId: string, permission: ContainerPermission, origin: string): boolean {
+    const siteMap = this.ensureSitePermissions(containerId);
+    return siteMap.get(permission)?.has(origin) ?? false;
+  }
+
+  recordSitePermission(containerId: string, permission: ContainerPermission, origin: string): void {
+    const siteMap = this.ensureSitePermissions(containerId);
+    const set = siteMap.get(permission);
+    if (!set) return;
+    if (!set.has(origin)) {
+      set.add(origin);
+      this.emit('containers:sitePermissionsChanged', {
+        containerId,
+        permission,
+        origins: Array.from(set),
       });
     }
-  } catch (error: any) {
-    if (error?.code !== 'ENOENT') {
-      console.warn('[Containers] Failed to load containers:', error);
+  }
+
+  removeSitePermission(containerId: string, permission: ContainerPermission, origin: string): void {
+    const siteMap = this.ensureSitePermissions(containerId);
+    const set = siteMap.get(permission);
+    if (!set) return;
+    if (set.delete(origin)) {
+      this.emit('containers:sitePermissionsChanged', {
+        containerId,
+        permission,
+        origins: Array.from(set),
+      });
     }
   }
-  ensureDefaults();
-}
 
-async function saveContainersToDisk() {
-  const data = Array.from(containers.values());
-  await fs.writeFile(CONTAINERS_FILE, JSON.stringify(data, null, 2), 'utf-8').catch((error) => {
-    console.warn('[Containers] Failed to save containers:', error);
-  });
-  broadcastContainers();
-}
-
-export async function initializeContainers(): Promise<void> {
-  if (initialized) return;
-  await loadContainersFromDisk();
-  initialized = true;
-}
-
-export function listContainers(): Container[] {
-  ensureDefaults();
-  return Array.from(containers.values());
-}
-
-export function getContainer(containerId?: string | null): Container | null {
-  if (!containerId) return containers.get('default') || null;
-  return containers.get(containerId) || containers.get('default') || null;
-}
-
-export function getActiveContainer(winId: number): Container | null {
-  const containerId = activeContainerByWindow.get(winId) || 'default';
-  return getContainer(containerId);
-}
-
-export function setActiveContainer(win: BrowserWindow, containerId: string): Container | null {
-  const container = getContainer(containerId);
-  if (!container) {
-    return null;
+  listSitePermissions(containerId: string): Array<{ permission: ContainerPermission; origins: string[] }> {
+    const siteMap = this.ensureSitePermissions(containerId);
+    const entries: Array<{ permission: ContainerPermission; origins: string[] }> = [];
+    for (const [permission, set] of siteMap.entries()) {
+      entries.push({ permission, origins: Array.from(set) });
+    }
+    return entries;
   }
-  activeContainerByWindow.set(win.id, container.id);
-  try {
-    win.webContents.send('containers:active', {
-      containerId: container.id,
+
+  getActiveForWindow(win: BrowserWindow): ContainerProfile {
+    const currentId = this.activeByWindow.get(win.id);
+    const container = this.getContainer(currentId);
+    this.activeByWindow.set(win.id, container.id);
+    (win as any).__ob_defaultContainerId = container.id;
+    return container;
+  }
+
+  setActiveForWindow(win: BrowserWindow, containerId?: string): ContainerProfile {
+    const container = this.getContainer(containerId);
+    this.activeByWindow.set(win.id, container.id);
+    (win as any).__ob_defaultContainerId = container.id;
+    this.emit('containers:activeChanged', { windowId: win.id, containerId: container.id });
+    return container;
+  }
+
+  removeWindow(winId: number) {
+    this.activeByWindow.delete(winId);
+  }
+
+  resolvePartition(params: ResolveContainerPartitionParams): ContainerPartitionResult {
+    const container = this.getContainer(params.containerId);
+
+    if (container.scope === 'ephemeral') {
+      const basePartition = `temp:container:${container.id}:${params.tabId}`;
+      return {
+        container,
+        basePartition,
+        deriveSitePartition: false,
+        partitionOptions: { cache: false },
+      };
+    }
+
+    if (container.scope === 'global') {
+      const basePartition = `persist:container:${container.id}`;
+      return {
+        container,
+        basePartition,
+        deriveSitePartition: true,
+      };
+    }
+
+    // session-scoped (default for built-ins)
+    const sessionPartition = params.sessionPartition || 'persist:default';
+    const basePartition = `${sessionPartition}:container:${container.id}`;
+    return {
       container,
-    });
-  } catch {}
-  return container;
+      basePartition,
+      deriveSitePartition: true,
+    };
+  }
 }
 
-export function ensureActiveContainer(win: BrowserWindow): Container | null {
-  if (!activeContainerByWindow.has(win.id)) {
-    const fallback = getContainer('default');
-    if (fallback) {
-      return setActiveContainer(win, fallback.id);
-    }
+let containerManagerInstance: ContainerManager | null = null;
+
+export function getContainerManager(): ContainerManager {
+  if (!containerManagerInstance) {
+    containerManagerInstance = new ContainerManager();
   }
-  return getActiveContainer(win.id);
+  return containerManagerInstance;
 }
 
 export function registerContainersIpc() {
+  const manager = getContainerManager();
+
+  manager.on('containers:sitePermissionsChanged', (payload: { containerId: string; permission: ContainerPermission; origins: string[] }) => {
+    BrowserWindow.getAllWindows().forEach((win) => {
+      if (!win.isDestroyed()) {
+        try {
+          win.webContents.send('containers:sitePermissions', payload);
+        } catch {}
+      }
+    });
+  });
+
   registerHandler('containers:list', z.object({}), async () => {
-    const result = listContainers();
-    return ContainerListResponse.parse(result);
-  });
-
-  registerHandler('containers:create', ContainerCreateRequest, async (_event, request) => {
-    const id = randomUUID();
-    const container: Container = {
-      id,
-      name: request.name,
-      color: request.color || '#22d3ee',
-      icon: request.icon,
-      partition: `persist:container:${id}`,
+    return manager.list().map((container) => ({
+      ...container,
+      partition: container.scope === 'ephemeral'
+        ? `temp:container:${container.id}`
+        : `persist:container:${container.id}`,
       createdAt: Date.now(),
-    };
-    containers.set(id, container);
-    await saveContainersToDisk();
-    return ContainerSchema.parse(container);
+    }));
   });
 
-  registerHandler('containers:delete', z.object({ containerId: z.string() }), async (_event, request) => {
-    if (request.containerId === 'default') {
-      throw new Error('Cannot delete default container');
+  registerHandler('containers:getActive', z.object({}), async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) {
+      return manager.getContainer();
     }
-    containers.delete(request.containerId);
-    await saveContainersToDisk();
-    return { success: true };
+    return manager.getActiveForWindow(win);
   });
 
   registerHandler('containers:setActive', ContainerSetActiveRequest, async (event, request) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win) {
-      return { success: false };
+      throw new Error('No window available for container switch');
     }
-    const container = setActiveContainer(win, request.containerId);
-    if (!container) {
-      throw new Error('Container not found');
+    const container = manager.setActiveForWindow(win, request.containerId);
+    try {
+      win.webContents.send('containers:active', {
+        containerId: container.id,
+        container,
+      });
+      const entries = manager.listSitePermissions(container.id);
+      for (const entry of entries) {
+        try {
+          win.webContents.send('containers:sitePermissions', {
+            containerId: container.id,
+            permission: entry.permission,
+            origins: entry.origins,
+          });
+        } catch {}
+      }
+    } catch {}
+    return container;
+  });
+
+  registerHandler('containers:create', ContainerCreateRequest, async (event, request) => {
+    const container = manager.createContainer(request.name, request.color, request.icon);
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) {
+      manager.setActiveForWindow(win, container.id);
+      try {
+        win.webContents.send('containers:list', manager.list());
+        win.webContents.send('containers:active', { containerId: container.id, container });
+        const entries = manager.listSitePermissions(container.id);
+        for (const entry of entries) {
+          win.webContents.send('containers:sitePermissions', {
+            containerId: container.id,
+            permission: entry.permission,
+            origins: entry.origins,
+          });
+        }
+      } catch {}
     }
-    return ContainerSchema.parse(container);
+    return container;
   });
 
-  registerHandler('containers:getActive', z.object({}), async (event) => {
-    const win = event.sender ? BrowserWindow.fromWebContents(event.sender) : null;
-    if (!win) {
-      return ContainerSchema.parse(getContainer('default'));
-    }
-    const container = getActiveContainer(win.id) || getContainer('default');
-    return ContainerSchema.parse(container);
-  });
-}
-
-export function removeActiveContainer(winId: number) {
-  activeContainerByWindow.delete(winId);
-}
-
-/**
- * Container Management
- * Per-tab ephemeral containers and "Burn Tab" functionality
- */
-
-import { session, BrowserView } from 'electron';
-import { randomUUID } from 'node:crypto';
-
-interface TabContainer {
-  tabId: string;
-  partition: string;
-  ephemeral: boolean;
-  createdAt: number;
-}
-
-const tabContainers = new Map<string, TabContainer>();
-
-/**
- * Create an ephemeral container for a tab
- */
-export function createEphemeralContainer(tabId: string): string {
-  const partition = `ephemeral:${randomUUID()}`;
-  
-  tabContainers.set(tabId, {
-    tabId,
-    partition,
-    ephemeral: true,
-    createdAt: Date.now(),
+  registerHandler('containers:getPermissions', z.object({ containerId: z.string() }), async (_event, request) => {
+    const response: z.infer<typeof ContainerPermissionsResponse> = {
+      containerId: request.containerId,
+      permissions: manager.getPermissions(request.containerId),
+    };
+    return response;
   });
 
-  return partition;
-}
-
-/**
- * Get container for a tab
- */
-export function getTabContainer(tabId: string): TabContainer | undefined {
-  return tabContainers.get(tabId);
-}
-
-/**
- * Burn a tab (clear storage, cache, history)
- */
-export async function burnTab(tabId: string, view: BrowserView): Promise<void> {
-  const container = tabContainers.get(tabId);
-  if (!container) return;
-
-  const sess = session.fromPartition(container.partition);
-
-  // Clear all storage
-  await sess.clearStorageData({
-    storages: [
-      'cookies',
-      'filesystem',
-      'indexdb',
-      'localstorage',
-      'shadercache',
-      'websql',
-      'serviceworkers',
-      'cachestorage',
-    ],
+  registerHandler('containers:setPermission', ContainerPermissionSetRequest, async (_event, request) => {
+    const permissions = manager.setPermission(request.containerId, request.permission, request.enabled);
+    const response: z.infer<typeof ContainerPermissionsResponse> = {
+      containerId: request.containerId,
+      permissions,
+    };
+    return response;
   });
 
-  // Clear cache
-  await sess.clearCache();
+  registerHandler('containers:getSitePermissions', z.object({ containerId: z.string() }), async (_event, request) => {
+    return manager.listSitePermissions(request.containerId);
+  });
 
-  // Clear cookies
-  await sess.cookies.flushStore();
-
-  // Remove from container registry
-  tabContainers.delete(tabId);
-
-  console.log(`[Containers] Burned tab ${tabId}`);
-}
-
-/**
- * Check if tab is ephemeral
- */
-export function isEphemeralTab(tabId: string): boolean {
-  const container = tabContainers.get(tabId);
-  return container?.ephemeral || false;
+  registerHandler('containers:revokeSitePermission', z.object({
+    containerId: z.string(),
+    permission: z.enum(['media', 'display-capture', 'notifications', 'fullscreen']),
+    origin: z.string(),
+  }), async (_event, request) => {
+    manager.removeSitePermission(request.containerId, request.permission, request.origin);
+    return manager.listSitePermissions(request.containerId);
+  });
 }
 

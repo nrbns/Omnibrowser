@@ -1,5 +1,6 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Search, Settings as SettingsIcon, Monitor, Shield, Download, Globe, Cpu, Bell, Palette, Power, ChevronRight, Lock, Eye, Trash2, Video, Database, Cloud } from 'lucide-react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { formatDistanceToNow } from 'date-fns';
+import { Search, Settings as SettingsIcon, Monitor, Shield, Download, Globe, Cpu, Bell, Palette, Power, ChevronRight, Lock, Eye, Trash2, Video, Database, Cloud, Sparkles, Loader2, RefreshCcw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ipc } from '../lib/ipc-typed';
 import { ShieldsPanel } from '../components/privacy/ShieldsPanel';
@@ -24,6 +25,9 @@ type Settings = {
     requireConsent: boolean;
     defaultPath: string;
     checksum: boolean;
+  };
+  diagnostics: {
+    telemetryOptIn: boolean;
   };
   performance: {
     tabSleepMins: number;
@@ -54,6 +58,13 @@ type Section = {
   category: string;
 };
 
+type PermissionEntry = {
+  type: 'camera' | 'microphone' | 'filesystem' | 'clipboard:write' | 'notifications';
+  origin: string;
+  grantedAt: number;
+  expiresAt: number;
+};
+
 const sections: Section[] = [
   { id: 'appearance', title: 'Appearance', icon: Palette, category: 'Basics' },
   { id: 'startup', title: 'On startup', icon: Power, category: 'Basics' },
@@ -62,8 +73,10 @@ const sections: Section[] = [
   { id: 'videoCall', title: 'Video calls', icon: Video, category: 'Advanced' },
   { id: 'languages', title: 'Languages', icon: Globe, category: 'Advanced' },
   { id: 'system', title: 'System', icon: Monitor, category: 'Advanced' },
+  { id: 'diagnostics', title: 'Diagnostics', icon: Database, category: 'Advanced' },
   { id: 'performance', title: 'Performance', icon: Cpu, category: 'Advanced' },
   { id: 'notifications', title: 'Notifications', icon: Bell, category: 'Advanced' },
+  { id: 'ai', title: 'AI Models', icon: Sparkles, category: 'AI & Sync' },
   { id: 'cloudVector', title: 'Cloud Vector DB', icon: Cloud, category: 'AI & Sync' },
   { id: 'hybridSearch', title: 'Hybrid Search', icon: Search, category: 'AI & Sync' },
   { id: 'e2eeSync', title: 'E2EE Sync', icon: Lock, category: 'AI & Sync' },
@@ -88,6 +101,14 @@ export default function Settings() {
     packetLoss: 0,
     quality: 'good',
   });
+  const [ollamaChecking, setOllamaChecking] = useState(false);
+  const [ollamaAvailable, setOllamaAvailable] = useState<boolean | null>(null);
+  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+  const [ollamaError, setOllamaError] = useState<string | null>(null);
+  const [diagnosticsNotice, setDiagnosticsNotice] = useState<{ text: string; tone: 'success' | 'error' } | null>(null);
+  const [permissionsLoading, setPermissionsLoading] = useState(false);
+  const [permissionsError, setPermissionsError] = useState<string | null>(null);
+  const [permissionsEntries, setPermissionsEntries] = useState<PermissionEntry[]>([]);
 
   // Load settings on mount
   useEffect(() => {
@@ -124,6 +145,9 @@ export default function Settings() {
               defaultPath: 'Downloads',
               checksum: false,
             },
+            diagnostics: {
+              telemetryOptIn: false,
+            },
             performance: {
               tabSleepMins: 20,
               memoryCapMB: 2048,
@@ -156,6 +180,7 @@ export default function Settings() {
         if (!loaded.privacy) loaded.privacy = { burnOnClose: false, telemetry: 'off', doNotTrack: true, autoPurgeCookies: false, purgeAfterDays: 30 };
         if (!loaded.network) loaded.network = { doh: false, dohProvider: 'cloudflare', proxy: null, perTabProxy: false, quic: true };
         if (!loaded.downloads) loaded.downloads = { requireConsent: false, defaultPath: 'Downloads', checksum: false };
+        if (!loaded.diagnostics) loaded.diagnostics = { telemetryOptIn: false };
         if (!loaded.performance) loaded.performance = { tabSleepMins: 20, memoryCapMB: 2048, gpuAcceleration: true };
         if (!loaded.ai) loaded.ai = { provider: 'local', model: 'default', maxTokens: 4096, temperature: 0.7 };
         if (!loaded.ui) loaded.ui = { theme: 'dark', compactMode: false, showProxyBadge: true };
@@ -288,6 +313,249 @@ export default function Settings() {
       console.error('Failed to update setting:', error);
     }
   };
+
+  const refreshPermissions = useCallback(async () => {
+    setPermissionsLoading(true);
+    setPermissionsError(null);
+    try {
+      const result = (await ipc.permissions.list()) as PermissionEntry[] | undefined;
+      if (Array.isArray(result)) {
+        setPermissionsEntries(result);
+      } else {
+        setPermissionsEntries([]);
+      }
+    } catch (error) {
+      console.error('Failed to load permissions:', error);
+      setPermissionsError('Unable to load site permissions right now.');
+      setPermissionsEntries([]);
+    } finally {
+      setPermissionsLoading(false);
+    }
+  }, []);
+
+  const handleRevokePermission = useCallback(
+    async (entry: PermissionEntry) => {
+      try {
+        await ipc.permissions.revoke(entry.type, entry.origin);
+        await refreshPermissions();
+      } catch (error) {
+        console.error('Failed to revoke permission:', error);
+        setPermissionsError(`Failed to revoke ${entry.type} for ${entry.origin}.`);
+      }
+    },
+    [refreshPermissions],
+  );
+
+  const handleClearOriginPermissions = useCallback(
+    async (origin: string) => {
+      try {
+        await ipc.permissions.clearOrigin(origin);
+        await refreshPermissions();
+      } catch (error) {
+        console.error('Failed to clear permissions for origin:', error);
+        setPermissionsError(`Failed to clear permissions for ${origin}.`);
+      }
+    },
+    [refreshPermissions],
+  );
+
+  const applyPrivacyPreset = useCallback(
+    async (preset: 'strict' | 'moderate' | 'relaxed') => {
+      const tasks: Promise<unknown>[] = [];
+      switch (preset) {
+        case 'strict':
+          tasks.push(updateSetting(['privacy', 'burnOnClose'], true));
+          tasks.push(updateSetting(['privacy', 'autoPurgeCookies'], true));
+          tasks.push(updateSetting(['privacy', 'purgeAfterDays'], 1));
+          tasks.push(updateSetting(['privacy', 'doNotTrack'], true));
+          tasks.push(updateSetting(['downloads', 'requireConsent'], true));
+          tasks.push(updateSetting(['diagnostics', 'telemetryOptIn'], false));
+          break;
+        case 'moderate':
+          tasks.push(updateSetting(['privacy', 'burnOnClose'], false));
+          tasks.push(updateSetting(['privacy', 'autoPurgeCookies'], true));
+          tasks.push(updateSetting(['privacy', 'purgeAfterDays'], 7));
+          tasks.push(updateSetting(['privacy', 'doNotTrack'], true));
+          tasks.push(updateSetting(['downloads', 'requireConsent'], true));
+          break;
+        case 'relaxed':
+        default:
+          tasks.push(updateSetting(['privacy', 'burnOnClose'], false));
+          tasks.push(updateSetting(['privacy', 'autoPurgeCookies'], false));
+          tasks.push(updateSetting(['privacy', 'purgeAfterDays'], 30));
+          tasks.push(updateSetting(['privacy', 'doNotTrack'], false));
+          tasks.push(updateSetting(['downloads', 'requireConsent'], false));
+          break;
+      }
+      await Promise.all(tasks);
+    },
+    [updateSetting],
+  );
+
+  const handleOpenLogs = useCallback(async () => {
+    try {
+      const result = await ipc.diagnostics.openLogs();
+      if (result?.success) {
+        setDiagnosticsNotice({ text: 'Logs folder opened in your file manager.', tone: 'success' });
+      } else {
+        setDiagnosticsNotice({ text: 'Unable to open logs folder.', tone: 'error' });
+      }
+    } catch (error) {
+      console.error('Failed to open logs folder:', error);
+      setDiagnosticsNotice({ text: 'Failed to open logs folder.', tone: 'error' });
+    }
+  }, []);
+
+  const handleCopyDiagnostics = useCallback(async () => {
+    try {
+      const result = await ipc.diagnostics.copyDiagnostics();
+      if (result?.diagnostics) {
+        await navigator.clipboard.writeText(result.diagnostics);
+        setDiagnosticsNotice({ text: 'Diagnostics copied to clipboard.', tone: 'success' });
+      } else {
+        throw new Error('No diagnostics payload received');
+      }
+    } catch (error) {
+      console.error('Failed to copy diagnostics:', error);
+      setDiagnosticsNotice({ text: 'Failed to copy diagnostics to clipboard.', tone: 'error' });
+    }
+  }, []);
+
+  const handleExportSettings = useCallback(async () => {
+    try {
+      const result = await ipc.settings.exportFile();
+      if (!result) {
+        setDiagnosticsNotice({ text: 'Export failed.', tone: 'error' });
+        return;
+      }
+      if (result.canceled) {
+        return;
+      }
+      if (result.success) {
+        setDiagnosticsNotice({
+          text: result.path ? `Settings exported to ${result.path}.` : 'Settings exported.',
+          tone: 'success',
+        });
+      } else {
+        setDiagnosticsNotice({ text: 'Unable to export settings.', tone: 'error' });
+      }
+    } catch (error) {
+      console.error('Failed to export settings:', error);
+      setDiagnosticsNotice({ text: 'Failed to export settings.', tone: 'error' });
+    }
+  }, []);
+
+  const handleImportSettings = useCallback(async () => {
+    try {
+      const result = await ipc.settings.importFile();
+      if (!result) {
+        setDiagnosticsNotice({ text: 'Import failed.', tone: 'error' });
+        return;
+      }
+      if (result.canceled) {
+        return;
+      }
+      if (result.success) {
+        try {
+          const fresh = (await ipc.settings.get()) as Settings;
+          setSettings(fresh);
+        } catch (error) {
+          console.warn('Imported settings but failed to reload via IPC:', error);
+        }
+        setDiagnosticsNotice({
+          text: result.path ? `Imported settings from ${result.path}.` : 'Settings imported.',
+          tone: 'success',
+        });
+      } else {
+        setDiagnosticsNotice({ text: 'Unable to import settings.', tone: 'error' });
+      }
+    } catch (error) {
+      console.error('Failed to import settings:', error);
+      setDiagnosticsNotice({ text: 'Failed to import settings.', tone: 'error' });
+    }
+  }, []);
+
+  const formatPermissionType = useCallback((type: PermissionEntry['type']) => {
+    switch (type) {
+      case 'clipboard:write':
+        return 'Clipboard';
+      case 'filesystem':
+        return 'File system';
+      case 'microphone':
+        return 'Microphone';
+      case 'camera':
+        return 'Camera';
+      case 'notifications':
+        return 'Notifications';
+      default:
+        return type;
+    }
+  }, []);
+
+  const loadOllamaInfo = useCallback(async () => {
+    setOllamaChecking(true);
+    setOllamaError(null);
+    try {
+      const status = await ipc.ollama.check();
+      const available = !!status?.available;
+      setOllamaAvailable(available);
+      if (available) {
+        const models =
+          status.models && status.models.length > 0
+            ? status.models
+            : (await ipc.ollama.listModels())?.models || [];
+        setOllamaModels(models);
+      } else {
+        setOllamaModels([]);
+      }
+    } catch (error) {
+      console.warn('Failed to check Ollama availability:', error);
+      setOllamaAvailable(false);
+      setOllamaModels([]);
+      setOllamaError('Unable to reach local Ollama service. Make sure it is running on port 11434.');
+    } finally {
+      setOllamaChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeSection === 'ai' || settings?.ai.provider === 'local') {
+      void loadOllamaInfo();
+    }
+  }, [activeSection, settings?.ai.provider, loadOllamaInfo]);
+
+  useEffect(() => {
+    if (activeSection === 'privacy') {
+      void refreshPermissions();
+    }
+  }, [activeSection, refreshPermissions]);
+
+  useEffect(() => {
+    if (!diagnosticsNotice) return;
+    const timeout = setTimeout(() => setDiagnosticsNotice(null), 4000);
+    return () => clearTimeout(timeout);
+  }, [diagnosticsNotice]);
+
+  const aiProviders = useMemo(
+    () => [
+      {
+        id: 'local' as const,
+        title: 'Local (Ollama / GGUF)',
+        description: 'Run GGUF models offline through the local Ollama service.',
+      },
+      {
+        id: 'openai' as const,
+        title: 'OpenAI',
+        description: 'Use OpenAI hosted models when cloud consent is granted.',
+      },
+      {
+        id: 'anthropic' as const,
+        title: 'Anthropic (coming soon)',
+        description: 'Future support for Claude models.',
+      },
+    ],
+    [],
+  );
 
   // Filter sections by search
   const filteredSections = useMemo(() => {
@@ -587,6 +855,44 @@ export default function Settings() {
                 <h2 className="text-2xl font-bold mb-6">Privacy and security</h2>
                 
                 <div className="space-y-6">
+                  <div className="p-4 rounded-lg bg-gray-900/60 border border-gray-800/50">
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
+                      <div>
+                        <h3 className="text-lg font-semibold">Privacy levels</h3>
+                        <p className="text-sm text-gray-400">Apply a preset to quickly align browser behavior with your risk tolerance.</p>
+                      </div>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <button
+                        onClick={() => void applyPrivacyPreset('strict')}
+                        className="rounded-lg border border-red-500/40 bg-red-500/10 p-4 text-left hover:border-red-500/60 transition-colors"
+                      >
+                        <div className="text-sm font-semibold text-red-300">Strict</div>
+                        <p className="mt-2 text-sm text-red-200/80">
+                          Wipe data on close, block tracking, require consent for downloads, disable telemetry.
+                        </p>
+                      </button>
+                      <button
+                        onClick={() => void applyPrivacyPreset('moderate')}
+                        className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-left hover:border-amber-500/60 transition-colors"
+                      >
+                        <div className="text-sm font-semibold text-amber-200">Moderate</div>
+                        <p className="mt-2 text-sm text-amber-100/70">
+                          Balanced defaults; auto-purge cookies after a week and keep consent prompts enabled.
+                        </p>
+                      </button>
+                      <button
+                        onClick={() => void applyPrivacyPreset('relaxed')}
+                        className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-4 text-left hover:border-emerald-500/60 transition-colors"
+                      >
+                        <div className="text-sm font-semibold text-emerald-200">Relaxed</div>
+                        <p className="mt-2 text-sm text-emerald-100/70">
+                          Keep browsing data persistent and minimize prompts for everyday use.
+                        </p>
+                      </button>
+                    </div>
+                  </div>
+
                   {/* Shields Panel */}
                   <div className="mb-8">
                     <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
@@ -666,6 +972,75 @@ export default function Settings() {
                           onChange={(e) => updateSetting(['privacy', 'purgeAfterDays'], parseInt(e.target.value) || 30)}
                           className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="p-4 rounded-lg bg-gray-900/60 border border-gray-800/50">
+                    <div className="flex items-start justify-between gap-3 mb-4">
+                      <div>
+                        <h4 className="font-medium">Per-site permissions</h4>
+                        <p className="text-sm text-gray-400">
+                          Review camera, microphone, filesystem, clipboard, and notification allowances.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => void refreshPermissions()}
+                        className="inline-flex items-center gap-2 rounded-md border border-gray-700 px-3 py-1.5 text-sm text-gray-200 hover:border-blue-500/60 hover:text-blue-200 transition-colors"
+                      >
+                        <RefreshCcw className="h-4 w-4" />
+                        Refresh
+                      </button>
+                    </div>
+                    {permissionsError && (
+                      <div className="mb-3 text-sm text-red-400">{permissionsError}</div>
+                    )}
+                    {permissionsLoading ? (
+                      <div className="flex items-center gap-2 text-sm text-gray-400">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Loading permissions…
+                      </div>
+                    ) : permissionsEntries.length === 0 ? (
+                      <p className="text-sm text-gray-400">No site permissions granted.</p>
+                    ) : (
+                      <div className="space-y-3">
+                        {permissionsEntries.map((entry) => (
+                          <div
+                            key={`${entry.type}:${entry.origin}`}
+                            className="flex flex-col gap-2 rounded-md border border-gray-800/70 bg-gray-900/80 p-3 md:flex-row md:items-center md:justify-between"
+                          >
+                            <div className="space-y-1">
+                              <p className="text-sm font-semibold text-gray-100 break-all">{entry.origin}</p>
+                              <p className="text-xs uppercase tracking-wide text-gray-400">
+                                {formatPermissionType(entry.type)}
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                Granted{' '}
+                                {formatDistanceToNow(entry.grantedAt, { addSuffix: true })}
+                                {typeof entry.expiresAt === 'number' && Number.isFinite(entry.expiresAt) && (
+                                  <>
+                                    {' • '}Expires{' '}
+                                    {formatDistanceToNow(entry.expiresAt, { addSuffix: true })}
+                                  </>
+                                )}
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                onClick={() => void handleRevokePermission(entry)}
+                                className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-200 hover:border-red-500/60 transition-colors"
+                              >
+                                Revoke
+                              </button>
+                              <button
+                                onClick={() => void handleClearOriginPermissions(entry.origin)}
+                                className="rounded-md border border-yellow-500/40 bg-yellow-500/10 px-3 py-1.5 text-xs font-medium text-yellow-100 hover:border-yellow-500/60 transition-colors"
+                              >
+                                Clear origin
+                              </button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
@@ -943,6 +1318,90 @@ export default function Settings() {
             </motion.div>
           )}
 
+          {activeSection === 'diagnostics' && settings && (
+            <motion.div
+              key="diagnostics"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="p-8 space-y-6"
+            >
+              <div>
+                <h2 className="text-2xl font-bold">Diagnostics</h2>
+                <p className="mt-2 text-sm text-gray-400">
+                  Review logs, collect troubleshooting details, and control whether diagnostics ever leave your device.
+                </p>
+              </div>
+
+              {diagnosticsNotice && (
+                <div
+                  className={`rounded-lg border px-4 py-3 text-sm ${
+                    diagnosticsNotice.tone === 'success'
+                      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
+                      : 'border-red-500/40 bg-red-500/10 text-red-200'
+                  }`}
+                >
+                  {diagnosticsNotice.text}
+                </div>
+              )}
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between rounded-lg border border-gray-800/50 bg-gray-900/60 p-4">
+                  <div className="max-w-xl">
+                    <h3 className="font-medium text-gray-100">Opt-in diagnostics telemetry</h3>
+                    <p className="mt-1 text-sm text-gray-400">
+                      Share anonymized crash signatures and performance stats to help harden OmniBrowser. Nothing is sent unless you opt in.
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
+                      checked={settings.diagnostics.telemetryOptIn}
+                      onChange={(e) => updateSetting(['diagnostics', 'telemetryOptIn'], e.target.checked)}
+                    />
+                    <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:bg-blue-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:absolute after:top-[2px] after:left-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all" />
+                  </label>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <button
+                    onClick={() => void handleOpenLogs()}
+                    className="rounded-lg border border-blue-500/40 bg-blue-500/10 px-4 py-3 text-left text-sm font-medium text-blue-100 hover:border-blue-500/60 transition-colors"
+                  >
+                    Open logs folder
+                    <span className="block text-xs font-normal text-blue-200/80">View rotating log files directly.</span>
+                  </button>
+                  <button
+                    onClick={() => void handleCopyDiagnostics()}
+                    className="rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-4 py-3 text-left text-sm font-medium text-indigo-100 hover:border-indigo-500/60 transition-colors"
+                  >
+                    Copy diagnostics summary
+                    <span className="block text-xs font-normal text-indigo-200/80">Copies environment info & recent log tail.</span>
+                  </button>
+                  <button
+                    onClick={() => void handleExportSettings()}
+                    className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-left text-sm font-medium text-emerald-100 hover:border-emerald-500/60 transition-colors"
+                  >
+                    Export settings to file
+                    <span className="block text-xs font-normal text-emerald-200/80">Saves your configuration to JSON.</span>
+                  </button>
+                  <button
+                    onClick={() => void handleImportSettings()}
+                    className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-left text-sm font-medium text-amber-100 hover:border-amber-500/60 transition-colors"
+                  >
+                    Import settings from file
+                    <span className="block text-xs font-normal text-amber-200/80">Restore a previously exported setup.</span>
+                  </button>
+                </div>
+
+                <div className="rounded-lg border border-gray-800/50 bg-gray-900/40 p-4 text-sm text-gray-400">
+                  Logs rotate automatically after 5&nbsp;MB or three days, and private/ghost session activity is excluded. Telemetry stays off unless explicitly enabled.
+                </div>
+              </div>
+            </motion.div>
+          )}
+
           {activeSection === 'performance' && (
             <motion.div
               key="performance"
@@ -1010,6 +1469,226 @@ export default function Settings() {
               <h2 className="text-2xl font-bold mb-6">Notifications</h2>
               <div className="p-4 rounded-lg bg-gray-900/60 border border-gray-800/50">
                 <p className="text-gray-400">Notification settings will be available in a future update.</p>
+              </div>
+            </motion.div>
+          )}
+
+          {activeSection === 'ai' && (
+            <motion.div
+              key="ai"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="p-8 space-y-6"
+            >
+              <div>
+                <h2 className="text-2xl font-bold text-gray-100 mb-2">AI Models</h2>
+                <p className="text-sm text-gray-400">
+                  Configure how OmniBrowser summarizes pages. Local GGUF models keep content offline, while
+                  cloud providers require user consent before data leaves your device.
+                </p>
+              </div>
+
+              <div className="grid gap-3">
+                {aiProviders.map((provider) => {
+                  const isActive = settings?.ai.provider === provider.id;
+                  const disabled = provider.id === 'anthropic';
+                  return (
+                    <button
+                      key={provider.id}
+                      onClick={() => {
+                        if (disabled || !settings) return;
+                        updateSetting(['ai', 'provider'], provider.id);
+                      }}
+                      className={`w-full rounded-xl border px-4 py-3 text-left transition-colors ${
+                        isActive
+                          ? 'border-blue-500/50 bg-blue-500/10'
+                          : 'border-gray-800/60 bg-gray-900/40 hover:bg-gray-900/60'
+                      } ${disabled ? 'cursor-not-allowed opacity-70' : ''}`}
+                      disabled={disabled || !settings}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-gray-100">{provider.title}</span>
+                            {isActive && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-200 border border-blue-500/40">
+                                Active
+                              </span>
+                            )}
+                            {disabled && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-700/40 text-gray-400 border border-gray-700/60">
+                                Coming soon
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">{provider.description}</p>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {!settings && (
+                <div className="flex items-center justify-center gap-2 text-sm text-gray-500 py-8">
+                  <Loader2 size={16} className="animate-spin" />
+                  Loading AI settings…
+                </div>
+              )}
+
+              {settings?.ai.provider === 'local' && (
+                <div className="space-y-4 rounded-xl border border-gray-800/60 bg-gray-900/40 p-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-100">Local models (Ollama / GGUF)</h3>
+                      <p className="text-xs text-gray-500 mt-1">
+                        OmniBrowser uses your local Ollama service to run GGUF models offline. Pull additional
+                        models with <code className="bg-gray-800/60 border border-gray-700/60 px-2 py-0.5 rounded text-[11px]">ollama pull &lt;model&gt;</code>.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => void loadOllamaInfo()}
+                      className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-700/60 bg-gray-800/40 hover:bg-gray-800/60 text-xs text-gray-200 transition-colors"
+                    >
+                      {ollamaChecking ? <Loader2 size={14} className="animate-spin" /> : <RefreshCcw size={14} />}
+                      Refresh
+                    </button>
+                  </div>
+
+                  <div className="text-sm text-gray-400 flex items-center gap-2">
+                    <span
+                      className={`inline-flex h-2.5 w-2.5 rounded-full border ${
+                        ollamaAvailable ? 'bg-emerald-400/80 border-emerald-300/60' : 'bg-red-400/70 border-red-300/60'
+                      }`}
+                    />
+                    {ollamaAvailable === null
+                      ? 'Detecting local Ollama service…'
+                      : ollamaAvailable
+                      ? 'Ollama is running on localhost:11434.'
+                      : 'Ollama service not detected. Start Ollama to run GGUF models offline.'}
+                  </div>
+
+                  {ollamaError && (
+                    <div className="rounded-lg border border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-200">
+                      {ollamaError}
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-gray-300 uppercase tracking-wide">
+                      Active local model
+                    </label>
+                    <select
+                      value={settings.ai.model}
+                      onChange={(e) => updateSetting(['ai', 'model'], e.target.value)}
+                      disabled={!ollamaAvailable || ollamaChecking}
+                      className="w-full px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                    >
+                      {ollamaModels.length === 0 && (
+                        <option value={settings.ai.model}>
+                          {ollamaAvailable ? 'No models detected' : 'Service unavailable'}
+                        </option>
+                      )}
+                      {ollamaModels.map((model) => (
+                        <option key={model} value={model}>
+                          {model}
+                        </option>
+                      ))}
+                      {!ollamaModels.includes(settings.ai.model) && (
+                        <option value={settings.ai.model}>{settings.ai.model || 'custom model'}</option>
+                      )}
+                    </select>
+                    <div className="text-[11px] text-gray-500">
+                      You can type a custom model name below if it isn’t listed.
+                    </div>
+                    <input
+                      type="text"
+                      value={settings.ai.model}
+                      onChange={(e) => updateSetting(['ai', 'model'], e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="llama3.2"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {settings?.ai.provider === 'openai' && (
+                <div className="space-y-4 rounded-xl border border-gray-800/60 bg-gray-900/40 p-5">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-100">OpenAI configuration</h3>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Set the model ID to use when cloud summarization is approved. Add{' '}
+                      <code className="bg-gray-800/60 border border-gray-700/60 px-2 py-0.5 rounded text-[11px]">
+                        OPENAI_API_KEY
+                      </code>{' '}
+                      to your environment before launching OmniBrowser.
+                    </p>
+                  </div>
+                  <label className="text-xs font-semibold text-gray-300 uppercase tracking-wide">
+                    Model ID
+                  </label>
+                  <input
+                    type="text"
+                    value={settings.ai.model}
+                    onChange={(e) => updateSetting(['ai', 'model'], e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="gpt-4o-mini"
+                  />
+                  <div className="text-[11px] text-gray-500">
+                    Cloud summaries always ask for consent before sending article content.
+                  </div>
+                </div>
+              )}
+
+              {settings?.ai.provider === 'anthropic' && (
+                <div className="rounded-xl border border-gray-800/60 bg-gray-900/40 p-5 text-sm text-gray-400">
+                  Anthropic/Claude integration is on the roadmap. In the meantime, use local GGUF models or the
+                  OpenAI provider.
+                </div>
+              )}
+
+              <div className="space-y-4 rounded-xl border border-gray-800/60 bg-gray-900/40 p-5">
+                <h3 className="text-sm font-semibold text-gray-100">Tuning</h3>
+                <div className="space-y-3">
+                  <div>
+                    <label className="flex items-center justify-between text-xs font-semibold text-gray-300 uppercase tracking-wide">
+                      <span>Temperature</span>
+                      <span className="text-gray-400">{settings?.ai.temperature.toFixed(1)}</span>
+                    </label>
+                    <input
+                      type="range"
+                      min={0}
+                      max={2}
+                      step={0.1}
+                      value={settings?.ai.temperature ?? 0.7}
+                      onChange={(e) => updateSetting(['ai', 'temperature'], parseFloat(e.target.value))}
+                      className="w-full mt-2 accent-blue-500"
+                    />
+                    <div className="text-[11px] text-gray-500 mt-1">
+                      Lower values make summaries more deterministic, higher values increase creativity.
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-300 uppercase tracking-wide">
+                      Max tokens
+                    </label>
+                    <input
+                      type="number"
+                      min={512}
+                      max={65536}
+                      step={256}
+                      value={settings?.ai.maxTokens ?? 8192}
+                      onChange={(e) =>
+                        updateSetting(['ai', 'maxTokens'], Math.max(512, parseInt(e.target.value) || 8192))
+                      }
+                      className="w-full mt-2 px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <div className="text-[11px] text-gray-500 mt-1">
+                      Maximum tokens to request from the model during summaries and offline analysis.
+                    </div>
+                  </div>
+                </div>
               </div>
             </motion.div>
           )}

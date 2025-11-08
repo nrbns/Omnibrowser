@@ -5,17 +5,29 @@ import { ipc } from '../lib/ipc-typed';
 import { DownloadUpdate } from '../lib/ipc-events';
 import { ipcEvents } from '../lib/ipc-events';
 
+type DownloadSafety = {
+  status: 'pending' | 'clean' | 'warning' | 'blocked' | 'unknown';
+  threatLevel?: 'low' | 'medium' | 'high' | 'critical';
+  details?: string;
+  recommendations?: string[];
+  scannedAt?: number;
+  quarantinePath?: string;
+};
+
 type DownloadItem = { 
   id: string; 
   url: string; 
   filename?: string;
-  status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled' | 'in-progress'; 
+  status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled' | 'in-progress' | 'blocked'; 
   path?: string; 
   createdAt: number;
   progress?: number;
   receivedBytes?: number;
   totalBytes?: number;
   checksum?: string;
+  safety?: DownloadSafety;
+  speedBytesPerSec?: number;
+  etaSeconds?: number;
 };
 
 export default function DownloadsPage() {
@@ -53,6 +65,9 @@ export default function DownloadsPage() {
           progress: update.progress,
           receivedBytes: update.receivedBytes,
           totalBytes: update.totalBytes,
+          safety: update.safety,
+          speedBytesPerSec: update.speedBytesPerSec,
+          etaSeconds: update.etaSeconds,
         };
 
         if (existingIndex >= 0) {
@@ -98,11 +113,33 @@ export default function DownloadsPage() {
     return 0;
   };
 
+  const formatSpeed = (bps?: number) => {
+    if (!bps || !Number.isFinite(bps) || bps <= 0) return '—';
+    const units = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+    const idx = Math.min(units.length - 1, Math.floor(Math.log(bps) / Math.log(1024)));
+    const value = bps / Math.pow(1024, idx);
+    return `${value >= 100 ? Math.round(value) : Math.round(value * 10) / 10} ${units[idx]}`;
+  };
+
+  const formatEta = (seconds?: number) => {
+    if (seconds === undefined || !Number.isFinite(seconds) || seconds <= 0) return '—';
+    const rounded = Math.max(0, Math.round(seconds));
+    const hours = Math.floor(rounded / 3600);
+    const minutes = Math.floor((rounded % 3600) / 60);
+    const secs = rounded % 60;
+    const parts = [];
+    if (hours > 0) parts.push(`${hours}h`);
+    if (minutes > 0 || hours > 0) parts.push(`${minutes}m`);
+    parts.push(`${secs}s`);
+    return parts.join(' ');
+  };
+
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'completed':
         return <CheckCircle size={16} className="text-green-400" />;
       case 'failed':
+      case 'blocked':
         return <XCircle size={16} className="text-red-400" />;
       case 'downloading':
       case 'in-progress':
@@ -126,6 +163,52 @@ export default function DownloadsPage() {
       // Use IPC to open folder in file explorer
       ipc.downloads.showInFolder?.(path).catch(console.error);
     }
+  };
+
+  const renderSafetyBadge = (safety?: DownloadSafety) => {
+    if (!safety) return null;
+    const base = 'px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide border';
+    switch (safety.status) {
+      case 'clean':
+        return <span className={`${base} bg-emerald-500/15 border-emerald-500/30 text-emerald-200`}>Scanned Clean</span>;
+      case 'warning':
+        return <span className={`${base} bg-amber-500/15 border-amber-500/30 text-amber-200`}>Review Recommended</span>;
+      case 'blocked':
+        return <span className={`${base} bg-red-500/15 border-red-500/40 text-red-200`}>Quarantined</span>;
+      case 'pending':
+        return <span className={`${base} bg-blue-500/15 border-blue-500/30 text-blue-200`}>Scanning…</span>;
+      default:
+        return <span className={`${base} bg-gray-500/15 border-gray-600/40 text-gray-300`}>Scan Unavailable</span>;
+    }
+  };
+
+  const renderSafetyDetails = (safety?: DownloadSafety) => {
+    if (!safety) return null;
+    return (
+      <div className="text-xs text-gray-500 space-y-1 mt-2">
+        <div className="flex items-center gap-2">
+          {renderSafetyBadge(safety)}
+          {safety.threatLevel && (
+            <span className="text-[10px] uppercase text-gray-400">
+              Threat level: {safety.threatLevel}
+            </span>
+          )}
+        </div>
+        {safety.details && <div>{safety.details}</div>}
+        {safety.recommendations && safety.recommendations.length > 0 && (
+          <ul className="list-disc list-inside text-[11px] space-y-0.5">
+            {safety.recommendations.slice(0, 3).map((rec, idx) => (
+              <li key={`${safety.scannedAt}-${idx}`}>{rec}</li>
+            ))}
+          </ul>
+        )}
+        {safety.status === 'blocked' && safety.quarantinePath && (
+          <div className="text-[11px] text-red-300">
+            File moved to quarantine: <span className="font-mono">{safety.quarantinePath}</span>
+          </div>
+        )}
+      </div>
+    );
   };
 
   if (loading) {
@@ -168,6 +251,7 @@ export default function DownloadsPage() {
                       <span className="font-medium text-gray-200 truncate">
                         {d.filename || d.url.split('/').pop() || 'Download'}
                       </span>
+                      {renderSafetyBadge(d.safety)}
                     </div>
                     
                     {/* Progress bar for active downloads */}
@@ -184,6 +268,10 @@ export default function DownloadsPage() {
                             animate={{ width: `${calcPercent(d)}%` }}
                             transition={{ duration: 0.3 }}
                           />
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-gray-500 mt-1">
+                          <span>Speed: {formatSpeed(d.speedBytesPerSec)}</span>
+                          <span>ETA: {formatEta(d.etaSeconds)}</span>
                         </div>
                       </div>
                     ) : null}
@@ -206,6 +294,7 @@ export default function DownloadsPage() {
                           SHA-256: {d.checksum.slice(0, 12)}…
                         </div>
                       )}
+                      {renderSafetyDetails(d.safety)}
                     </div>
                   </div>
 
@@ -271,17 +360,19 @@ export default function DownloadsPage() {
                         <Play size={18} />
                       </motion.button>
                     )}
-                    {d.status === 'completed' && d.path && (
+                    {(d.status === 'completed' || d.status === 'failed' || d.status === 'cancelled' || d.status === 'blocked') && d.path && (
                       <>
-                        <motion.button
-                          onClick={() => handleOpenFile(d.path)}
-                          whileHover={{ scale: 1.1 }}
-                          whileTap={{ scale: 0.9 }}
-                          className="p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800 border border-gray-700/50 text-gray-300 hover:text-blue-400 transition-colors"
-                          title="Open file"
-                        >
-                          <DownloadIcon size={18} />
-                        </motion.button>
+                        {d.status !== 'blocked' && (
+                          <motion.button
+                            onClick={() => handleOpenFile(d.path)}
+                            whileHover={{ scale: 1.1 }}
+                            whileTap={{ scale: 0.9 }}
+                            className="p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800 border border-gray-700/50 text-gray-300 hover:text-blue-400 transition-colors"
+                            title="Open file"
+                          >
+                            <DownloadIcon size={18} />
+                          </motion.button>
+                        )}
                         <motion.button
                           onClick={() => handleOpenFolder(d.path)}
                           whileHover={{ scale: 1.1 }}

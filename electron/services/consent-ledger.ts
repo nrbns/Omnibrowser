@@ -18,10 +18,12 @@ export const ConsentActionSchema = z.object({
     'access_camera',
     'access_microphone',
     'access_filesystem',
+    'ai_cloud',
   ]),
   description: z.string(), // Plain-language description
   target: z.string().optional(), // URL, file path, etc.
   metadata: z.record(z.unknown()).optional(),
+  risk: z.enum(['low', 'medium', 'high']).default('medium'),
 });
 
 export type ConsentAction = z.infer<typeof ConsentActionSchema>;

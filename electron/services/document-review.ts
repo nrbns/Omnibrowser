@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { researchQuery } from './research-enhanced';
 import { verifyResearchResult } from './research-verifier';
 import { exportDocument, exportToMarkdown, exportToHTML, CitationStyle } from './document-exports';
+import { stealthFetchPage } from './stealth-fetch';
 
 export interface DocumentSection {
   title: string;
@@ -293,6 +294,121 @@ function extractClaims(text: string, sections: DocumentSection[]): Array<{
   return claims;
 }
 
+function createTextFragment(snippet: string): string {
+  const sanitized = snippet.replace(/\s+/g, ' ').trim();
+  if (!sanitized) return '';
+  const start = sanitized.slice(0, 80);
+  const end = sanitized.length > 120 ? sanitized.slice(-80) : '';
+  const encode = (value: string) => encodeURIComponent(value.replace(/%/g, '').slice(0, 80));
+  return end ? `#:~:text=${encode(start)},${encode(end)}` : `#:~:text=${encode(start)}`;
+}
+
+function buildFactHighlights(claims: DocumentClaim[]): Array<{
+  claimId: string;
+  text: string;
+  importance: string;
+  section?: string;
+  position: number;
+  fragment: string;
+}> | undefined {
+  if (claims.length === 0) return undefined;
+  return claims.slice(0, 20).map((claim) => ({
+    claimId: claim.id,
+    text: claim.text,
+    importance: claim.verification.status,
+    section: claim.section,
+    position: claim.position,
+    fragment: createTextFragment(claim.text),
+  }));
+}
+
+function buildAssumptions(
+  claims: DocumentClaim[]
+): Array<{
+  claimId: string;
+  text: string;
+  rationale: string;
+  severity: 'low' | 'medium' | 'high';
+  section?: string;
+}> | undefined {
+  const assumptions = claims
+    .filter(
+      (claim) =>
+        !claim.verification ||
+        claim.verification.status !== 'verified' ||
+        claim.verification.confidence < 0.6
+    )
+    .map((claim) => {
+      const disputing = claim.verification?.sources
+        ? claim.verification.sources.filter((s) => !s.supports).length
+        : 0;
+      const rationale =
+        disputing > 0
+          ? 'Conflicting external sources detected.'
+          : 'Insufficient corroborating evidence detected.';
+      const severity: 'low' | 'medium' | 'high' =
+        disputing > 1 || claim.verification.confidence < 0.4
+          ? 'high'
+          : claim.verification.confidence < 0.55
+            ? 'medium'
+            : 'low';
+      return {
+        claimId: claim.id,
+        text: claim.text,
+        rationale,
+        severity,
+        section: claim.section,
+      };
+    });
+
+  return assumptions.length > 0 ? assumptions : undefined;
+}
+
+function buildAuditTrail(claims: DocumentClaim[]): Array<{
+  claimId: string;
+  section?: string;
+  page?: number;
+  line?: number;
+  status: string;
+  link?: string;
+ }> | undefined {
+  if (claims.length === 0) return undefined;
+  return claims.map((claim) => ({
+    claimId: claim.id,
+    section: claim.section,
+    page: claim.page,
+    line: claim.line,
+    status: claim.verification.status,
+    link: claim.verification.sources[0]?.url,
+  }));
+}
+
+function buildEntityGraph(
+  entities: DocumentEntity[],
+  claims: DocumentClaim[]
+): Array<{
+  name: string;
+  count: number;
+  type: string;
+  connections: string[];
+}> | undefined {
+  if (entities.length === 0) return undefined;
+
+  return entities.slice(0, 25).map((entity) => {
+    const connections = claims
+      .filter((claim) => claim.text.toLowerCase().includes(entity.name.toLowerCase()))
+      .slice(0, 5)
+      .map((claim) => claim.id);
+
+    return {
+      name: entity.name,
+      count: entity.occurrences.length,
+      type: entity.type,
+      connections,
+    };
+  });
+}
+
 /**
  * Cross-check a claim against external sources
  */
@@ -376,13 +492,22 @@ export async function ingestDocument(
   
   if (type === 'web') {
     // Fetch and extract from URL
-    const res = await fetch(source as string, { headers: { 'User-Agent': 'OmniBrowserBot/1.0' } });
-    const html = await res.text();
-    const dom = new JSDOM(html, { url: source as string });
-    const reader = new Readability(dom.window.document);
-    const article = reader.parse();
-    content = article?.textContent || '';
-    title = title || article?.title || source as string;
+    const stealthResult = await stealthFetchPage(source as string, { timeout: 15000 }).catch(() => null);
+    if (stealthResult && stealthResult.html) {
+      const dom = new JSDOM(stealthResult.html, { url: stealthResult.finalUrl || (source as string) });
+      const reader = new Readability(dom.window.document);
+      const article = reader.parse();
+      content = article?.textContent || dom.window.document.body?.textContent || '';
+      title = title || article?.title || stealthResult.title || (source as string);
+    } else {
+      const res = await fetch(source as string, { headers: { 'User-Agent': 'OmniBrowserBot/1.0' } });
+      const html = await res.text();
+      const dom = new JSDOM(html, { url: source as string });
+      const reader = new Readability(dom.window.document);
+      const article = reader.parse();
+      content = article?.textContent || '';
+      title = title || article?.title || source as string;
+    }
   } else {
     // For PDF/DOCX, content should be pre-extracted
     content = source as string;
@@ -421,6 +546,9 @@ export async function ingestDocument(
     entities,
     timeline,
     claims,
+    // @ts-expect-error: auditTrail is not yet typed on DocumentReview
+    auditTrail: buildAuditTrail(claims),
+    entityGraph: buildEntityGraph(entities, claims),
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };

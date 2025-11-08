@@ -3,19 +3,30 @@
  */
 
 import React, { useState, useEffect, Suspense } from 'react';
+import { AlertTriangle } from 'lucide-react';
 import { Outlet } from 'react-router-dom';
 import { PermissionRequest, ConsentRequest, ipcEvents } from '../../lib/ipc-events';
 import { useIPCEvent } from '../../lib/use-ipc-event';
 import { useTabsStore } from '../../state/tabsStore';
 import { ipc } from '../../lib/ipc-typed';
+import { ResearchHighlight } from '../../types/research';
+
+type ErrorBoundaryState = {
+  hasError: boolean;
+  error?: Error;
+  errorInfo?: string;
+  copyStatus: 'success' | 'error' | null;
+  copyMessage?: string;
+  copying: boolean;
+};
 
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode; fallback?: React.ReactNode; componentName?: string },
-  { hasError: boolean; error?: Error; errorInfo?: string }
+  ErrorBoundaryState
 > {
   constructor(props: { children: React.ReactNode; fallback?: React.ReactNode; componentName?: string }) {
     super(props);
-    this.state = { hasError: false };
+    this.state = { hasError: false, copyStatus: null, copying: false };
   }
 
   static getDerivedStateFromError(error: Error) {
@@ -23,43 +34,140 @@ class ErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error(`ErrorBoundary caught error${this.props.componentName ? ` in ${this.props.componentName}` : ''}:`, error, errorInfo);
+    console.error(
+      `ErrorBoundary caught error${this.props.componentName ? ` in ${this.props.componentName}` : ''}:`,
+      error,
+      errorInfo,
+    );
     this.setState({ error, errorInfo: errorInfo.componentStack });
   }
 
+  private handleReload = () => {
+    window.location.reload();
+  };
+
+  private handleOpenLogs = async () => {
+    try {
+      const result = await ipc.diagnostics.openLogs();
+      this.setState({
+        copyStatus: result?.success ? 'success' : 'error',
+        copyMessage: result?.success ? 'Logs folder opened.' : 'Unable to open logs folder.',
+        copying: false,
+      });
+    } catch (error) {
+      console.error('Failed to open logs folder from error boundary:', error);
+      this.setState({
+        copyStatus: 'error',
+        copyMessage: 'Failed to open logs folder.',
+        copying: false,
+      });
+    }
+  };
+
+  private handleCopyDiagnostics = async () => {
+    if (this.state.copying) return;
+    this.setState({ copying: true, copyStatus: null, copyMessage: undefined });
+    try {
+      const result = await ipc.diagnostics.copyDiagnostics();
+      if (result?.diagnostics && navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(result.diagnostics);
+        this.setState({
+          copyStatus: 'success',
+          copyMessage: 'Diagnostics copied to clipboard.',
+          copying: false,
+        });
+      } else {
+        this.setState({
+          copyStatus: 'error',
+          copyMessage: 'Clipboard unavailable. Diagnostics logged to console.',
+          copying: false,
+        });
+        console.info('[Diagnostics] Summary:', result?.diagnostics);
+      }
+    } catch (error) {
+      console.error('Failed to copy diagnostics from error boundary:', error);
+      this.setState({
+        copyStatus: 'error',
+        copyMessage: 'Failed to copy diagnostics.',
+        copying: false,
+      });
+    }
+  };
+
   render() {
     if (this.state.hasError) {
-      // If there's a custom fallback, use it
       if (this.props.fallback) {
         return this.props.fallback;
       }
-      
-      // Otherwise, return null to hide the error silently in production
-      // or show minimal error info in development
-      if (process.env.NODE_ENV === 'development') {
-        return (
-          <div style={{ 
-            padding: '8px', 
-            color: '#ef4444', 
-            fontSize: '11px',
-            backgroundColor: '#1e1e1e',
-            borderLeft: '2px solid #ef4444'
-          }}>
-            {this.props.componentName ? `${this.props.componentName} error` : 'Component error'}
-            {this.state.error && (
-              <details style={{ marginTop: '4px', color: '#94a3b8' }}>
-                <summary style={{ cursor: 'pointer' }}>Details</summary>
-                <pre style={{ fontSize: '10px', marginTop: '4px', whiteSpace: 'pre-wrap' }}>
-                  {this.state.error.message}
+
+      return (
+        <div className="flex min-h-screen w-full items-center justify-center bg-slate-950 px-6 py-12 text-gray-100">
+          <div className="w-full max-w-xl space-y-5 rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow-lg">
+            <div className="flex items-start gap-3">
+              <div className="rounded-full bg-red-500/20 p-2 text-red-200">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div>
+                <h1 className="text-lg font-semibold text-red-200">
+                  Something went wrong{this.props.componentName ? ` inside ${this.props.componentName}` : ''}.
+                </h1>
+                {this.state.error?.message && (
+                  <p className="mt-2 text-sm text-red-100/80">{this.state.error.message}</p>
+                )}
+                <p className="mt-2 text-sm text-gray-400">
+                  Try reloading the interface. You can also copy diagnostics or inspect the latest logs to share with the
+                  team.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              <button
+                onClick={this.handleReload}
+                className="rounded-lg border border-blue-500/50 bg-blue-500/10 px-4 py-2 text-sm font-medium text-blue-100 hover:border-blue-500/70 transition-colors"
+              >
+                Reload app
+              </button>
+              <button
+                onClick={this.handleCopyDiagnostics}
+                disabled={this.state.copying}
+                className={`rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
+                  this.state.copying
+                    ? 'border-indigo-500/30 bg-indigo-500/10 text-indigo-200/60 cursor-wait'
+                    : 'border-indigo-500/50 bg-indigo-500/10 text-indigo-100 hover:border-indigo-500/70'
+                }`}
+              >
+                {this.state.copying ? 'Copying…' : 'Copy diagnostics'}
+              </button>
+              <button
+                onClick={this.handleOpenLogs}
+                className="rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-100 hover:border-emerald-500/70 transition-colors"
+              >
+                Open logs folder
+              </button>
+            </div>
+
+            {this.state.copyMessage && (
+              <div
+                className={`text-sm ${
+                  this.state.copyStatus === 'success' ? 'text-emerald-300' : 'text-red-300'
+                }`}
+              >
+                {this.state.copyMessage}
+              </div>
+            )}
+
+            {process.env.NODE_ENV === 'development' && this.state.errorInfo && (
+              <details className="text-xs text-gray-400">
+                <summary className="cursor-pointer text-gray-300">Stack trace</summary>
+                <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-black/40 p-3">
+                  {this.state.errorInfo}
                 </pre>
               </details>
             )}
           </div>
-        );
-      }
-      
-      // In production, hide errors silently to avoid UI clutter
-      return null;
+        </div>
+      );
     }
     return this.props.children;
   }
@@ -74,6 +182,8 @@ const CommandPalette = React.lazy(() => import('./CommandPalette').then(m => ({ 
 const PermissionPrompt = React.lazy(() => import('../Overlays/PermissionPrompt').then(m => ({ default: m.PermissionPrompt })));
 const ConsentPrompt = React.lazy(() => import('../Overlays/ConsentPrompt').then(m => ({ default: m.ConsentPrompt })));
 const AgentOverlay = React.lazy(() => import('../AgentOverlay').then(m => ({ default: m.AgentOverlay })));
+const ClipperOverlay = React.lazy(() => import('../Overlays/ClipperOverlay').then(m => ({ default: m.ClipperOverlay })));
+const ReaderOverlay = React.lazy(() => import('../Overlays/ReaderOverlay').then(m => ({ default: m.ReaderOverlay })));
 
 export function AppShell() {
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
@@ -81,6 +191,10 @@ export function AppShell() {
   const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
   const [consentRequest, setConsentRequest] = useState<ConsentRequest | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [clipperActive, setClipperActive] = useState(false);
+  const [readerActive, setReaderActive] = useState(false);
+  const tabsState = useTabsStore();
+  const activeTab = tabsState.tabs.find(tab => tab.id === tabsState.activeId);
 
   // Listen for permission requests
   useIPCEvent<PermissionRequest>('permissions:request', (request) => {
@@ -88,9 +202,35 @@ export function AppShell() {
   }, []);
 
   // Listen for consent requests
-  useIPCEvent<ConsentRequest>('agent:consent:request', (request) => {
-    setConsentRequest(request);
-  }, []);
+  useIPCEvent<any>(
+    'agent:consent:request',
+    (payload) => {
+      if (!payload || !payload.id || !payload.action) return;
+      const request: ConsentRequest = {
+        id: payload.id,
+        action: {
+          type: payload.action.type,
+          description: payload.action.description,
+          risk: payload.action.risk ?? 'medium',
+        },
+        callback: async (approved: boolean) => {
+          try {
+            if (approved) {
+              await ipc.consent.approve(payload.id);
+            } else {
+              await ipc.consent.revoke(payload.id);
+            }
+          } catch (error) {
+            console.error('Failed to resolve consent:', error);
+          } finally {
+            setConsentRequest(null);
+          }
+        },
+      };
+      setConsentRequest(request);
+    },
+    [],
+  );
 
   // Listen for fullscreen changes
   useEffect(() => {
@@ -154,6 +294,15 @@ export function AppShell() {
         return;
       }
 
+      // ⌘⇧H / Ctrl+Shift+H: Highlight clipper
+      if (modifier && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'h') {
+        e.preventDefault();
+        if (useTabsStore.getState().activeId) {
+          setClipperActive(true);
+        }
+        return;
+      }
+
       // ⌥⌘P / Alt+Ctrl+P: Proxy Menu (opens NetworkButton menu)
       if (modifier && e.altKey && e.key.toLowerCase() === 'p') {
         e.preventDefault();
@@ -183,7 +332,9 @@ export function AppShell() {
 
       // Esc: Close modals
       if (e.key === 'Escape') {
-        if (commandPaletteOpen) {
+        if (clipperActive) {
+          setClipperActive(false);
+        } else if (commandPaletteOpen) {
           setCommandPaletteOpen(false);
         } else if (permissionRequest) {
           setPermissionRequest(null);
@@ -198,7 +349,25 @@ export function AppShell() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [commandPaletteOpen, permissionRequest, consentRequest, rightPanelOpen]);
+  }, [commandPaletteOpen, permissionRequest, consentRequest, rightPanelOpen, clipperActive]);
+
+  const handleCreateHighlight = async (highlight: ResearchHighlight) => {
+    if (!activeTab?.url) {
+      setClipperActive(false);
+      return;
+    }
+    try {
+      const existing = await ipc.research.getNotes(activeTab.url);
+      const notes = existing?.notes ?? '';
+      const highlights = Array.isArray(existing?.highlights) ? existing.highlights : [];
+      await ipc.research.saveNotes(activeTab.url, notes, [...highlights, highlight]);
+      ipcEvents.emit('research:highlight-added', { url: activeTab.url, highlight });
+    } catch (error) {
+      console.error('Failed to save highlight:', error);
+    } finally {
+      setClipperActive(false);
+    }
+  };
 
   return (
     <div className="flex flex-col h-screen bg-[#1A1D28] text-gray-100 overflow-hidden relative">
@@ -209,6 +378,16 @@ export function AppShell() {
             <TopNav 
               onAgentToggle={() => setRightPanelOpen(!rightPanelOpen)}
               onCommandPalette={() => setCommandPaletteOpen(true)}
+              onClipperToggle={() => {
+                if (tabsState.activeId) {
+                  setClipperActive(true);
+                }
+              }}
+              onReaderToggle={() => {
+                if (tabsState.activeId) {
+                  setReaderActive(true);
+                }
+              }}
             />
           </ErrorBoundary>
         </Suspense>
@@ -259,6 +438,27 @@ export function AppShell() {
       <Suspense fallback={null}>
         <ErrorBoundary componentName="AgentOverlay">
           <AgentOverlay />
+        </ErrorBoundary>
+      </Suspense>
+
+      <Suspense fallback={null}>
+        <ErrorBoundary componentName="ClipperOverlay">
+          <ClipperOverlay
+            active={clipperActive}
+            onCancel={() => setClipperActive(false)}
+            onCreateHighlight={handleCreateHighlight}
+          />
+        </ErrorBoundary>
+      </Suspense>
+
+      <Suspense fallback={null}>
+        <ErrorBoundary componentName="ReaderOverlay">
+          <ReaderOverlay
+            active={readerActive}
+            onClose={() => setReaderActive(false)}
+            tabId={tabsState.activeId}
+            url={activeTab?.url}
+          />
         </ErrorBoundary>
       </Suspense>
 

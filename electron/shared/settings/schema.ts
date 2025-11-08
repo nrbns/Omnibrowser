@@ -25,6 +25,9 @@ export const SettingsSchema = z.object({
     defaultPath: z.string().default(''),
     checksum: z.boolean().default(true),
   }).default({}),
+  diagnostics: z.object({
+    telemetryOptIn: z.boolean().default(false),
+  }).default({}),
   performance: z.object({
     tabSleepMins: z.number().min(1).max(120).default(20),
     memoryCapMB: z.number().min(100).max(8192).default(2048),

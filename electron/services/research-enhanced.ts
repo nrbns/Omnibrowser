@@ -5,11 +5,13 @@
 
 import { Readability } from '@mozilla/readability';
 import { JSDOM } from 'jsdom';
-import { fetch } from 'undici';
+import { randomUUID } from 'node:crypto';
 import { registerHandler } from '../shared/ipc/router';
 import { z } from 'zod';
 import { verifyResearchResult, VerificationResult } from './research-verifier';
 import { getHybridSearchService, SearchResult as HybridSearchResult } from './search/hybrid-search';
+import { stealthFetchPage } from './stealth-fetch';
+import { fetch } from 'undici';
 
 export interface ResearchSource {
   url: string;
@@ -128,8 +130,10 @@ function parseMetadataTimestamp(meta?: HybridSearchResult): number | undefined {
 }
 
 async function fetchReadable(target: string, timeout = 10000, meta?: HybridSearchResult): Promise<ResearchSource | null> {
+  const normalizedTarget = normalizeUrl(target);
+
   // Check cache
-  const cached = contentCache.get(target);
+  const cached = contentCache.get(normalizedTarget);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     if (meta) {
       cached.content.metadata = { ...(meta.metadata || {}), source: meta.source, score: meta.score };
@@ -144,50 +148,86 @@ async function fetchReadable(target: string, timeout = 10000, meta?: HybridSearc
     return cached.content;
   }
 
+  const stealthResult = await stealthFetchPage(target, { timeout }).catch(() => null);
+
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
-    
-    const res = await fetch(target, {
-      headers: { 'User-Agent': 'OmniBrowserBot/1.0' },
-      signal: controller.signal,
-    }).catch(() => null);
-    
-    clearTimeout(timeoutId);
-    
-    if (!res || !res.ok) return null;
-    
-    const html = await res.text();
-    const dom = new JSDOM(html, { url: target });
+    if (!stealthResult) {
+      throw new Error('Stealth fetch failed');
+    }
+
+    const effectiveUrl = normalizeUrl(stealthResult.finalUrl || target);
+    const dom = new JSDOM(stealthResult.html, { url: effectiveUrl });
     const reader = new Readability(dom.window.document);
     const article = reader.parse();
-    
+
     if (!article) return null;
-    
     const text = (article.textContent || '').replace(/[\t\r]+/g, ' ').trim();
-    const title = article.title || dom.window.document.title || target;
+    const title = article.title || stealthResult.title || dom.window.document.title || effectiveUrl;
     const defaultSnippet = text.slice(0, 200) + (text.length > 200 ? '...' : '');
     const snippet = meta?.snippet?.trim() ? meta.snippet.trim() : defaultSnippet;
     const timestamp = parseMetadataTimestamp(meta) ?? Date.now();
-    
+
     const source: ResearchSource = {
-      url: target,
+      url: effectiveUrl,
       title,
       text,
       snippet,
       timestamp,
-      domain: getDomain(target),
+      domain: getDomain(effectiveUrl),
       relevanceScore: 0,
       sourceType: classifySourceType(target, title),
       metadata: meta ? { ...(meta.metadata || {}), source: meta.source, score: meta.score } : undefined,
     };
-    
+
     // Cache result
-    contentCache.set(target, { content: source, timestamp: Date.now() });
-    
+    const cacheEntry = { content: source, timestamp: Date.now() };
+    contentCache.set(effectiveUrl, cacheEntry);
+    if (effectiveUrl !== normalizedTarget) {
+      contentCache.set(normalizedTarget, cacheEntry);
+    }
+
     return source;
   } catch (error) {
-    return null;
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+      const res = await fetch(target, {
+        headers: { 'User-Agent': 'OmniBrowserBot/1.0' },
+        signal: controller.signal,
+      }).catch(() => null);
+      clearTimeout(timeoutId);
+      if (!res || !res.ok) return null;
+
+      const html = await res.text();
+      const dom = new JSDOM(html, { url: target });
+      const reader = new Readability(dom.window.document);
+      const article = reader.parse();
+
+      if (!article) return null;
+      const text = (article.textContent || '').replace(/[\t\r]+/g, ' ').trim();
+      const title = article.title || dom.window.document.title || target;
+      const defaultSnippet = text.slice(0, 200) + (text.length > 200 ? '...' : '');
+      const snippet = meta?.snippet?.trim() ? meta.snippet.trim() : defaultSnippet;
+      const timestamp = parseMetadataTimestamp(meta) ?? Date.now();
+
+      const source: ResearchSource = {
+        url: target,
+        title,
+        text,
+        snippet,
+        timestamp,
+        domain: getDomain(target),
+        relevanceScore: 0,
+        sourceType: classifySourceType(target, title),
+        metadata: meta ? { ...(meta.metadata || {}), source: meta.source, score: meta.score } : undefined,
+      };
+
+      contentCache.set(normalizedTarget, { content: source, timestamp: Date.now() });
+      return source;
+    } catch (fallbackError) {
+      console.warn('[Research] Failed to fetch readable content:', fallbackError);
+      return null;
+    }
   }
 }
 
@@ -401,40 +441,62 @@ function voteOnSources(sources: ResearchSource[], query: string, weights: ScoreW
  * Detect contradictions between sources
  */
 function detectContradictions(sources: ResearchSource[], query: string): ResearchResult['contradictions'] {
-  // Simple contradiction detection based on key claims
+  if (sources.length < 2) return undefined;
+
   const contradictions: ResearchResult['contradictions'] = [];
-  
-  // Extract key claims (simplified - in production, use NLP)
   const keyTerms = query.toLowerCase().split(/\s+/).filter(term => term.length > 3);
-  
-  // Compare sources for disagreements on key terms
+
+  const polarityPairs = [
+    { positive: /\b(increase|higher|growth|rise|support|approve)\b/gi, negative: /\b(decrease|lower|drop|decline|oppose|reject)\b/gi },
+    { positive: /\b(success|effective|works|beneficial|advantage)\b/gi, negative: /\b(fail|ineffective|harmful|risk|drawback)\b/gi },
+    { positive: /\b(accurate|reliable|confirmed|proven)\b/gi, negative: /\b(doubt|disputed|questioned|uncertain)\b/gi },
+  ];
+
   for (let i = 0; i < sources.length; i++) {
     for (let j = i + 1; j < sources.length; j++) {
       const source1 = sources[i];
       const source2 = sources[j];
-      
-      // Simple disagreement detection (can be enhanced with NLP)
       const text1 = source1.text.toLowerCase();
       const text2 = source2.text.toLowerCase();
-      
-      // Check for contradictory patterns (this is simplified)
-      const hasContradiction = keyTerms.some(term => {
-        const in1 = text1.includes(term);
-        const in2 = text2.includes(term);
-        // More sophisticated contradiction detection would go here
-        return false; // Placeholder
-      });
-      
-      if (hasContradiction) {
+
+      const sharedTerms = keyTerms.filter(term => text1.includes(term) && text2.includes(term));
+      if (sharedTerms.length === 0) continue;
+
+      let severityScore = 0;
+      let summary: string | undefined;
+
+      for (const pair of polarityPairs) {
+        const pos1 = (source1.text.match(pair.positive) || []).length;
+        const neg1 = (source1.text.match(pair.negative) || []).length;
+        const pos2 = (source2.text.match(pair.positive) || []).length;
+        const neg2 = (source2.text.match(pair.negative) || []).length;
+
+        const polarity1 = pos1 - neg1;
+        const polarity2 = pos2 - neg2;
+
+        if (polarity1 === 0 || polarity2 === 0) continue;
+
+        if (polarity1 > 0 && polarity2 < 0) {
+          severityScore += Math.abs(polarity1) + Math.abs(polarity2);
+          summary = `${source1.domain} reports positive findings while ${source2.domain} reports concerns.`;
+        } else if (polarity1 < 0 && polarity2 > 0) {
+          severityScore += Math.abs(polarity1) + Math.abs(polarity2);
+          summary = `${source1.domain} highlights risks that ${source2.domain} disputes.`;
+        }
+      }
+
+      if (severityScore > 0) {
         contradictions.push({
-          claim: query,
+          claim: sharedTerms.slice(0, 3).join(', '),
           sources: [i, j],
-          disagreement: 'minor',
+          disagreement: severityScore > 6 ? 'major' : 'minor',
+          summary,
+          severityScore,
         });
       }
     }
   }
-  
+
   return contradictions.length > 0 ? contradictions : undefined;
 }
 
@@ -497,6 +559,146 @@ function generateSummaryWithCitations(sources: ResearchSource[], query: string):
   };
 }
 
+function createTextFragment(snippet: string): string {
+  const sanitized = snippet.replace(/\s+/g, ' ').trim();
+  if (!sanitized) return '';
+
+  const start = sanitized.slice(0, 80);
+  const end = sanitized.length > 120 ? sanitized.slice(-80) : '';
+  const encode = (text: string) => encodeURIComponent(text.replace(/%/g, '').slice(0, 80));
+
+  if (end) {
+    return `#:~:text=${encode(start)},${encode(end)}`;
+  }
+  return `#:~:text=${encode(start)}`;
+}
+
+function buildEvidence(sources: ResearchSource[], query: string): ResearchResult['evidence'] {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const evidence: NonNullable<ResearchResult['evidence']> = [];
+
+  sources.slice(0, 6).forEach((source, sourceIndex) => {
+    const snippets = extractSnippets(source.text, query, 3);
+    snippets.forEach((snippet) => {
+      const score = terms.reduce((acc, term) => acc + (snippet.toLowerCase().includes(term) ? 1 : 0), 0);
+      const importance = score >= 4 ? 'high' : score >= 2 ? 'medium' : 'low';
+      const fragment = createTextFragment(snippet);
+
+      evidence.push({
+        id: randomUUID(),
+        sourceIndex,
+        quote: snippet.trim(),
+        context: `${source.title} • ${source.domain}`,
+        importance,
+        fragmentUrl: fragment ? `${source.url}${fragment}` : source.url,
+      });
+    });
+  });
+
+  return evidence.length > 0 ? evidence : undefined;
+}
+
+function buildBiasProfile(sources: ResearchSource[], weights: ScoreWeights): ResearchResult['biasProfile'] {
+  if (sources.length === 0) return undefined;
+
+  const counts: Record<ResearchSource['sourceType'], number> = {
+    news: 0,
+    academic: 0,
+    documentation: 0,
+    forum: 0,
+    other: 0,
+  };
+
+  sources.forEach((source) => {
+    counts[source.sourceType] += 1;
+  });
+
+  const total = sources.length || 1;
+  const domainMix = (Object.keys(counts) as ResearchSource['sourceType'][]).map((type) => ({
+    type,
+    percentage: Math.round((counts[type] / total) * 100),
+  }));
+
+  return {
+    authorityBias: Math.round(weights.authorityWeight * 100),
+    recencyBias: Math.round(weights.recencyWeight * 100),
+    domainMix,
+  };
+}
+
+function buildTaskChains(result: ResearchResult): ResearchResult['taskChains'] {
+  const chains: ResearchResult['taskChains'] = [];
+  const primarySteps = [
+    {
+      id: randomUUID(),
+      title: 'Review AI synthesis',
+      description: 'Skim the generated answer and note the cited claims.',
+      status: 'in_progress' as const,
+    },
+  ];
+
+  if (result.evidence && result.evidence.length > 0) {
+    const evidence = result.evidence[0];
+    primarySteps.push({
+      id: randomUUID(),
+      title: 'Verify primary evidence',
+      description: 'Open the highlighted passage on the original page to confirm context.',
+      status: 'pending' as const,
+      action: {
+        type: 'openEvidence',
+        sourceIndex: evidence.sourceIndex,
+        evidenceId: evidence.id,
+        fragmentUrl: evidence.fragmentUrl,
+      },
+    });
+  }
+
+  if (result.contradictions && result.contradictions.length > 0) {
+    primarySteps.push({
+      id: randomUUID(),
+      title: 'Resolve conflicting sources',
+      description: 'Compare sources with opposing conclusions and record takeaways.',
+      status: 'pending' as const,
+      action: {
+        type: 'openSource',
+        sourceIndex: result.contradictions[0].sources[0],
+      },
+    });
+  }
+
+  primarySteps.push({
+    id: randomUUID(),
+    title: 'Capture final summary',
+    description: 'Document the reconciled answer with citations.',
+    status: 'pending' as const,
+  });
+
+  chains.push({
+    id: randomUUID(),
+    label: 'Verify and Synthesize',
+    steps: primarySteps,
+  });
+
+  if (result.sources.length > 4) {
+    chains.push({
+      id: randomUUID(),
+      label: 'Source Deep Dive',
+      steps: result.sources.slice(0, 4).map((source, idx) => ({
+        id: randomUUID(),
+        title: `Audit source #${idx + 1}`,
+        description: `${source.title} (${source.domain})`,
+        status: 'pending' as const,
+        action: {
+          type: 'openSource',
+          sourceIndex: idx,
+        },
+      })),
+    });
+  }
+
+  return chains;
+}
+
 /**
  * Main research query handler
  */
@@ -556,6 +758,9 @@ export async function researchQuery(
   // Run verification
   const verification = verifyResearchResult(result);
   result.verification = verification;
+  result.evidence = buildEvidence(rankedSources, query);
+  result.biasProfile = buildBiasProfile(rankedSources, weights);
+  result.taskChains = buildTaskChains(result);
   
   return result;
 }

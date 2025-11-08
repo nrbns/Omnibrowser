@@ -25,6 +25,7 @@ export const TabCreateRequest = z.object({
   url: z.string().url().or(z.literal('about:blank')).optional().default('about:blank'),
   profileId: z.string().optional(),
   containerId: z.string().optional(),
+  mode: z.enum(['normal', 'ghost', 'private']).optional(),
 });
 
 export const TabCreateResponse = z.object({
@@ -34,6 +35,24 @@ export const TabCreateResponse = z.object({
 export const TabCreateWithProfileRequest = z.object({
   url: z.string().url().or(z.literal('about:blank')).optional().default('about:blank'),
   accountId: z.string(),
+});
+
+export const TabSetContainerRequest = z.object({
+  id: z.string(),
+  containerId: z.string(),
+});
+
+export const OmniSuggestion = z.object({
+  id: z.string(),
+  kind: z.enum(['action', 'history', 'tab', 'bookmark', 'search']),
+  title: z.string(),
+  value: z.string(),
+  description: z.string().optional(),
+  shortcut: z.string().optional(),
+  section: z.string().optional(),
+  icon: z.string().optional(),
+  url: z.string().optional(),
+  containerId: z.string().optional(),
 });
 
 export const TabCloseRequest = z.object({
@@ -82,6 +101,10 @@ export const TabListResponse = z.array(z.object({
   containerId: z.string().optional(),
   containerName: z.string().optional(),
   containerColor: z.string().optional(),
+  createdAt: z.number().optional(),
+  lastActiveAt: z.number().optional(),
+  sessionId: z.string().optional(),
+  profileId: z.string().optional(),
 }));
 // Container schemas
 export const ContainerSchema = z.object({
@@ -105,12 +128,38 @@ export const ContainerSetActiveRequest = z.object({
   containerId: z.string(),
 });
 
+export const ContainerPermissionsResponse = z.object({
+  containerId: z.string(),
+  permissions: z.array(z.enum(['media', 'display-capture', 'notifications', 'fullscreen'])),
+});
+
+export const ContainerPermissionSetRequest = z.object({
+  containerId: z.string(),
+  permission: z.enum(['media', 'display-capture', 'notifications', 'fullscreen']),
+  enabled: z.boolean(),
+});
+
+export const ContainerSitePermissionEntry = z.object({
+  permission: z.enum(['media', 'display-capture', 'notifications', 'fullscreen']),
+  origins: z.array(z.string()),
+});
+
+export const ContainerSitePermissionListResponse = z.array(ContainerSitePermissionEntry);
+
 
 export const TabInfo = z.object({
   id: z.string(),
   title: z.string(),
   url: z.string().optional(),
   active: z.boolean(),
+  mode: z.enum(['normal', 'ghost', 'private']).optional(),
+  containerId: z.string().optional(),
+  containerName: z.string().optional(),
+  containerColor: z.string().optional(),
+  createdAt: z.number().optional(),
+  lastActiveAt: z.number().optional(),
+  sessionId: z.string().optional(),
+  profileId: z.string().optional(),
 });
 
 // Proxy schemas
@@ -153,9 +202,18 @@ export const ProxyStatusResponse = z.object({
 });
 
 // Profile schemas
+export const ProfilePolicy = z.object({
+  allowDownloads: z.boolean(),
+  allowPrivateWindows: z.boolean(),
+  allowGhostTabs: z.boolean(),
+  allowScreenshots: z.boolean(),
+  allowClipping: z.boolean(),
+});
+
 export const ProfileCreateRequest = z.object({
   name: z.string().min(1).max(100),
   proxy: ProxyProfile.optional(),
+  color: z.string().optional(),
 });
 
 export const Profile = z.object({
@@ -163,6 +221,47 @@ export const Profile = z.object({
   name: z.string(),
   createdAt: z.number(),
   proxy: ProxyProfile.optional(),
+  kind: z.enum(['default', 'work', 'personal', 'custom']).optional(),
+  color: z.string().optional(),
+  system: z.boolean().optional(),
+  policy: ProfilePolicy.optional(),
+  description: z.string().optional(),
+});
+
+export const ProfileSetActiveRequest = z.object({
+  profileId: z.string(),
+});
+
+export const ProfilePolicyRequest = z.object({
+  profileId: z.string().optional(),
+});
+
+export const ReaderSummarizeRequest = z.object({
+  url: z.string().optional(),
+  title: z.string().optional(),
+  content: z.string().min(1),
+  html: z.string().optional(),
+});
+
+export const ReaderSummaryItem = z.object({
+  summary: z.string(),
+  citation: z
+    .object({
+      text: z.string(),
+      url: z.string().optional(),
+    })
+    .optional(),
+});
+
+export const ReaderSummarizeResponse = z.object({
+  mode: z.enum(['local', 'cloud', 'extractive']),
+  bullets: z.array(ReaderSummaryItem),
+});
+
+export const ReaderExportRequest = z.object({
+  url: z.string().optional(),
+  title: z.string().optional(),
+  html: z.string(),
 });
 
 // Settings schemas
@@ -487,6 +586,7 @@ export const SessionBundleExportRequest = z.object({
   runId: z.string(),
   name: z.string().optional(),
   description: z.string().optional(),
+  includeWorkspace: z.boolean().optional(),
 });
 
 export const SessionBundleImportRequest = z.object({

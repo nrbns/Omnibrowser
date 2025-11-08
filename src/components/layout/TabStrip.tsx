@@ -18,12 +18,29 @@ interface Tab {
   url: string;
   favicon?: string;
   active: boolean;
+  mode?: 'normal' | 'ghost' | 'private';
+  containerId?: string;
+  containerName?: string;
+  containerColor?: string;
+  createdAt?: number;
+  lastActiveAt?: number;
+  sessionId?: string;
+  profileId?: string;
 }
 
 export function TabStrip() {
   const { tabs: storeTabs, setAll: setAllTabs, setActive: setActiveTab, activeId } = useTabsStore();
   const [tabs, setTabs] = useState<Tab[]>([]);
-  const [contextMenu, setContextMenu] = useState<{ tabId: string; url: string; x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    tabId: string;
+    url: string;
+    containerId?: string;
+    containerName?: string;
+    containerColor?: string;
+    mode?: 'normal' | 'ghost' | 'private';
+    x: number;
+    y: number;
+  } | null>(null);
   const [hasInitialized, setHasInitialized] = useState(false);
   const isRestoringRef = useRef(false);
   const isCreatingTabRef = useRef(false); // Prevent infinite tab creation loops
@@ -48,6 +65,13 @@ export function TabStrip() {
         url: t.url || 'about:blank',
         active: t.active || false,
         mode: t.mode || 'normal',
+        containerId: t.containerId,
+        containerName: t.containerName,
+        containerColor: t.containerColor,
+        createdAt: t.createdAt,
+        lastActiveAt: t.lastActiveAt,
+        sessionId: t.sessionId,
+        profileId: t.profileId,
       }));
 
       const ids = mappedTabs.map(t => t.id).sort().join(',');
@@ -55,7 +79,20 @@ export function TabStrip() {
 
       setTabs(mappedTabs);
       tabsRef.current = mappedTabs;
-      setAllTabs(mappedTabs.map(t => ({ id: t.id, title: t.title, active: t.active, url: t.url, mode: t.mode })));
+      setAllTabs(mappedTabs.map(t => ({
+        id: t.id,
+        title: t.title,
+        active: t.active,
+        url: t.url,
+        mode: t.mode,
+        containerId: t.containerId,
+        containerColor: t.containerColor,
+        containerName: t.containerName,
+        createdAt: t.createdAt,
+        lastActiveAt: t.lastActiveAt,
+        sessionId: t.sessionId,
+        profileId: t.profileId,
+      })));
 
       const activeTab = mappedTabs.find(t => t.active);
       if (activeTab) {
@@ -140,6 +177,14 @@ export function TabStrip() {
             title: t.title || 'New Tab',
             url: t.url || 'about:blank',
             active: t.active || false,
+            mode: t.mode || 'normal',
+            containerId: t.containerId,
+            containerName: t.containerName,
+            containerColor: t.containerColor,
+            createdAt: t.createdAt,
+            lastActiveAt: t.lastActiveAt,
+            sessionId: t.sessionId,
+            profileId: t.profileId,
           }));
           
           // Update ref to track tab IDs and only update state if changed
@@ -147,7 +192,20 @@ export function TabStrip() {
           if (previousTabIdsRef.current !== tabIds) {
             previousTabIdsRef.current = tabIds;
             setTabs(mappedTabs);
-            setAllTabs(mappedTabs.map(t => ({ id: t.id, title: t.title, active: t.active, url: t.url, mode: t.mode })));
+            setAllTabs(mappedTabs.map(t => ({
+              id: t.id,
+              title: t.title,
+              active: t.active,
+              url: t.url,
+              mode: t.mode,
+              containerId: t.containerId,
+              containerColor: t.containerColor,
+              containerName: t.containerName,
+              createdAt: t.createdAt,
+              lastActiveAt: t.lastActiveAt,
+              sessionId: t.sessionId,
+              profileId: t.profileId,
+            })));
           }
           
           // Set active tab in store (only if changed - use ref to avoid dependency)
@@ -251,7 +309,10 @@ export function TabStrip() {
       
       isCreatingTabRef.current = true;
       try {
-        await ipc.tabs.create(tabState.url || 'about:blank');
+        await ipc.tabs.create({
+          url: tabState.url || 'about:blank',
+          containerId: tabState.containerId,
+        });
       } catch (error) {
         if (process.env.NODE_ENV === 'development') {
           console.error('Failed to restore tab from session:', error);
@@ -288,12 +349,20 @@ export function TabStrip() {
         console.log('[TabStrip] handleTabUpdate received:', tabList.map(t => ({ id: t.id, active: t.active })));
       }
       
-      const mappedTabs = tabList.map((t: any) => ({
-        id: t.id,
-        title: t.title || 'New Tab',
-        url: t.url || 'about:blank',
-        active: t.active || false,
-      }));
+    const mappedTabs = tabList.map((t: any) => ({
+      id: t.id,
+      title: t.title || 'New Tab',
+      url: t.url || 'about:blank',
+      active: t.active || false,
+      containerId: t.containerId,
+      containerName: t.containerName,
+      containerColor: t.containerColor,
+      mode: t.mode,
+      createdAt: t.createdAt,
+      lastActiveAt: t.lastActiveAt,
+      sessionId: t.sessionId,
+      profileId: t.profileId,
+    }));
       
       // Find the active tab from IPC (source of truth)
       const activeTabFromIPC = mappedTabs.find(t => t.active);
@@ -307,7 +376,20 @@ export function TabStrip() {
       // This ensures UI stays in sync even if optimistic updates were wrong
       setTabs(mappedTabs);
       tabsRef.current = mappedTabs;
-      setAllTabs(mappedTabs.map(t => ({ id: t.id, title: t.title, active: t.active, url: t.url, mode: t.mode })));
+      setAllTabs(mappedTabs.map(t => ({
+        id: t.id,
+        title: t.title,
+        active: t.active,
+        url: t.url,
+        mode: t.mode,
+        containerId: t.containerId,
+        containerColor: t.containerColor,
+      containerName: t.containerName,
+      createdAt: t.createdAt,
+      lastActiveAt: t.lastActiveAt,
+      sessionId: t.sessionId,
+      profileId: t.profileId,
+      })));
       
       // Update previousTabIdsRef to track changes
       if (currentTabIds !== newTabIds) {
@@ -600,7 +682,7 @@ export function TabStrip() {
 
   // Keyboard navigation (Left/Right/Home/End)
   // Use refs to access current tabs/activeId without causing re-renders
-  const tabsRef = useRef(tabs);
+  const tabsRef = useRef<Tab[]>(tabs);
   const activeIdRef = useRef(activeId);
   
   useEffect(() => {
@@ -742,7 +824,16 @@ export function TabStrip() {
                   onContextMenu={(e) => {
                     e.preventDefault();
                     (window as any).__lastContextMenuPos = { x: e.clientX, y: e.clientY };
-                    setContextMenu({ tabId: tab.id, url: tab.url, x: e.clientX, y: e.clientY });
+                    setContextMenu({
+                      tabId: tab.id,
+                      url: tab.url,
+                      containerId: tab.containerId,
+                    containerName: tab.containerName,
+                    containerColor: tab.containerColor,
+                      mode: tab.mode,
+                      x: e.clientX,
+                      y: e.clientY,
+                    });
                   }}
                 >
                   {/* Favicon */}
@@ -764,6 +855,14 @@ export function TabStrip() {
                     >
                       {tab.mode === 'ghost' ? 'Ghost' : 'Private'}
                     </span>
+                  )}
+
+                  {tab.containerId && tab.containerId !== 'default' && (
+                    <div
+                      className="w-2.5 h-2.5 rounded-full border border-gray-700/60"
+                      style={{ backgroundColor: tab.containerColor || '#6366f1' }}
+                      title={`${tab.containerName || 'Custom'} container`}
+                    />
                   )}
 
                   {/* Title */}
@@ -830,7 +929,10 @@ export function TabStrip() {
         <TabContextMenu
           tabId={contextMenu.tabId}
           url={contextMenu.url}
-          mode={tabs.find(t => t.id === contextMenu.tabId)?.mode}
+          containerId={contextMenu.containerId ?? tabs.find(t => t.id === contextMenu.tabId)?.containerId}
+          containerName={contextMenu.containerName ?? tabs.find(t => t.id === contextMenu.tabId)?.containerName}
+          containerColor={contextMenu.containerColor ?? tabs.find(t => t.id === contextMenu.tabId)?.containerColor}
+          mode={contextMenu.mode ?? tabs.find(t => t.id === contextMenu.tabId)?.mode}
           onClose={() => setContextMenu(null)}
         />
       )}

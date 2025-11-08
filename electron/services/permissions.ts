@@ -69,6 +69,7 @@ export function requestPermission(request: PermissionRequest): { granted: boolea
     type: getConsentActionType(request.type),
     description: `Request ${request.type} access from ${request.origin}`,
     target: request.origin,
+    risk: getRiskLevel(request.type),
   };
 
   if (ledger.hasValidConsent(consentAction)) {
@@ -147,6 +148,22 @@ function getConsentActionType(permissionType: PermissionType): ConsentAction['ty
       return 'access_clipboard';
     default:
       return 'access_filesystem';
+  }
+}
+
+function getRiskLevel(permissionType: PermissionType): 'low' | 'medium' | 'high' {
+  switch (permissionType) {
+    case 'camera':
+    case 'microphone':
+      return 'high';
+    case 'filesystem':
+      return 'high';
+    case 'clipboard:write':
+      return 'medium';
+    case 'notifications':
+      return 'low';
+    default:
+      return 'medium';
   }
 }
 

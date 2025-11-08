@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, ArrowRight, RefreshCw, Camera, PictureInPicture, Search, Download, History, Settings, Bot, ChevronDown, Workflow, Home, ZoomIn, ZoomOut, Code, FileText, Network, Layers } from 'lucide-react';
+import { ArrowLeft, ArrowRight, RefreshCw, Camera, PictureInPicture, Search, Download, History, Settings, Bot, ChevronDown, Workflow, Home, ZoomIn, ZoomOut, Code, FileText, Network, Layers, Activity } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useTabsStore } from '../../state/tabsStore';
@@ -15,15 +15,19 @@ import { QuickActions } from '../TopNav/QuickActions';
 import { ShieldsButton } from '../TopNav/ShieldsButton';
 import { NetworkButton } from '../TopNav/NetworkButton';
 import { SessionSwitcher } from '../sessions/SessionSwitcher';
+import { ProfileQuickSwitcher } from '../sessions/ProfileQuickSwitcher';
+import { ContainerSwitcher } from '../sessions/ContainerSwitcher';
 import { useIPCEvent } from '../../lib/use-ipc-event';
 import { DownloadUpdate, TabNavigationState } from '../../lib/ipc-events';
 
 interface TopNavProps {
   onAgentToggle: () => void;
   onCommandPalette: () => void;
+  onClipperToggle: () => void;
+  onReaderToggle: () => void;
 }
 
-export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
+export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onReaderToggle }: TopNavProps) {
   const { activeId } = useTabsStore();
   const navigate = useNavigate();
   const [canGoBack, setCanGoBack] = useState(false);
@@ -301,9 +305,11 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
   return (
     <div className="h-14 flex items-center px-4 gap-4 bg-gray-900/80 backdrop-blur-xl border-b border-gray-800/50 shadow-lg">
           {/* Left: Mode Switch + Session Switcher */}
-          <div className="flex-shrink-0 flex items-center gap-3">
-            <ModeSwitch />
-            <SessionSwitcher />
+      <div className="flex-shrink-0 flex items-center gap-3">
+        <ModeSwitch />
+        <ProfileQuickSwitcher />
+        <SessionSwitcher />
+            <ContainerSwitcher />
           </div>
 
       {/* Browser Navigation Controls */}
@@ -391,7 +397,7 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
         <NetworkButton />
 
         {/* Quick Actions */}
-        <QuickActions />
+        <QuickActions onReaderToggle={onReaderToggle} onClipperToggle={onClipperToggle} />
 
         {/* Options Dropdown */}
         <div className="relative">
@@ -782,6 +788,19 @@ export function TopNav({ onAgentToggle, onCommandPalette }: TopNavProps) {
               {downloadCount > 9 ? '9+' : downloadCount}
             </motion.span>
           )}
+        </motion.button>
+
+            {/* Watchers Button */}
+            <motion.button
+              onClick={() => {
+                navigate('/watchers');
+              }}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          className="p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
+          title="Page watchers"
+        >
+          <Activity size={18} />
         </motion.button>
 
             {/* History Button */}
