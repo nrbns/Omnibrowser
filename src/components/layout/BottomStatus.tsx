@@ -7,9 +7,10 @@ import { Lock, Send, Cpu, MemoryStick, Network, Brain, Shield, Activity } from '
 import { motion } from 'framer-motion';
 import { ipc } from '../../lib/ipc-typed';
 import { useTabsStore } from '../../state/tabsStore';
-import { NetworkStatus } from '../../lib/ipc-events';
+import { EfficiencyModeEvent, NetworkStatus } from '../../lib/ipc-events';
 import { useIPCEvent } from '../../lib/use-ipc-event';
 import { PrivacySwitch } from '../PrivacySwitch';
+import { useEfficiencyStore } from '../../state/efficiencyStore';
 
 export function BottomStatus() {
   const { activeId } = useTabsStore();
@@ -19,6 +20,11 @@ export function BottomStatus() {
   const [memoryUsage, setMemoryUsage] = useState(0);
   const [modelReady, setModelReady] = useState(true);
   const [privacyMode, setPrivacyMode] = useState<'Normal' | 'Ghost' | 'Tor'>('Normal');
+  const efficiencyLabel = useEfficiencyStore((state) => state.label);
+  const efficiencyBadge = useEfficiencyStore((state) => state.badge);
+  const efficiencyColor = useEfficiencyStore((state) => state.colorClass);
+  const efficiencySnapshot = useEfficiencyStore((state) => state.snapshot);
+  const setEfficiencyEvent = useEfficiencyStore((state) => state.setEvent);
 
   // Listen for network status
   useIPCEvent<NetworkStatus>('net:status', (status) => {
@@ -33,6 +39,10 @@ export function BottomStatus() {
       setPrivacyMode('Normal');
     }
   }, []);
+
+  useIPCEvent<EfficiencyModeEvent>('efficiency:mode', (event) => {
+    setEfficiencyEvent(event);
+  }, [setEfficiencyEvent]);
 
   // Update CPU and memory (throttled) - use ref to prevent infinite loops
   const statsUpdateRef = useRef<number>(0);
@@ -154,6 +164,27 @@ export function BottomStatus() {
             />
           </div>
         </motion.button>
+
+        {/* Efficiency Mode */}
+        <div
+          className={`flex items-center gap-1.5 ${efficiencyColor}`}
+          title={
+            efficiencyBadge
+              ? `${efficiencyLabel} · ${efficiencyBadge}`
+              : efficiencyLabel
+          }
+        >
+          <Activity size={14} />
+          <span>{efficiencyLabel}</span>
+          {efficiencyBadge && (
+            <span className="text-xs text-emerald-300">{efficiencyBadge}</span>
+          )}
+          {typeof efficiencySnapshot.batteryPct === 'number' && (
+            <span className="text-xs text-gray-400">
+              ({Math.round(efficiencySnapshot.batteryPct)}%)
+            </span>
+          )}
+        </div>
 
         {/* Network Status */}
         <div className="flex items-center gap-1.5" title={`Network: ${privacyMode} mode`}>

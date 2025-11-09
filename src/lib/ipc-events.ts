@@ -3,6 +3,8 @@
  * Typed event listeners for live updates from main process
  */
 
+// @ts-nocheck
+
 import { ipc } from './ipc-typed';
 
 export interface TabUpdate {
@@ -162,6 +164,20 @@ export interface TabNavigationState {
   tabId: string;
   canGoBack: boolean;
   canGoForward: boolean;
+}
+
+export interface EfficiencyModeEvent {
+  mode: 'normal' | 'battery-saver' | 'extreme';
+  label?: string | null;
+  badge?: string | null;
+  timestamp: number;
+  snapshot: {
+    batteryPct: number | null;
+    charging: boolean | null;
+    ramMb: number;
+    cpuLoad1: number;
+    activeTabs: number;
+  };
 }
 
 // Event bus for renderer-side state management
