@@ -475,6 +475,40 @@ export const ipc = {
     config: (config: { sources?: { brave?: { enabled: boolean; apiKey?: string }; bing?: { enabled: boolean; apiKey?: string; endpoint?: string }; custom?: { enabled: boolean } }; maxResults?: number; rerank?: boolean }) =>
       ipcCall('search:config', config),
   },
+  liveSearch: {
+    start: (query: string, options?: { mode?: 'default' | 'threat' | 'trade'; region?: string; maxResults?: number }) =>
+      ipcCall<
+        { query: string; mode?: 'default' | 'threat' | 'trade'; region?: string; maxResults?: number },
+        { jobId: string; channel: string }
+      >('search:live:start', { query, ...options }),
+  },
+  graph: {
+    tabs: () =>
+      ipcCall<unknown, {
+        nodes: Array<{
+          id: string;
+          title: string;
+          url: string;
+          domain: string;
+          containerId?: string;
+          containerName?: string;
+          containerColor?: string;
+          mode?: 'normal' | 'ghost' | 'private';
+          active: boolean;
+          createdAt?: number;
+          lastActiveAt?: number;
+        }>;
+        edges: Array<{ id: string; source: string; target: string; weight: number; reasons: string[] }>;
+        summary: { totalTabs: number; activeTabs: number; domains: number; containers: number };
+        updatedAt: number;
+      }>('graph:tabs', {}),
+  },
+  efficiency: {
+    applyMode: (mode: 'normal' | 'battery-saver' | 'extreme') =>
+      ipcCall<{ mode: 'normal' | 'battery-saver' | 'extreme' }, { success: boolean }>('efficiency:applyMode', { mode }),
+    clearOverride: () => ipcCall<unknown, { success: boolean }>('efficiency:clearOverride', {}),
+    hibernateInactiveTabs: () => ipcCall<unknown, { success: boolean; count: number }>('efficiency:hibernate', {}),
+  },
   downloads: {
     list: () =>
       ipcCall<
@@ -522,8 +556,9 @@ export const ipc = {
     revoke: (consentId: string) => ipcCall('consent:revoke', { consentId }),
     check: (action: unknown) => ipcCall('consent:check', action),
     get: (consentId: string) => ipcCall('consent:get', { consentId }),
-    list: (filter?: unknown) => ipcCall('consent:list', filter || {}),
-    export: () => ipcCall('consent:export', {}),
+    list: (filter?: { type?: string; approved?: boolean }) =>
+      ipcCall<{ type?: string; approved?: boolean }, import('../types/consent').ConsentRecord[]>('consent:list', filter ?? {}),
+    export: () => ipcCall<unknown, string>('consent:export', {}),
   },
   permissions: {
     request: (type: string, origin: string, description?: string) => ipcCall('permissions:request', { type, origin, description }),
@@ -663,11 +698,15 @@ export const ipc = {
   },
   tor: {
     start: (config?: { port?: number; controlPort?: number; newnymInterval?: number }) =>
-      ipcCall('tor:start', config || {}),
-    stop: () => ipcCall('tor:stop', {}),
-    status: () => ipcCall<unknown, { running: boolean; bootstrapped: boolean; progress: number; error?: string; circuitEstablished: boolean }>('tor:status', {}),
+      ipcCall<typeof config, { success: boolean; stub?: boolean; warning?: string }>('tor:start', config || {}),
+    stop: () => ipcCall<unknown, { success: boolean; stub?: boolean }>('tor:stop', {}),
+    status: () =>
+      ipcCall<
+        unknown,
+        { running: boolean; bootstrapped: boolean; progress: number; error?: string; circuitEstablished: boolean; stub?: boolean }
+      >('tor:status', {}),
     newIdentity: () => ipcCall('tor:newIdentity', {}),
-    getProxy: () => ipcCall<unknown, { proxy: string | null }>('tor:getProxy', {}),
+    getProxy: () => ipcCall<unknown, { proxy: string | null; stub?: boolean }>('tor:getProxy', {}),
   },
   shields: {
     get: (url: string) => ipcCall('shields:get', { url }),
@@ -677,8 +716,8 @@ export const ipc = {
     getStatus: () => ipcCall<unknown, { adsBlocked: number; trackersBlocked: number; httpsUpgrades: number; cookies3p: 'block' | 'allow'; webrtcBlocked: boolean; fingerprinting: boolean }>('shields:getStatus', {}),
   },
   vpn: {
-    status: () => ipcCall<unknown, { connected: boolean; type?: string; name?: string }>('vpn:status', {}),
-    check: () => ipcCall<unknown, { connected: boolean; type?: string; name?: string }>('vpn:check', {}),
+    status: () => ipcCall<unknown, { connected: boolean; type?: string; name?: string; stub?: boolean }>('vpn:status', {}),
+    check: () => ipcCall<unknown, { connected: boolean; type?: string; name?: string; stub?: boolean }>('vpn:check', {}),
   },
   network: {
     get: () => ipcCall<unknown, { quicEnabled: boolean; ipv6Enabled: boolean; ipv6LeakProtection: boolean }>('network:get', {}),

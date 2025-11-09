@@ -275,6 +275,10 @@ app.whenReady().then(async () => {
     registerReaderIpc();
     const { registerResearchEnhancedIpc } = await import('./services/research-enhanced');
     registerResearchEnhancedIpc();
+    const { registerLiveSearchIpc } = await import('./services/search/live-search');
+    registerLiveSearchIpc();
+    const { registerGraphAnalyticsIpc } = await import('./services/graph-analytics');
+    registerGraphAnalyticsIpc();
     const { registerDocumentReviewIpc } = await import('./services/document-review');
     registerDocumentReviewIpc();
     registerPluginIpc();

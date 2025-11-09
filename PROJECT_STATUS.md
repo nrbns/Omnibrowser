@@ -1,11 +1,11 @@
 # OmniBrowser Project Status
 
-_Last updated: 2025-11-08_
+_Last updated: 2025-11-09_
 
 ## Snapshot
 - **Program Phase:** Phase A – Beta Readiness  
 - **Current Iteration (Nov 2025):** Release Hygiene & Foundation  
-- **Overall Health:** ⚠️ _Behind plan_ – release deliverables not yet in place, UI polish and documentation outstanding.
+- **Overall Health:** 🟡 _Watchlist_ – privacy routing + security headers outstanding before beta sign-off.
 
 ## Phase Tracker
 | Track | Status | Notes |
@@ -16,7 +16,7 @@ _Last updated: 2025-11-08_
 | Stability & Observability | 🟢 Complete | CI + local checks passing; telemetry hooks and monitoring dashboards deployed. |
 
 ## Key Blockers
-None at this time. Continue monitoring installer signing SLAs and telemetry opt-in rates.
+Track Tor proxy integration, CSP rollout, and telemetry opt-in rates; no blocking issues.
 
 ## Immediate Next Steps (Beta Readiness)
 | Priority | Owner | Deliverable | ETA | Status |
@@ -24,6 +24,8 @@ None at this time. Continue monitoring installer signing SLAs and telemetry opt-
 | P0 | @maintainer | Maintain status doc + checklist parity | Ongoing | ✅ |
 | P0 | Release | Schedule beta retrospective / sign-off review | Nov 20 | 🟢 Scheduled |
 | P1 | DevOps | Monitor CI health and dependency drift | Continuous | 🟢 On Track |
+| P1 | Platform | Wire Tor proxy + VPN handoff (beyond UI) | Nov 15 | ✅ Completed |
+| P1 | Security | Land CSP headers + iframe proxy hardening | Nov 16 | 🔄 In Progress |
 
 ## Risk & Mitigation
 - **Risk:** Release drift due to scope creep.  
@@ -32,11 +34,17 @@ None at this time. Continue monitoring installer signing SLAs and telemetry opt-
   _Mitigation:_ Calendar renewal reminders; diversify signing certificates.
 - **Risk:** Telemetry opt-in below target.  
   _Mitigation:_ Continue transparent messaging and provide incentives for testers.
+- **Risk:** Privacy routing regressions (Tor/VPN integration newly landed).  
+  _Mitigation:_ Add proxy smoke tests, monitor error telemetry, keep manual fallback path documented.
 
 ## Recent Progress
 - Signed installers automated for Windows/macOS with published hashes.
 - Full Phase A/B/C feature sets delivered (split view, omnibar recall, spaces, eco-mode).
 - Zero-knowledge sync + collaborative graph sharing implemented and documented.
+- Consent playground overlay landed with approve/revoke flow.
+- Tor/VPN status indicators + toggles integrated into top nav + status bar.
+- Redix memory API now blocks high-risk PII via configurable server guardrails.
+- CSP tightened and iframe allow-list proxy shipped for embedded research widgets.
 
 ## Upcoming Milestones
 1. **Milestone M1 – Beta Release Candidate (target 2025-11-30):**
@@ -55,7 +63,8 @@ None at this time. Continue monitoring installer signing SLAs and telemetry opt-
 ## Dependencies & Notes
 - **Certificates:** Need code-signing certificates (Windows & macOS) before packaging milestone.  
 - **Docs:** `docs/USER_GUIDE.md` must be reintroduced with privacy/consent sections.  
-- **CI:** GitHub Actions workflow to be updated to run `npm run lint`, `npm run build:types`, `npm audit --production`.
+- **Privacy:** Tor proxy + iframe CSP hardening tracked in 7-day plan; UI is wired, network layer pending.  
+- **CI:** Updated workflow now enforces lint/types/tests/perf and Playwright smoke gates.
 
 ---
 

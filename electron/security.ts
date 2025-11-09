@@ -1,4 +1,110 @@
-import { app, session } from 'electron';
+import { app, session, type Session } from 'electron';
+import { createLogger } from './services/utils/logger';
+
+const logger = createLogger('security');
+
+const DEFAULT_IFRAME_ALLOWLIST = [
+  'tradingview.com',
+  'www.youtube.com',
+  'youtube.com',
+  'player.vimeo.com',
+  'calendar.google.com',
+  'open.spotify.com',
+];
+
+function parseAllowlist(): string[] {
+  const fromEnv = (process.env.IFRAME_ALLOWLIST ?? '')
+    .split(',')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+  const merged = new Set([...DEFAULT_IFRAME_ALLOWLIST.map((d) => d.toLowerCase()), ...fromEnv]);
+  return Array.from(merged);
+}
+
+const iframeHostAllowlist = parseAllowlist();
+
+function isAllowlistedFrame(url: string): boolean {
+  try {
+    const { hostname } = new URL(url);
+    return iframeHostAllowlist.some((domain) => {
+      if (hostname === domain) return true;
+      return hostname.endsWith(`.${domain}`);
+    });
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeHeaders(headers: Record<string, string | string[]>, name: string) {
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === name.toLowerCase()) {
+      delete headers[key];
+    }
+  }
+}
+
+function buildContentSecurityPolicy(isDev: boolean): string {
+  if (isDev) {
+    const devServer = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
+    return [
+      `default-src 'self' ${devServer}`,
+      `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${devServer}`,
+      `style-src 'self' 'unsafe-inline' ${devServer} https://fonts.googleapis.com`,
+      `font-src 'self' data: https://fonts.gstatic.com`,
+      `img-src 'self' data: blob: https: ${devServer}`,
+      `media-src 'self' blob: https:`,
+      `frame-src 'self' https:`,
+      `connect-src 'self' https: http: ws: wss: ${devServer}`,
+      `worker-src 'self' blob: ${devServer}`,
+      `frame-ancestors 'self'`,
+    ].join('; ');
+  }
+
+  return [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' data: https://fonts.gstatic.com",
+    "img-src 'self' data: blob: https:",
+    "media-src 'self' blob: https:",
+    "frame-src 'self' https:",
+    "connect-src 'self' https: http: ws: wss:",
+    "worker-src 'self' blob:",
+    "frame-ancestors 'self'",
+  ].join('; ');
+}
+
+const configuredSessions = new WeakSet<Session>();
+
+function configureSessionSecurity(ses: Session) {
+  if (configuredSessions.has(ses)) {
+    return;
+  }
+  configuredSessions.add(ses);
+
+  ses.webRequest.onHeadersReceived((details, callback) => {
+    const isDev = process.env.NODE_ENV === 'development';
+    const headers = { ...details.responseHeaders } as Record<string, string | string[]>;
+
+    const resourceType = details.resourceType;
+
+    // Apply CSP for application frames
+    if (details.url.startsWith('file://')) {
+      headers['Content-Security-Policy'] = [buildContentSecurityPolicy(isDev)];
+      headers['Cross-Origin-Opener-Policy'] = ['same-origin'];
+      headers['Cross-Origin-Embedder-Policy'] = ['require-corp'];
+    }
+
+    // Relax X-Frame-Options / CSP for allowlisted hosts to enable embedding via iframe proxy
+    if (resourceType === 'subFrame' && isAllowlistedFrame(details.url)) {
+      sanitizeHeaders(headers, 'x-frame-options');
+      sanitizeHeaders(headers, 'content-security-policy');
+      logger.debug?.('Relaxed frame headers for allowlisted host', { url: details.url });
+    }
+
+    callback({ responseHeaders: headers });
+  });
+}
 
 export function applySecurityPolicies() {
   app.on('web-contents-created', (_event, contents) => {
@@ -48,34 +154,10 @@ export function applySecurityPolicies() {
         cb(false);
       });
     } catch {}
+    configureSessionSecurity(ses);
   });
 
-  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    const isDev = process.env.NODE_ENV === 'development';
-    const vite = "http://localhost:5173";
-    // Allow external frames for embedded widgets (TradingView, YouTube, etc.)
-    // while maintaining security for scripts and other resources
-    const csp = isDev
-      ? `default-src 'self' ${vite}; script-src 'self' 'unsafe-inline' 'unsafe-eval' ${vite}; style-src 'self' 'unsafe-inline' ${vite}; img-src 'self' data: blob: https: ${vite}; frame-src 'self' https: ${vite}; connect-src 'self' http: https: ws: wss: ${vite}`
-      : "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; frame-src 'self' https:; connect-src 'self' http: https: ws: wss:";
-
-    const headers = {
-      ...details.responseHeaders,
-      'Content-Security-Policy': [csp]
-    } as Record<string, string | string[]>;
-
-    // COOP/COEP for local app assets (enables SAB/WASM when needed)
-    try {
-      const url = details.url || '';
-      const isAppAsset = url.startsWith('file://');
-      if (isAppAsset) {
-        headers['Cross-Origin-Opener-Policy'] = ['same-origin'];
-        headers['Cross-Origin-Embedder-Policy'] = ['require-corp'];
-      }
-    } catch {}
-
-    callback({ responseHeaders: headers });
-  });
+  configureSessionSecurity(session.defaultSession);
 }
 
 

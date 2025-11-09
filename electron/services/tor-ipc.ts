@@ -6,6 +6,7 @@ import { registerHandler } from '../shared/ipc/router';
 import { z } from 'zod';
 import { initializeTor, getTorService, type TorStatus } from './tor';
 import { createLogger } from './utils/logger';
+import { session } from 'electron';
 
 const TorStartRequest = z.object({
   port: z.number().min(1).max(65535).optional().default(9050),
@@ -34,6 +35,48 @@ const stubStatus: TorStatus & { stub?: boolean } = {
   error: 'Tor unavailable; running in stub mode',
 };
 
+let torProxyApplied = false;
+let previousProxyString: string | null = null;
+
+async function applyTorProxy(proxyRules: string) {
+  try {
+    if (!torProxyApplied) {
+      // Capture existing proxy for later restoration
+      const current = await session.defaultSession.resolveProxy('https://example.com');
+      previousProxyString = current;
+    }
+    await session.defaultSession.setProxy({ proxyRules } as any);
+    torProxyApplied = true;
+    logger.info('Applied Tor proxy to default session', { proxyRules });
+  } catch (error) {
+    logger.error('Failed to apply Tor proxy', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+}
+
+async function clearTorProxy() {
+  if (!torProxyApplied) {
+    return;
+  }
+  try {
+    if (previousProxyString && previousProxyString !== 'DIRECT') {
+      await session.defaultSession.setProxy({ proxyRules: previousProxyString } as any);
+    } else {
+      await session.defaultSession.setProxy({ mode: 'direct' } as any);
+    }
+    logger.info('Restored previous proxy configuration', { previous: previousProxyString });
+  } catch (error) {
+    logger.warn('Failed to restore proxy after Tor stop', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    torProxyApplied = false;
+    previousProxyString = null;
+  }
+}
+
 export function registerTorIpc() {
   // Start Tor
   registerHandler('tor:start', TorStartRequest, async (_event, request) => {
@@ -53,6 +96,7 @@ export function registerTorIpc() {
         newnymInterval: request.newnymInterval,
       });
       await torService.start();
+      await applyTorProxy(torService.getProxyString());
       return { success: true };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -76,6 +120,7 @@ export function registerTorIpc() {
 
       const torService = getTorService();
       await torService.stop();
+      await clearTorProxy();
       return { success: true };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

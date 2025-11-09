@@ -22,6 +22,9 @@ interface Suggestion {
   url?: string;
   icon?: string;
   action?: SuggestionAction;
+  interactive?: boolean;
+  badge?: string;
+  metadata?: string;
 }
 
 type SearchEngine = 'google' | 'duckduckgo' | 'wiki' | 'youtube' | 'twitter';
@@ -33,6 +36,16 @@ type SuggestionAction =
   | { type: 'agent'; prompt: string }
   | { type: 'calc'; expr: string; result?: string }
   | { type: 'command'; command: string };
+
+type LiveResult = {
+  id: string;
+  title: string;
+  url: string;
+  snippet?: string;
+  source?: string;
+  score?: number;
+  publishedAt?: string;
+};
 
 const SEARCH_ENDPOINTS: Record<SearchEngine, string> = {
   google: 'https://www.google.com/search?q=',
@@ -213,6 +226,37 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
   const [isLoading, setIsLoading] = useState(false);
   const [recentItems, setRecentItems] = useState<Array<{ title: string; url: string; timestamp: number }>>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [liveResults, setLiveResults] = useState<LiveResult[]>([]);
+  const [liveStatus, setLiveStatus] = useState<string | null>(null);
+  const liveSessionRef = useRef<{ jobId: string; channel: string } | null>(null);
+  const liveUnsubscribeRef = useRef<(() => void) | null>(null);
+  const attachIpcListener = useCallback((channel: string, handler: (...args: any[]) => void) => {
+    const bridge = (window as any)?.ipc;
+    if (!bridge) return;
+    if (typeof bridge.on === 'function') {
+      bridge.on(channel, handler);
+      return;
+    }
+    if (typeof bridge.addListener === 'function') {
+      bridge.addListener(channel, handler);
+    }
+  }, []);
+
+  const detachIpcListener = useCallback((channel: string, handler: (...args: any[]) => void) => {
+    const bridge = (window as any)?.ipc;
+    if (!bridge) return;
+    if (typeof bridge.removeListener === 'function') {
+      bridge.removeListener(channel, handler);
+      return;
+    }
+    if (typeof bridge.off === 'function') {
+      bridge.off(channel, handler);
+      return;
+    }
+    if (typeof bridge.removeEventListener === 'function') {
+      bridge.removeEventListener(channel, handler);
+    }
+  }, []);
 
   const activeTab = tabs.find(t => t.id === activeId);
 
@@ -250,6 +294,81 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
     });
   }, []);
 
+  const stopLiveSession = useCallback(() => {
+    if (liveUnsubscribeRef.current) {
+      try {
+        liveUnsubscribeRef.current();
+      } catch {
+        // noop
+      }
+      liveUnsubscribeRef.current = null;
+    }
+    liveSessionRef.current = null;
+  }, []);
+
+  const handleLiveStep = useCallback((step: any) => {
+    if (!step || typeof step !== 'object') {
+      return;
+    }
+
+    if (step.type === 'status') {
+      setLiveStatus(step.value || null);
+      return;
+    }
+
+    if (step.type === 'result' && step.result) {
+      setLiveResults((prev) => {
+        const existingIndex = prev.findIndex((item) => item.url === step.result.url);
+        if (existingIndex >= 0) {
+          const updated = prev.slice();
+          updated[existingIndex] = { ...updated[existingIndex], ...step.result };
+          return updated;
+        }
+        return [...prev, step.result];
+      });
+      return;
+    }
+
+    if (step.type === 'complete') {
+      setLiveStatus((current) => current ?? 'Live results updated');
+      return;
+    }
+
+    if (step.type === 'error') {
+      setLiveStatus(step.message || 'Live search failed');
+      return;
+    }
+  }, []);
+
+  const startLiveSearch = useCallback(
+    async (query: string) => {
+      const trimmed = query.trim();
+      if (!trimmed) {
+        return;
+      }
+
+      stopLiveSession();
+      setLiveResults([]);
+      setLiveStatus('Searching…');
+
+      try {
+        const session = await ipc.liveSearch.start(trimmed, { maxResults: 10 });
+        liveSessionRef.current = session;
+
+        const handler = (_event: any, step: any) => {
+          handleLiveStep(step);
+        };
+
+        attachIpcListener(session.channel, handler);
+        liveUnsubscribeRef.current = () => detachIpcListener(session.channel, handler);
+      } catch (error) {
+        console.error('Live search start failed:', error);
+        setLiveStatus('Live search failed');
+      }
+    },
+    [attachIpcListener, detachIpcListener, handleLiveStep, stopLiveSession],
+  );
+
   // Listen for tab updates
   useIPCEvent<TabUpdate[]>('tabs:updated', (tabList) => {
     const tab = Array.isArray(tabList) ? tabList.find((t: any) => t.active) : null;
@@ -280,6 +399,10 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
       const normalized = query ?? '';
       const queryLower = normalized.toLowerCase().trim();
       const results: Suggestion[] = [];
+      if (queryLower.startsWith('@live')) {
+        setSuggestions([]);
+        return;
+      }
       const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
 
       const pushSuggestion = (suggestion: Suggestion) => {
@@ -378,6 +501,77 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
     }, 150),
     [tabs, recentItems]
   );
+
+  const debouncedLiveSearch = useMemo(
+    () =>
+      debounce((searchTerm: string) => {
+        startLiveSearch(searchTerm);
+      }, 250),
+    [startLiveSearch],
+  );
+
+  useEffect(() => () => debouncedLiveSearch.cancel(), [debouncedLiveSearch]);
+
+  useEffect(() => () => {
+    stopLiveSession();
+  }, [stopLiveSession]);
+
+  useEffect(() => {
+    const trimmed = url.trim();
+    if (trimmed.toLowerCase().startsWith('@live')) {
+      const searchTerm = trimmed.replace(/^@live\\s*/i, '').trim();
+      if (searchTerm.length < 2) {
+        debouncedLiveSearch.cancel();
+        setLiveResults([]);
+        setLiveStatus('Type at least 2 characters to stream results');
+        stopLiveSession();
+        return;
+      }
+      debouncedLiveSearch(searchTerm);
+    } else {
+      debouncedLiveSearch.cancel();
+      setLiveResults([]);
+      setLiveStatus(null);
+      stopLiveSession();
+    }
+  }, [url, debouncedLiveSearch, stopLiveSession]);
+
+  useEffect(() => {
+    const trimmed = url.trim();
+    if (!trimmed.toLowerCase().startsWith('@live')) {
+      return;
+    }
+    const searchTerm = trimmed.replace(/^@live\s*/i, '').trim();
+    const searchTerm = trimmed.replace(/^@live\s*/i, '').trim();
+    const base: Suggestion[] = [
+      {
+        type: 'command',
+        title: `Redix Live Search${searchTerm ? ` • ${searchTerm}` : ''}`,
+        subtitle:
+          liveStatus ??
+          (searchTerm.length < 2
+            ? 'Type at least 2 characters to begin streaming'
+            : liveResults.length === 0
+            ? 'Streaming results…'
+            : 'Live results ready'),
+        interactive: false,
+        icon: 'sparkles',
+      },
+    ];
+
+    liveResults.forEach((result) => {
+      base.push({
+        type: 'search',
+        title: result.title || result.url,
+        subtitle: result.snippet || result.url,
+        url: result.url,
+        action: { type: 'nav', url: result.url, title: result.title },
+        icon: 'search',
+      });
+    });
+
+    setSuggestions(base);
+  }, [url, liveResults, liveStatus]);
 
   useEffect(() => {
     if (focused) {
@@ -607,6 +801,9 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
     suggestion: Suggestion,
     options: { background?: boolean; newWindow?: boolean } = {},
   ) => {
+    if (suggestion.interactive === false) {
+      return;
+    }
     if (suggestion.action) {
       await executeAction(suggestion.action, suggestion.subtitle || suggestion.url || url, {
         ...options,
@@ -632,6 +829,17 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
         const suggestion = suggestions[selectedIndex];
         await handleSuggestionActivate(suggestion, { background, newWindow });
       } else {
+        if (url.trim().toLowerCase().startsWith('@live')) {
+          const topResult = liveResults[0];
+          if (topResult?.url) {
+            await navigateToUrl(topResult.url, {
+              background,
+              newWindow,
+              titleOverride: topResult.title,
+            });
+            return;
+          }
+        }
         const action = resolveQuickAction(url);
         await executeAction(action, url, { background, newWindow });
       }
@@ -733,8 +941,10 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
               <motion.button
                 key={index}
                 type="button"
+                disabled={suggestion.interactive === false}
                 onMouseDown={async (event) => {
                   event.preventDefault();
+                  if (suggestion.interactive === false) return;
                   const background = event.shiftKey && !event.altKey;
                   const newWindow = event.altKey;
                   await handleSuggestionActivate(suggestion, { background, newWindow });
@@ -743,6 +953,7 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
+                    if (suggestion.interactive === false) return;
                     const background = e.shiftKey && !e.altKey;
                     const newWindow = e.altKey;
                     handleSuggestionActivate(suggestion, { background, newWindow });
@@ -758,17 +969,21 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
                     ? 'bg-gray-800/60 text-gray-100'
                     : 'text-gray-300 hover:bg-gray-800/40'
                   }
+                  ${suggestion.interactive === false ? 'cursor-default opacity-80' : ''}
                 `}
               >
                 <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
-                  {suggestion.action?.type === 'calc' && <Calculator size={14} className="text-amber-400" />}
-                  {suggestion.action?.type === 'ai' && <Sparkles size={14} className="text-violet-400" />}
-                  {suggestion.action?.type === 'agent' && <Sparkles size={14} className="text-blue-400" />}
-                  {suggestion.action?.type === 'search' && <Search size={14} className="text-purple-400" />}
-                  {suggestion.type === 'tab' && <div className="w-3 h-3 bg-blue-500 rounded-full" />}
-                  {suggestion.type === 'history' && <Clock size={13} className="text-gray-400" />}
-                  {!suggestion.action && suggestion.type === 'command' && <Search size={14} className="text-blue-400" />}
-                  {!suggestion.action && suggestion.type === 'search' && <Search size={14} className="text-purple-400" />}
+                  {suggestion.icon === 'sparkles' && <Sparkles size={14} className="text-emerald-400" />}
+                  {suggestion.icon === 'search' && <Search size={14} className="text-purple-400" />}
+                  {suggestion.icon === 'history' && <Clock size={13} className="text-gray-400" />}
+                  {!suggestion.icon && suggestion.action?.type === 'calc' && <Calculator size={14} className="text-amber-400" />}
+                  {!suggestion.icon && suggestion.action?.type === 'ai' && <Sparkles size={14} className="text-violet-400" />}
+                  {!suggestion.icon && suggestion.action?.type === 'agent' && <Sparkles size={14} className="text-blue-400" />}
+                  {!suggestion.icon && suggestion.action?.type === 'search' && <Search size={14} className="text-purple-400" />}
+                  {!suggestion.icon && suggestion.type === 'tab' && <div className="w-3 h-3 bg-blue-500 rounded-full" />}
+                  {!suggestion.icon && suggestion.type === 'history' && <Clock size={13} className="text-gray-400" />}
+                  {!suggestion.icon && !suggestion.action && suggestion.type === 'command' && <Search size={14} className="text-blue-400" />}
+                  {!suggestion.icon && !suggestion.action && suggestion.type === 'search' && <Search size={14} className="text-purple-400" />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium truncate">{suggestion.title}</div>

@@ -9,6 +9,32 @@ import { ipc } from '../../lib/ipc-typed';
 import { AgentPlan, AgentStep, ConsentRequest } from '../../lib/ipc-events';
 import { useIPCEvent } from '../../lib/use-ipc-event';
 import { AgentPlanner } from '../AgentPlanner';
+import { useConsentOverlayStore } from '../../state/consentOverlayStore';
+import type { ConsentRecord, ConsentActionType } from '../../types/consent';
+import { formatDistanceToNow } from 'date-fns';
+
+const ACTION_LABELS: Record<ConsentActionType, string> = {
+  download: 'Download file',
+  form_submit: 'Submit form',
+  login: 'Login',
+  scrape: 'Scrape content',
+  export_data: 'Export data',
+  access_clipboard: 'Clipboard access',
+  access_camera: 'Camera access',
+  access_microphone: 'Microphone access',
+  access_filesystem: 'Filesystem access',
+  ai_cloud: 'Cloud AI usage',
+};
+
+const statusLabel = (record: ConsentRecord): { label: string; tone: string } => {
+  if (record.revokedAt) {
+    return { label: 'Revoked', tone: 'text-red-400 bg-red-500/10 border-red-500/40' };
+  }
+  if (record.approved) {
+    return { label: 'Approved', tone: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/40' };
+  }
+  return { label: 'Pending', tone: 'text-amber-300 bg-amber-500/10 border-amber-500/40' };
+};
 
 interface RightPanelProps {
   open: boolean;
@@ -29,9 +55,12 @@ export function RightPanel({ open, onClose }: RightPanelProps) {
   const [plan, setPlan] = useState<AgentPlan | null>(null);
   const [steps, setSteps] = useState<AgentStep[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
-  const [consentRecords, setConsentRecords] = useState<ConsentRequest[]>([]);
+  const [consentRecords, setConsentRecords] = useState<ConsentRecord[]>([]);
   const [dryRun, setDryRun] = useState(false);
   const logsEndRef = useRef<HTMLDivElement>(null);
+  const consentRefresh = useConsentOverlayStore((state) => state.refresh);
+  const consentList = useConsentOverlayStore((state) => state.records);
+  const openConsentDashboard = useConsentOverlayStore((state) => state.open);
 
   // Listen for agent plan
   useIPCEvent<AgentPlan>('agent:plan', (data) => {
@@ -49,9 +78,9 @@ export function RightPanel({ open, onClose }: RightPanelProps) {
   }, []);
 
   // Listen for consent requests
-  useIPCEvent<ConsentRequest>('agent:consent:request', (data) => {
-    setConsentRecords(prev => [...prev, data]);
-  }, []);
+  useIPCEvent<ConsentRequest>('agent:consent:request', () => {
+    void consentRefresh();
+  }, [consentRefresh]);
 
   // Auto-scroll logs
   useEffect(() => {
@@ -60,14 +89,15 @@ export function RightPanel({ open, onClose }: RightPanelProps) {
     }
   }, [logs, activeTab]);
 
-  // Load consent ledger
+  useEffect(() => {
+    setConsentRecords(consentList);
+  }, [consentList]);
+
   useEffect(() => {
     if (open && activeTab === 'consent') {
-      ipc.consent.list().then(list => {
-        // Would parse consent records
-      }).catch(() => {});
+      void consentRefresh();
     }
-  }, [open, activeTab]);
+  }, [open, activeTab, consentRefresh]);
 
   return (
     <AnimatePresence>
@@ -224,28 +254,37 @@ export function RightPanel({ open, onClose }: RightPanelProps) {
             )}
 
             {activeTab === 'consent' && (
-              <div className="space-y-2">
-                <div className="text-sm text-gray-400 mb-3">Consent Ledger</div>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-sm text-gray-400">
+                  <span>Consent Ledger</span>
+                  <button
+                    onClick={() => void openConsentDashboard()}
+                    className="rounded-lg border border-slate-700/60 bg-slate-900/70 px-2 py-1 text-[11px] text-gray-300 hover:bg-slate-900/90"
+                  >
+                    Open dashboard
+                  </button>
+                </div>
                 {consentRecords.length > 0 ? (
                   <div className="space-y-2">
-                    {consentRecords.map((record, idx) => (
-                      <div key={idx} className="bg-gray-800/40 rounded p-3 border border-gray-700/30">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs font-medium text-gray-300">{record.action.type}</span>
-                          <span className={`text-xs px-2 py-0.5 rounded ${
-                            record.action.risk === 'high' ? 'bg-red-500/20 text-red-400' :
-                            record.action.risk === 'medium' ? 'bg-yellow-500/20 text-yellow-400' :
-                            'bg-green-500/20 text-green-400'
-                          }`}>
-                            {record.action.risk}
-                          </span>
+                    {consentRecords.slice(0, 6).map((record) => {
+                      const status = statusLabel(record);
+                      return (
+                        <div key={record.id} className="rounded-xl border border-slate-700/60 bg-slate-900/60 p-3 space-y-2">
+                          <div className="flex items-center justify-between text-xs text-gray-400">
+                            <span className="text-gray-300 font-medium">{ACTION_LABELS[record.action.type]}</span>
+                            <span className={`rounded-full border px-2 py-0.5 ${status.tone}`}>{status.label}</span>
+                          </div>
+                          <div className="text-[11px] text-gray-500">{record.action.description}</div>
+                          <div className="flex items-center gap-2 text-[10px] text-gray-600">
+                            <span>{formatDistanceToNow(new Date(record.timestamp), { addSuffix: true })}</span>
+                            {record.action.target && <span>• {record.action.target}</span>}
+                          </div>
                         </div>
-                        <div className="text-xs text-gray-500 mt-1">{record.action.description}</div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
-                  <div className="text-xs text-gray-500 text-center py-8">No consent records</div>
+                  <div className="text-xs text-gray-500 text-center py-8">No consent records yet</div>
                 )}
               </div>
             )}

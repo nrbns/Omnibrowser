@@ -7,6 +7,7 @@ import { registerHandler } from '../../shared/ipc/router';
 import { getGPUControls } from './gpu-controls';
 import { getCrashRecovery } from './crash-recovery';
 import { updateBatteryState } from './resource-monitor';
+import { forceHibernateTabs, setManualOverride } from './efficiency-manager';
 
 export function registerPerformanceIpc(): void {
   // GPU Controls
@@ -99,6 +100,25 @@ export function registerPerformanceIpc(): void {
     const recovery = getCrashRecovery();
     const snapshots = await recovery.listSnapshots();
     return { snapshots };
+  });
+
+  registerHandler(
+    'efficiency:applyMode',
+    z.object({ mode: z.enum(['normal', 'battery-saver', 'extreme']) }),
+    async (_event, request) => {
+      setManualOverride(request.mode);
+      return { success: true };
+    },
+  );
+
+  registerHandler('efficiency:clearOverride', z.object({}), async () => {
+    setManualOverride(null);
+    return { success: true };
+  });
+
+  registerHandler('efficiency:hibernate', z.object({}), async () => {
+    const count = forceHibernateTabs();
+    return { success: true, count };
   });
 }
 

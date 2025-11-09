@@ -186,6 +186,12 @@ const ConsentPrompt = React.lazy(() => import('../Overlays/ConsentPrompt').then(
 const AgentOverlay = React.lazy(() => import('../AgentOverlay').then(m => ({ default: m.AgentOverlay })));
 const ClipperOverlay = React.lazy(() => import('../Overlays/ClipperOverlay').then(m => ({ default: m.ClipperOverlay })));
 const ReaderOverlay = React.lazy(() => import('../Overlays/ReaderOverlay').then(m => ({ default: m.ReaderOverlay })));
+const TabGraphOverlay = React.lazy(() => import('./TabGraphOverlay').then(m => ({ default: m.TabGraphOverlay })));
+const ConsentDashboard = React.lazy(() => import('../Consent/ConsentDashboard').then(m => ({ default: m.ConsentDashboard })));
+const OnboardingTour = React.lazy(() => import('../Onboarding/OnboardingTour').then(m => ({ default: m.OnboardingTour })));
+
+import { useOnboardingStore, onboardingStorage } from '../../state/onboardingStore';
+import { useConsentOverlayStore } from '../../state/consentOverlayStore';
 
 export function AppShell() {
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
@@ -195,6 +201,10 @@ export function AppShell() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [clipperActive, setClipperActive] = useState(false);
   const [readerActive, setReaderActive] = useState(false);
+  const onboardingVisible = useOnboardingStore((state) => state.visible);
+  const startOnboarding = useOnboardingStore((state) => state.start);
+  const finishOnboarding = useOnboardingStore((state) => state.finish);
+  const consentVisible = useConsentOverlayStore((state) => state.visible);
   const tabsState = useTabsStore();
   const activeTab = tabsState.tabs.find(tab => tab.id === tabsState.activeId);
   const overlayActive =
@@ -215,6 +225,13 @@ export function AppShell() {
       return null;
     }
   }, [restoreSummary]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!onboardingStorage.isCompleted()) {
+      startOnboarding();
+    }
+  }, [startOnboarding]);
 
   useEffect(() => {
     if (restoreDismissed) return;
@@ -610,6 +627,38 @@ export function AppShell() {
           </ErrorBoundary>
         </Portal>
       </Suspense>
+
+      <Suspense fallback={null}>
+        <Portal>
+          <ErrorBoundary componentName="TabGraphOverlay">
+            <TabGraphOverlay />
+          </ErrorBoundary>
+        </Portal>
+      </Suspense>
+
+      {consentVisible && (
+        <Suspense fallback={null}>
+          <Portal>
+            <ErrorBoundary componentName="ConsentDashboard">
+              <ConsentDashboard />
+            </ErrorBoundary>
+          </Portal>
+        </Suspense>
+      )}
+
+      {onboardingVisible && (
+        <Suspense fallback={null}>
+          <Portal>
+            <ErrorBoundary componentName="OnboardingTour">
+              <OnboardingTour
+                onClose={() => {
+                  finishOnboarding();
+                }}
+              />
+            </ErrorBoundary>
+          </Portal>
+        </Suspense>
+      )}
 
       {/* Overlays */}
       {commandPaletteOpen && (

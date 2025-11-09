@@ -3,14 +3,15 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { Lock, Send, Cpu, MemoryStick, Network, Brain, Shield, Activity } from 'lucide-react';
+import { Lock, Send, Cpu, MemoryStick, Network, Brain, Shield, Activity, AlertTriangle, X, RefreshCw, Wifi } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { ipc } from '../../lib/ipc-typed';
 import { useTabsStore } from '../../state/tabsStore';
-import { EfficiencyModeEvent, NetworkStatus } from '../../lib/ipc-events';
+import { EfficiencyModeEvent, NetworkStatus, EfficiencyAlert, EfficiencyAlertAction } from '../../lib/ipc-events';
 import { useIPCEvent } from '../../lib/use-ipc-event';
 import { PrivacySwitch } from '../PrivacySwitch';
 import { useEfficiencyStore } from '../../state/efficiencyStore';
+import { usePrivacyStore } from '../../state/privacyStore';
 
 export function BottomStatus() {
   const { activeId } = useTabsStore();
@@ -20,11 +21,20 @@ export function BottomStatus() {
   const [memoryUsage, setMemoryUsage] = useState(0);
   const [modelReady, setModelReady] = useState(true);
   const [privacyMode, setPrivacyMode] = useState<'Normal' | 'Ghost' | 'Tor'>('Normal');
+  const [efficiencyAlert, setEfficiencyAlert] = useState<EfficiencyAlert | null>(null);
   const efficiencyLabel = useEfficiencyStore((state) => state.label);
   const efficiencyBadge = useEfficiencyStore((state) => state.badge);
   const efficiencyColor = useEfficiencyStore((state) => state.colorClass);
   const efficiencySnapshot = useEfficiencyStore((state) => state.snapshot);
   const setEfficiencyEvent = useEfficiencyStore((state) => state.setEvent);
+  const torStatus = usePrivacyStore((state) => state.tor);
+  const vpnStatus = usePrivacyStore((state) => state.vpn);
+  const refreshTor = usePrivacyStore((state) => state.refreshTor);
+  const refreshVpn = usePrivacyStore((state) => state.refreshVpn);
+  const startTor = usePrivacyStore((state) => state.startTor);
+  const stopTor = usePrivacyStore((state) => state.stopTor);
+  const newTorIdentity = usePrivacyStore((state) => state.newTorIdentity);
+  const checkVpn = usePrivacyStore((state) => state.checkVpn);
 
   // Listen for network status
   useIPCEvent<NetworkStatus>('net:status', (status) => {
@@ -43,6 +53,20 @@ export function BottomStatus() {
   useIPCEvent<EfficiencyModeEvent>('efficiency:mode', (event) => {
     setEfficiencyEvent(event);
   }, [setEfficiencyEvent]);
+
+  useIPCEvent<EfficiencyAlert>('efficiency:alert', (alert) => {
+    setEfficiencyAlert(alert);
+  }, []);
+
+  useEffect(() => {
+    void refreshTor();
+    void refreshVpn();
+    const interval = window.setInterval(() => {
+      void refreshTor();
+      void refreshVpn();
+    }, 20000);
+    return () => window.clearInterval(interval);
+  }, [refreshTor, refreshVpn]);
 
   // Update CPU and memory (throttled) - use ref to prevent infinite loops
   const statsUpdateRef = useRef<number>(0);
@@ -123,13 +147,111 @@ export function BottomStatus() {
     Tor: 'text-purple-400',
   };
 
+  const torStatusLabel = torStatus.stub
+    ? 'Tor: Stub'
+    : torStatus.running
+      ? torStatus.circuitEstablished
+        ? 'Tor: On'
+        : `Tor: ${Math.round(torStatus.progress)}%`
+      : 'Tor: Off';
+  const torColorClass = torStatus.stub
+    ? 'text-amber-300'
+    : torStatus.running
+      ? torStatus.circuitEstablished
+        ? 'text-purple-300'
+        : 'text-amber-300'
+      : 'text-gray-500';
+  const torTooltip = torStatus.error
+    ? `Tor warning: ${torStatus.error}`
+    : torStatus.stub
+      ? 'Tor binary not found; using stub mode for UI only.'
+      : torStatus.running
+        ? torStatus.circuitEstablished
+          ? 'Tor circuit established. Click to stop.'
+          : 'Tor starting up. Click to stop.'
+        : 'Route traffic through Tor. Click to enable.';
+
+  const vpnStatusLabel = vpnStatus.connected
+    ? `VPN: ${vpnStatus.type ? vpnStatus.type.toUpperCase() : 'Active'}`
+    : 'VPN: Disconnected';
+  const vpnColorClass = vpnStatus.connected ? 'text-emerald-300' : 'text-gray-500';
+  const vpnTooltip = vpnStatus.connected
+    ? `VPN connected${vpnStatus.name ? ` (${vpnStatus.name})` : ''}. Click to re-check.`
+    : 'Check whether a system VPN is active.';
+
+  const severityStyles: Record<'info' | 'warning' | 'critical', string> = {
+    info: 'bg-blue-500/10 border-blue-400/40 text-blue-100',
+    warning: 'bg-amber-500/10 border-amber-400/40 text-amber-100',
+    critical: 'bg-red-500/10 border-red-400/40 text-red-100',
+  };
+
+  useEffect(() => {
+    if (!efficiencyAlert) return;
+    const timer = setTimeout(() => {
+      setEfficiencyAlert(null);
+    }, 20000);
+    return () => clearTimeout(timer);
+  }, [efficiencyAlert]);
+
+  const handleEfficiencyAction = async (action: EfficiencyAlertAction) => {
+    try {
+      if (action.type === 'mode' && action.mode) {
+        await ipc.efficiency.applyMode(action.mode);
+      } else if (action.type === 'hibernate') {
+        await ipc.efficiency.hibernateInactiveTabs();
+      }
+    } catch (error) {
+      console.error('Efficiency action failed:', error);
+    } finally {
+      setEfficiencyAlert(null);
+    }
+  };
+
   return (
-    <div className="h-10 flex items-center justify-between px-4 bg-gray-800/90 backdrop-blur-sm border-t border-gray-700/50">
+    <div
+      className="h-10 flex items-center justify-between px-4 bg-gray-800/90 backdrop-blur-sm border-t border-gray-700/50"
+      data-onboarding="status-bar"
+    >
       {/* Left: Status Indicators */}
       <div className="flex items-center gap-4 text-xs text-gray-300">
         {/* Privacy Mode Switch */}
         <PrivacySwitch />
         
+        {/* Efficiency Alerts */}
+        {efficiencyAlert && (
+          <motion.div
+            layout
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 6 }}
+            className={`flex items-center gap-3 px-3 py-2 border rounded-lg shadow-inner ${severityStyles[efficiencyAlert.severity]}`}
+          >
+            <AlertTriangle size={14} />
+            <div className="flex flex-col gap-0.5">
+              <span className="text-xs font-semibold">{efficiencyAlert.title}</span>
+              <span className="text-[11px] opacity-80">{efficiencyAlert.message}</span>
+            </div>
+            <div className="flex items-center gap-2 ml-2">
+              {efficiencyAlert.actions.map((action) => (
+                <button
+                  key={action.id}
+                  onClick={() => handleEfficiencyAction(action)}
+                  className="px-2 py-1 text-[11px] font-medium rounded bg-gray-900/60 hover:bg-gray-900/80 transition-colors"
+                >
+                  {action.label}
+                </button>
+              ))}
+              <button
+                onClick={() => setEfficiencyAlert(null)}
+                className="p-1 text-xs opacity-70 hover:opacity-100 transition-opacity"
+                aria-label="Dismiss efficiency alert"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+
         {/* CPU & Memory Gauges (clickable) */}
         <motion.button
           whileHover={{ scale: 1.05 }}
@@ -184,6 +306,57 @@ export function BottomStatus() {
               ({Math.round(efficiencySnapshot.batteryPct)}%)
             </span>
           )}
+        </div>
+
+        {/* Tor / VPN Controls */}
+        <div className="flex items-center gap-2">
+          <motion.button
+            whileHover={{ scale: torStatus.loading ? 1 : 1.05 }}
+            onClick={() => {
+              if (torStatus.loading) return;
+              if (torStatus.running) {
+                void stopTor();
+              } else {
+                void startTor();
+              }
+            }}
+            disabled={torStatus.loading}
+            className={`flex items-center gap-1.5 transition-colors ${torColorClass} ${torStatus.loading ? 'opacity-60 cursor-not-allowed' : 'hover:text-gray-200'}`}
+            title={torTooltip}
+          >
+            <Shield size={14} />
+            <span>{torStatusLabel}</span>
+          </motion.button>
+          {torStatus.running && !torStatus.stub && (
+            <motion.button
+              whileHover={{ scale: torStatus.loading ? 1 : 1.05 }}
+              onClick={() => {
+                if (!torStatus.loading) {
+                  void newTorIdentity();
+                }
+              }}
+              disabled={torStatus.loading}
+              className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-60"
+              title="Request a new Tor identity"
+            >
+              <RefreshCw size={12} />
+              <span>New ID</span>
+            </motion.button>
+          )}
+          <motion.button
+            whileHover={{ scale: vpnStatus.loading ? 1 : 1.05 }}
+            onClick={() => {
+              if (!vpnStatus.loading) {
+                void checkVpn();
+              }
+            }}
+            disabled={vpnStatus.loading}
+            className={`flex items-center gap-1.5 transition-colors ${vpnColorClass} ${vpnStatus.loading ? 'opacity-60 cursor-not-allowed' : 'hover:text-gray-200'}`}
+            title={vpnTooltip}
+          >
+            <Wifi size={14} />
+            <span>{vpnStatusLabel}</span>
+          </motion.button>
         </div>
 
         {/* Network Status */}

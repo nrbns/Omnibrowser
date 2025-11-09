@@ -180,6 +180,22 @@ export interface EfficiencyModeEvent {
   };
 }
 
+export interface EfficiencyAlertAction {
+  id: string;
+  label: string;
+  type: 'mode' | 'hibernate';
+  mode?: 'normal' | 'battery-saver' | 'extreme';
+}
+
+export interface EfficiencyAlert {
+  id: string;
+  severity: 'info' | 'warning' | 'critical';
+  title: string;
+  message: string;
+  timestamp: number;
+  actions: EfficiencyAlertAction[];
+}
+
 // Event bus for renderer-side state management
 class IPCEventBus {
   private listeners = new Map<string, Set<(data: any) => void>>();

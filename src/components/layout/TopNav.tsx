@@ -33,6 +33,10 @@ import type { LucideIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useTabsStore } from '../../state/tabsStore';
+import { useOnboardingStore } from '../../state/onboardingStore';
+import { useTabGraphStore } from '../../state/tabGraphStore';
+import { useConsentOverlayStore } from '../../state/consentOverlayStore';
+import { usePrivacyStore } from '../../state/privacyStore';
 import { ipc } from '../../lib/ipc-typed';
 import { ModeSwitch } from '../TopNav/ModeSwitch';
 import { Omnibox } from '../TopNav/Omnibox';
@@ -72,6 +76,16 @@ interface TopNavProps {
 export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onReaderToggle }: TopNavProps) {
   const { activeId } = useTabsStore();
   const navigate = useNavigate();
+  const toggleTabGraph = useTabGraphStore((state) => state.toggle);
+  const openTabGraph = useTabGraphStore((state) => state.open);
+  const resetOnboarding = useOnboardingStore((state) => state.reset);
+  const openConsentDashboard = useConsentOverlayStore((state) => state.open);
+  const torStatus = usePrivacyStore((state) => state.tor);
+  const vpnStatus = usePrivacyStore((state) => state.vpn);
+  const startTor = usePrivacyStore((state) => state.startTor);
+  const stopTor = usePrivacyStore((state) => state.stopTor);
+  const newTorIdentity = usePrivacyStore((state) => state.newTorIdentity);
+  const checkVpn = usePrivacyStore((state) => state.checkVpn);
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -99,6 +113,19 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
       canGoForward,
     };
   }, [activeId, canGoBack, canGoForward]);
+
+  useEffect(() => {
+    const handleGraphShortcut = (event: KeyboardEvent) => {
+      const isGraphShortcut =
+        (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'g';
+      if (isGraphShortcut) {
+        event.preventDefault();
+        void toggleTabGraph();
+      }
+    };
+    window.addEventListener('keydown', handleGraphShortcut);
+    return () => window.removeEventListener('keydown', handleGraphShortcut);
+  }, [toggleTabGraph]);
 
   useEffect(() => {
     return () => {
@@ -510,6 +537,15 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
     { type: 'divider', key: 'tools-divider' },
     {
       type: 'item',
+      key: 'guided-tour',
+      icon: Sparkles,
+      label: 'Run Guided Tour',
+      onSelect: () => {
+        resetOnboarding();
+      },
+    },
+    {
+      type: 'item',
       key: 'watchers',
       icon: Activity,
       label: 'Page Watchers',
@@ -524,6 +560,25 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
       label: 'History',
       onSelect: () => {
         navigate('/history');
+      },
+    },
+    {
+      type: 'item',
+      key: 'tab-graph',
+      icon: Network,
+      label: 'Tab Graph Overlay',
+      shortcut: isMac ? '⌘⇧G' : 'Ctrl⇧G',
+      onSelect: () => {
+        void openTabGraph();
+      },
+    },
+    {
+      type: 'item',
+      key: 'consent-dashboard',
+      icon: Shield,
+      label: 'Consent Playground',
+      onSelect: () => {
+        void openConsentDashboard();
       },
     },
   ];
@@ -583,6 +638,42 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
       onSelect: () => {
         const target = document.querySelector('[data-network-button]') as HTMLElement | null;
         target?.click();
+      },
+    },
+    {
+      type: 'item',
+      key: 'tor-toggle',
+      icon: Shield,
+      label: torStatus.running ? 'Disable Tor' : 'Enable Tor',
+      onSelect: () => {
+        if (torStatus.running) {
+          void stopTor();
+        } else {
+          void startTor();
+        }
+      },
+    },
+    {
+      type: 'item',
+      key: 'tor-new-identity',
+      icon: RefreshCw,
+      label: 'Tor: New Identity',
+      disabled: !torStatus.running || Boolean(torStatus.stub),
+      onSelect: () => {
+        if (torStatus.running && !torStatus.stub) {
+          void newTorIdentity();
+        }
+      },
+    },
+    {
+      type: 'item',
+      key: 'vpn-status',
+      icon: Wifi,
+      label: vpnStatus.connected
+        ? `VPN: ${vpnStatus.type ? vpnStatus.type.toUpperCase() : 'Active'}`
+        : 'Check VPN Status',
+      onSelect: () => {
+        void checkVpn();
       },
     },
     { type: 'divider', key: 'security-divider' },
@@ -748,7 +839,7 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
       </div>
 
       {/* Center: Omnibox with Progress Bar */}
-      <div className="no-drag flex-1 relative mx-4">
+      <div className="no-drag flex-1 relative mx-4" data-onboarding="omnibox">
         <Omnibox onCommandPalette={onCommandPalette} />
         <ProgressBar />
       </div>

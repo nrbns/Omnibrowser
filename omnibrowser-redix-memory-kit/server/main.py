@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 import logging
 import os
 import re
-from typing import Annotated, Any, Dict
+from typing import Annotated, Any, Dict, Iterable, Literal, Mapping
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -35,10 +35,41 @@ ALLOWED_PROJECTS = {
     if project.strip()
 }
 
-PII_PATTERNS: dict[str, re.Pattern[str]] = {
-    "email": re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE),
-    "phone": re.compile(r"\+?\d[\d\s().-]{7,}\d"),
-}
+Severity = Literal["low", "medium", "high"]
+
+PII_RULES: tuple[dict[str, Any], ...] = (
+    {
+        "label": "email",
+        "pattern": re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE),
+        "severity": "low",
+    },
+    {
+        "label": "phone",
+        "pattern": re.compile(r"\+?\d[\d\s().-]{7,}\d"),
+        "severity": "medium",
+    },
+    {
+        "label": "ipv4",
+        "pattern": re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
+        "severity": "medium",
+    },
+    {
+        "label": "ssn",
+        "pattern": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
+        "severity": "high",
+    },
+    {
+        "label": "credit_card",
+        "pattern": re.compile(r"\b(?:\d[ -]?){13,16}\b"),
+        "severity": "high",
+    },
+)
+
+SEVERITY_ORDER: dict[str, int] = {"none": 0, "low": 1, "medium": 2, "high": 3}
+PII_REJECT_SEVERITY = os.getenv("PII_REJECT_SEVERITY", "high").lower()
+if PII_REJECT_SEVERITY not in SEVERITY_ORDER:
+    logger.warning("Invalid PII_REJECT_SEVERITY value '%s'; defaulting to 'high'", PII_REJECT_SEVERITY)
+    PII_REJECT_SEVERITY = "high"
 
 
 class AuthContext(BaseModel):
@@ -86,16 +117,33 @@ class MemorySearchRequest(BaseModel):
     with_sources: bool | None = False
 
 
-def _detect_pii(text: str) -> dict[str, int]:
-    matches: dict[str, int] = {}
-    for label, pattern in PII_PATTERNS.items():
-        found = pattern.findall(text)
-        if found:
-            matches[label] = len(found)
-    return matches
+def _detect_pii(text: str) -> tuple[dict[str, dict[str, Any]], Severity | None]:
+    matches: dict[str, dict[str, Any]] = {}
+    highest: Severity | None = None
+    for rule in PII_RULES:
+        found = rule["pattern"].findall(text)
+        if not found:
+            continue
+        label = rule["label"]
+        severity: Severity = rule["severity"]
+        sample_raw = found[0]
+        if isinstance(sample_raw, Iterable) and not isinstance(sample_raw, (str, bytes)):
+            sample_raw = " ".join(str(part) for part in sample_raw)
+        sample = str(sample_raw)[:120]
+        matches[label] = {
+            "count": len(found),
+            "severity": severity,
+            "sample": sample,
+        }
+        if highest is None or SEVERITY_ORDER[severity] > SEVERITY_ORDER[highest]:
+            highest = severity
+    return matches, highest
 
 
-def _merge_pii(original: dict[str, Any] | None, detected: dict[str, int]) -> dict[str, Any] | None:
+def _merge_pii(
+    original: dict[str, Any] | None,
+    detected: Mapping[str, dict[str, Any]],
+) -> dict[str, Any] | None:
     if not detected:
         return original
     merged: dict[str, Any]
@@ -104,10 +152,19 @@ def _merge_pii(original: dict[str, Any] | None, detected: dict[str, int]) -> dic
     else:
         merged = {}
     auto = merged.get("auto")
-    if isinstance(auto, dict):
-        auto.update(detected)
-    else:
-        merged["auto"] = detected
+    if not isinstance(auto, dict):
+        auto = {}
+    for label, info in detected.items():
+        existing = auto.get(label)
+        if isinstance(existing, dict):
+            existing_count = existing.get("count", 0)
+            existing["count"] = existing_count + info.get("count", 0)
+            existing["severity"] = info.get("severity", existing.get("severity"))
+            if "sample" not in existing and "sample" in info:
+                existing["sample"] = info["sample"]
+        else:
+            auto[label] = dict(info)
+    merged["auto"] = auto
     return merged
 
 
@@ -129,7 +186,26 @@ def memory_write(
         )
         raise HTTPException(status_code=403, detail="Project not permitted")
 
-    pii_summary = _detect_pii(payload.text)
+    pii_summary, highest_pii = _detect_pii(payload.text)
+
+    if (
+        highest_pii
+        and SEVERITY_ORDER[PII_REJECT_SEVERITY] > 0
+        and SEVERITY_ORDER[highest_pii] >= SEVERITY_ORDER[PII_REJECT_SEVERITY]
+    ):
+        logger.warning(
+            "Rejected memory write due to high-risk PII",
+            extra={
+                "project": payload.project,
+                "tenant_id": auth.tenant_id,
+                "severity": highest_pii,
+                "pii_flags": list(pii_summary.keys()),
+            },
+        )
+        raise HTTPException(
+            status_code=422,
+            detail=f"memory contains {highest_pii} risk PII ({', '.join(pii_summary.keys())})",
+        )
 
     memory_data = dict(
         id=memory_id,

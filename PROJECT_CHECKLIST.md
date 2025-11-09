@@ -9,7 +9,7 @@ Curated from the deep review and roadmap discussion. Tasks are grouped by milest
 ### Release Hygiene
 - [x] Restore public status doc (`PROJECT_STATUS.md`) with phase tracker and blockers
 - [ ] Tag `v0.2.0-beta` with release notes and changelog
-- [ ] Ensure CI runs lint (`npm run lint`), tests, and `npm audit`
+- [x] Ensure CI runs lint (`npm run lint`), tests, and `npm audit`
 - [ ] Add signed Windows (NSIS) and macOS (DMG) installers with published hashes
 
 ### Onboarding & Docs
@@ -44,6 +44,8 @@ Curated from the deep review and roadmap discussion. Tasks are grouped by milest
 - [x] Prototype ML-backed dynamic shield decisions
 - [x] Visual threat dashboard (VPN, Tor, shield activity)
 - [x] Automated privacy scans integrated into CI
+- [x] CSP hardening (iframe proxy + headers)
+- [x] Tor proxy auto-routing when enabled
 
 ---
 
@@ -73,5 +75,6 @@ Curated from the deep review and roadmap discussion. Tasks are grouped by milest
 - [ ] Schedule quarterly security reviews (Tor/VPN leakage tests, dependency audits)
 - [ ] Collect beta telemetry (opt-in) to guide UX iterations
 - [ ] Maintain public roadmap aligning releases with Arc/Brave/Atlas/Comet competitive analysis
+- [ ] Publish CI health dashboard (link to Actions) for external testers
 
 

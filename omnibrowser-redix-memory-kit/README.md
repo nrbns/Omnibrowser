@@ -44,6 +44,17 @@ docker compose up -d
 
 See `examples.http` for test requests.
 
+### 3.1 PII Guardrail
+
+The ingestion pipeline auto-flags emails, phone numbers, IPv4 addresses, SSNs, and credit-card-like strings. Detected values are stored under `pii.auto` in the memory record.  
+Set `PII_REJECT_SEVERITY` to decide which matches block writes (`none`, `low`, `medium`, `high`).  
+Default is `high`, so SSNs/credit cards return `422` unless you explicitly allow them.
+
+### 3.2 Frame Embeds
+
+Some data sources lock down `X-Frame-Options`. The desktop shell strips those headers for a small allow-list (TradingView, YouTube, Vimeo, Google Calendar, Spotify).  
+Add more hosts with `IFRAME_ALLOWLIST=example.com,sub.domain.com` before launching Electron to relax framing for additional domains.
+
 ## 4. Extension Overview
 
 - `background.js` handles queueing, throttled flushes, and mode cycling.
@@ -63,7 +74,7 @@ Set `ASYNC_EMBED=true` (default in `docker-compose.yml`) to route writes through
 
 - Add `/admin` React micro-frontend for smoke debugging and decay dashboards.
 - Wire background.js to stream into Redis for async embedding (currently inline write).
-- Integrate PII heuristics + WebCrypto queue encryption before turning on cloud sync.
+- Layer WebCrypto queue encryption + consent-backed sync before turning on cloud replication.
 - Extend omnibar results with pin controls and session timeline visualizations.
 
 ---

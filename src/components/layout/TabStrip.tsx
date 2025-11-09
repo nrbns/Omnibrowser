@@ -804,6 +804,7 @@ export function TabStrip() {
       className="no-drag flex items-center gap-1 px-3 py-2 bg-[#1A1D28] border-b border-gray-700/30 overflow-x-auto scrollbar-hide"
       style={{ pointerEvents: 'auto' }}
       onKeyDown={handleKeyNavigation}
+      data-onboarding="tabstrip"
     >
       <div className="flex items-center gap-2 min-w-0 flex-1" style={{ pointerEvents: 'auto' }}>
         <AnimatePresence mode="popLayout">
