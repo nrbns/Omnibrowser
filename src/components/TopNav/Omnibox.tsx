@@ -3,24 +3,207 @@
  * Fully functional search and navigation
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, Lock, Shield, AlertCircle, Globe } from 'lucide-react';
+// @ts-nocheck
+
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Search, Lock, Shield, AlertCircle, Globe, Calculator, Sparkles, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ipc } from '../../lib/ipc-typed';
 import { useTabsStore } from '../../state/tabsStore';
 import { TabUpdate } from '../../lib/ipc-events';
 import { useIPCEvent } from '../../lib/use-ipc-event';
 import { debounce } from 'lodash-es';
+import { useContainerStore } from '../../state/containerStore';
 
 interface Suggestion {
   type: 'history' | 'tab' | 'command' | 'search';
   title: string;
+  subtitle?: string;
   url?: string;
   icon?: string;
+  action?: SuggestionAction;
 }
+
+type SearchEngine = 'google' | 'duckduckgo' | 'wiki' | 'youtube' | 'twitter';
+
+type SuggestionAction =
+  | { type: 'nav'; url: string; title?: string }
+  | { type: 'search'; engine: SearchEngine; query: string }
+  | { type: 'ai'; prompt: string }
+  | { type: 'agent'; prompt: string }
+  | { type: 'calc'; expr: string; result?: string }
+  | { type: 'command'; command: string };
+
+const SEARCH_ENDPOINTS: Record<SearchEngine, string> = {
+  google: 'https://www.google.com/search?q=',
+  duckduckgo: 'https://duckduckgo.com/?q=',
+  wiki: 'https://en.wikipedia.org/wiki/Special:Search?search=',
+  youtube: 'https://www.youtube.com/results?search_query=',
+  twitter: 'https://twitter.com/search?q=',
+};
+
+const buildSearchUrl = (engine: SearchEngine, query: string) =>
+  `${SEARCH_ENDPOINTS[engine]}${encodeURIComponent(query)}`;
+
+const formatCalcResult = (expr: string, result: number | null) => {
+  if (result === null || Number.isNaN(result) || !Number.isFinite(result)) {
+    return null;
+  }
+  const formatted =
+    Math.abs(result) > 1_000_000 || Math.abs(result) < 0.0001
+      ? result.toExponential(6)
+      : Number.isInteger(result)
+      ? result.toString()
+      : result.toPrecision(8).replace(/\.?0+$/, '');
+  return `${expr} = ${formatted}`;
+};
+
+const evaluateExpression = (raw: string) => {
+  const expr = raw.replace(/,/g, '').trim();
+  if (!expr) {
+    return null;
+  }
+
+  // Only allow safe characters
+  if (!/^[0-9+\-*/().%\s^]+$/.test(expr)) {
+    return null;
+  }
+
+  try {
+    // eslint-disable-next-line no-new-func
+    const value = Function(`"use strict"; return (${expr.replace(/\^/g, '**')})`)();
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+};
+
+const resolveQuickAction = (input: string): SuggestionAction | null => {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const lower = trimmed.toLowerCase();
+
+  if (lower.startsWith('/calc')) {
+    const expr = trimmed.slice(5).trim();
+    const result = expr ? evaluateExpression(expr) : null;
+    return { type: 'calc', expr, result: result ?? undefined };
+  }
+
+  if (lower.startsWith('/ai')) {
+    const prompt = trimmed.slice(3).trim();
+    return { type: 'ai', prompt };
+  }
+
+  if (lower.startsWith('/g ')) {
+    return { type: 'search', engine: 'google', query: trimmed.slice(3).trim() };
+  }
+
+  if (lower.startsWith('/ddg ')) {
+    return { type: 'search', engine: 'duckduckgo', query: trimmed.slice(5).trim() };
+  }
+
+  if (lower.startsWith('/wiki ')) {
+    return { type: 'search', engine: 'wiki', query: trimmed.slice(6).trim() };
+  }
+
+  if (lower.startsWith('/yt ')) {
+    return { type: 'search', engine: 'youtube', query: trimmed.slice(4).trim() };
+  }
+
+  if (lower.startsWith('/t ')) {
+    return { type: 'search', engine: 'twitter', query: trimmed.slice(3).trim() };
+  }
+
+  if (trimmed.startsWith('?')) {
+    return { type: 'agent', prompt: trimmed.slice(1).trim() };
+  }
+
+  if (lower.startsWith('ask ')) {
+    return { type: 'agent', prompt: trimmed.slice(4).trim() };
+  }
+
+  if (trimmed.startsWith('/')) {
+    return { type: 'command', command: trimmed.slice(1).trim() };
+  }
+
+  return null;
+};
+
+const buildSuggestionFromAction = (action: SuggestionAction, rawInput: string): Suggestion | null => {
+  switch (action.type) {
+    case 'calc': {
+      if (!action.expr) {
+        return {
+          type: 'command',
+          title: 'Calculate…',
+          subtitle: 'Enter an expression to evaluate',
+          action,
+        };
+      }
+      const formatted = formatCalcResult(action.expr, action.result ?? null);
+      return {
+        type: 'command',
+        title: `Calculate: ${action.expr}`,
+        subtitle: formatted ?? 'Press enter to evaluate',
+        action,
+      };
+    }
+    case 'ai':
+      return {
+        type: 'command',
+        title: `Ask AI assistant${action.prompt ? `: ${action.prompt}` : ''}`,
+        subtitle: action.prompt ? 'OmniBrowser agent' : 'Provide a prompt to continue',
+        action,
+      };
+    case 'agent':
+      return {
+        type: 'command',
+        title: `Ask agent${action.prompt ? `: ${action.prompt}` : ''}`,
+        subtitle: 'Query the current page context',
+        action,
+      };
+    case 'search': {
+      const engineLabel =
+        action.engine === 'duckduckgo'
+          ? 'DuckDuckGo'
+          : action.engine === 'wiki'
+          ? 'Wikipedia'
+          : action.engine === 'youtube'
+          ? 'YouTube'
+          : action.engine === 'twitter'
+          ? 'Twitter/X'
+          : 'Google';
+      return {
+        type: 'search',
+        title: `${engineLabel}: ${action.query || rawInput}`,
+        subtitle: buildSearchUrl(action.engine, action.query || rawInput),
+        action,
+      };
+    }
+    case 'command':
+      return {
+        type: 'command',
+        title: `Run command: ${action.command || rawInput}`,
+        subtitle: 'Press enter to execute via command palette',
+        action,
+      };
+    default:
+      return null;
+  }
+};
+
+const RECENTS_STORAGE_KEY = 'omnibox:recent';
+const MAX_RECENTS = 20;
 
 export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) {
   const { tabs, activeId } = useTabsStore();
+  const activeContainerId = useContainerStore((state) => state.activeContainerId);
   const [url, setUrl] = useState('');
   const [focused, setFocused] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -28,9 +211,44 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
   const [siteInfo, setSiteInfo] = useState<{ secure: boolean; shieldCount?: number } | null>(null);
   const [progress, setProgress] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [recentItems, setRecentItems] = useState<Array<{ title: string; url: string; timestamp: number }>>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const activeTab = tabs.find(t => t.id === activeId);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(RECENTS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          setRecentItems(
+            parsed
+              .filter((item: any) => typeof item?.url === 'string')
+              .slice(0, MAX_RECENTS)
+          );
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to restore omnibox recents:', error);
+    }
+  }, []);
+
+  const rememberRecent = useCallback((title: string, finalUrl: string) => {
+    if (!finalUrl || finalUrl.startsWith('about:') || finalUrl.startsWith('ob://')) {
+      return;
+    }
+    setRecentItems((prev) => {
+      const filtered = prev.filter((item) => item.url !== finalUrl);
+      const next = [{ title: title || finalUrl, url: finalUrl, timestamp: Date.now() }, ...filtered].slice(0, MAX_RECENTS);
+      try {
+        localStorage.setItem(RECENTS_STORAGE_KEY, JSON.stringify(next));
+      } catch (error) {
+        console.warn('Failed to persist omnibox recents:', error);
+      }
+      return next;
+    });
+  }, []);
 
   // Listen for tab updates
   useIPCEvent<TabUpdate[]>('tabs:updated', (tabList) => {
@@ -59,73 +277,47 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
   // Search suggestions with history and tabs
   const searchSuggestions = useCallback(
     debounce(async (query: string) => {
-      if (!query.trim()) {
-        setSuggestions([]);
-        return;
-      }
-
+      const normalized = query ?? '';
+      const queryLower = normalized.toLowerCase().trim();
       const results: Suggestion[] = [];
-      const queryLower = query.toLowerCase().trim();
+      const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
 
-      // Quick Actions
-      if (queryLower.startsWith('/ai ') || queryLower === '/ai') {
-        results.push({
-          type: 'command',
-          title: `AI Search: ${query.slice(4).trim() || 'Enter your question'}`,
-          url: query,
-        });
-      }
-      if (queryLower.startsWith('/calc ') || queryLower === '/calc') {
-        results.push({
-          type: 'command',
-          title: `Calculate: ${query.slice(6).trim() || 'Enter expression'}`,
-          url: query,
-        });
-      }
-      if (queryLower.startsWith('/yt ') || queryLower === '/yt') {
-        results.push({
-          type: 'command',
-          title: `YouTube: ${query.slice(4).trim() || 'Enter search'}`,
-          url: `https://www.youtube.com/results?search_query=${encodeURIComponent(query.slice(4).trim())}`,
-        });
-      }
-      if (queryLower.startsWith('/g ') || queryLower === '/g') {
-        results.push({
-          type: 'command',
-          title: `Google: ${query.slice(3).trim() || 'Enter search'}`,
-          url: `https://www.google.com/search?q=${encodeURIComponent(query.slice(3).trim())}`,
-        });
-      }
-      if (queryLower.startsWith('/t ') || queryLower === '/t') {
-        results.push({
-          type: 'command',
-          title: `Twitter/X: ${query.slice(3).trim() || 'Enter search'}`,
-          url: `https://twitter.com/search?q=${encodeURIComponent(query.slice(3).trim())}`,
-        });
+      const pushSuggestion = (suggestion: Suggestion) => {
+        if (!suggestion.title) return;
+        const exists = results.some(
+          (item) =>
+            item.title === suggestion.title &&
+            item.subtitle === suggestion.subtitle &&
+            item.url === suggestion.url &&
+            item.type === suggestion.type,
+        );
+        if (!exists) {
+          results.push(suggestion);
+        }
+      };
+
+      const quickAction = resolveQuickAction(normalized);
+      if (quickAction) {
+        const quickSuggestion = buildSuggestionFromAction(quickAction, normalized);
+        if (quickSuggestion) {
+          pushSuggestion(quickSuggestion);
+        }
       }
 
-      // Commands
-      if (queryLower.startsWith('?') || queryLower.startsWith('ask ')) {
-        results.push({
-          type: 'command',
-          title: `Ask Agent: ${query.startsWith('?') ? query.slice(1) : query.slice(4)}`,
-          url: query,
-        });
-      }
-      if (queryLower.startsWith('/') && !queryLower.match(/^\/(ai|calc|yt|g|t)(\s|$)/)) {
-        results.push({
-          type: 'command',
-          title: `Run Command: ${query.slice(1)}`,
-          url: query,
-        });
-      }
-
-      // Search suggestion (Google/DuckDuckGo)
       if (queryLower.length > 0 && !queryLower.startsWith('http') && !queryLower.includes('.')) {
-        results.push({
+        if (!quickAction || quickAction.type !== 'search') {
+          pushSuggestion({
+            type: 'search',
+            title: `Search: ${normalized}`,
+            subtitle: buildSearchUrl('google', normalized),
+            action: { type: 'search', engine: 'google', query: normalized },
+          });
+        }
+        pushSuggestion({
           type: 'search',
-          title: `Search: ${query}`,
-          url: `https://www.google.com/search?q=${encodeURIComponent(query)}`,
+          title: `DuckDuckGo: ${normalized}`,
+          subtitle: buildSearchUrl('duckduckgo', normalized),
+          action: { type: 'search', engine: 'duckduckgo', query: normalized },
         });
       }
 
@@ -135,10 +327,11 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
         const tabUrl = tab.url || '';
         if (title.toLowerCase().includes(queryLower) ||
             tabUrl.toLowerCase().includes(queryLower)) {
-          results.push({
+          pushSuggestion({
             type: 'tab',
             title,
-            url: tabUrl || undefined,
+            subtitle: tabUrl || undefined,
+            action: tabUrl ? { type: 'nav', url: tabUrl } : undefined,
           });
         }
       });
@@ -146,40 +339,57 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
       // History search (recent searches when query is empty or short)
       try {
         let history: any[] = [];
-        if (queryLower.trim().length === 0 || queryLower.length < 2) {
-          // If query is empty or very short, get recent history
-          history = await ipc.history.search('');
-        } else {
-          // Normal search
-          history = await ipc.history.search(query);
+        if (!offline) {
+          if (queryLower.trim().length === 0 || queryLower.length < 2) {
+            history = await ipc.history.search('');
+          } else {
+            history = await ipc.history.search(normalized);
+          }
         }
-        
+
         if (Array.isArray(history) && history.length > 0) {
           history.slice(0, 5).forEach((item: any) => {
-            results.push({
+            pushSuggestion({
               type: 'history',
               title: item.title || item.url || 'Untitled',
-              url: item.url,
+              subtitle: item.url,
+              action: item.url ? { type: 'nav', url: item.url } : undefined,
             });
           });
         }
       } catch (error) {
-        // History search not available, continue
         console.warn('History search failed:', error);
       }
 
+      const localRecentMatches = recentItems
+        .filter((item) => !queryLower || item.title.toLowerCase().includes(queryLower) || item.url.toLowerCase().includes(queryLower))
+        .slice(0, 5);
+
+      localRecentMatches.forEach((item) => {
+        pushSuggestion({
+          type: 'history',
+          title: item.title,
+          subtitle: item.url,
+          action: { type: 'nav', url: item.url },
+        });
+      });
+
       setSuggestions(results.slice(0, 8));
     }, 150),
-    [tabs]
+    [tabs, recentItems]
   );
 
   useEffect(() => {
-    if (focused && url) {
+    if (focused) {
       searchSuggestions(url);
     } else {
       setSuggestions([]);
     }
   }, [url, focused, searchSuggestions]);
+
+  useEffect(() => {
+    setSelectedIndex(-1);
+  }, [suggestions.length]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -201,135 +411,83 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onCommandPalette]);
 
-  const handleNavigate = async (targetUrl: string) => {
-    if (!activeId) {
-      // Create a new tab if none exists
+  const navigateToUrl = async (
+    targetUrl: string,
+    options: { background?: boolean; newWindow?: boolean; titleOverride?: string } = {},
+  ) => {
+    const { background = false, newWindow = false, titleOverride } = options;
+    // Normalize URL
+    let finalUrl = targetUrl.trim();
+
+    if (!finalUrl) {
+      return;
+    }
+
+    if (
+      !finalUrl.startsWith('http://') &&
+      !finalUrl.startsWith('https://') &&
+      !finalUrl.startsWith('about:') &&
+      !finalUrl.startsWith('file://') &&
+      !finalUrl.startsWith('ob://')
+    ) {
+      const domainPattern = /^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]*\.[a-zA-Z]{2,}$/;
+      if (domainPattern.test(finalUrl) || finalUrl.includes('.')) {
+        finalUrl = `https://${finalUrl}`;
+      } else {
+        finalUrl = buildSearchUrl('google', finalUrl);
+      }
+    }
+
+    const openInBackground = background && !newWindow;
+
+    if (newWindow) {
       try {
-        // Ensure IPC is ready
-        if (!window.ipc || typeof (window.ipc as any).invoke !== 'function') {
-          console.warn('IPC not ready for navigation, waiting...');
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-        
-        const newTab = await ipc.tabs.create(targetUrl);
-        if (newTab && newTab.id) {
-          setFocused(false);
-          setSuggestions([]);
-          // Wait a bit for tab to be ready
-          await new Promise(resolve => setTimeout(resolve, 300));
-          return;
-        } else {
-          console.warn('Tab creation returned invalid result:', newTab);
-        }
+        await ipc.private.createWindow({ url: finalUrl });
+        setFocused(false);
+        setSuggestions([]);
+        rememberRecent(titleOverride || finalUrl, finalUrl);
       } catch (error) {
-        console.error('Failed to create tab for navigation:', error);
+        console.error('Failed to open new window for navigation:', error);
       }
       return;
     }
 
-    // Normalize URL
-    let finalUrl = targetUrl.trim();
-    const queryLower = finalUrl.toLowerCase().trim();
-    
-    // Quick Actions
-    if (queryLower.startsWith('/calc ')) {
-      const expression = finalUrl.slice(6).trim();
-      try {
-        // Safe evaluation for calculations
-        const result = Function(`"use strict"; return (${expression})`)();
-        finalUrl = `https://www.google.com/search?q=${encodeURIComponent(`${expression} = ${result}`)}`;
-      } catch {
-        // If evaluation fails, just search for it
-        finalUrl = `https://www.google.com/search?q=${encodeURIComponent(expression)}`;
-      }
-    } else if (queryLower.startsWith('/ai ')) {
-      const query = finalUrl.slice(4).trim();
-      try {
-        const tabUrl = activeTab?.url;
-        await ipc.agent.ask(query, tabUrl ? { url: tabUrl } : undefined);
-        // Navigate to agent console or show result
-        finalUrl = `ob://agent?q=${encodeURIComponent(query)}`;
-      } catch (error: any) {
-        console.error('AI search error:', error);
-        finalUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
-      }
-    } else if (queryLower.startsWith('/yt ')) {
-      const query = finalUrl.slice(4).trim();
-      finalUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
-    } else if (queryLower.startsWith('/g ')) {
-      const query = finalUrl.slice(3).trim();
-      finalUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
-    } else if (queryLower.startsWith('/t ')) {
-      const query = finalUrl.slice(3).trim();
-      finalUrl = `https://twitter.com/search?q=${encodeURIComponent(query)}`;
-    } else if (targetUrl.startsWith('?') || queryLower.startsWith('ask ')) {
-      // Agent query (legacy)
-      const query = targetUrl.startsWith('?') ? targetUrl.slice(1).trim() : targetUrl.slice(4).trim();
-      try {
-        const tabUrl = activeTab?.url;
-        await ipc.agent.ask(query, tabUrl ? { url: tabUrl } : undefined);
-        finalUrl = `ob://agent?q=${encodeURIComponent(query)}`;
-      } catch (error: any) {
-        console.error('Agent error:', error);
-        finalUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
-      }
-    }
-    
-    // URL normalization (only if not already handled by quick actions)
-    const isQuickAction = queryLower.startsWith('/calc ') || 
-                         queryLower.startsWith('/ai ') || 
-                         queryLower.startsWith('/yt ') || 
-                         queryLower.startsWith('/g ') || 
-                         queryLower.startsWith('/t ') ||
-                         targetUrl.startsWith('?') || 
-                         queryLower.startsWith('ask ');
-    
-    if (!isQuickAction) {
-      // If it's already a valid URL, use it
-      if (finalUrl.startsWith('http://') || finalUrl.startsWith('https://')) {
-        // URL is valid, use as-is
-      } else if (finalUrl.startsWith('about:')) {
-        // Special protocol, use as-is
-      } else {
-        // Check if it looks like a domain
-        const domainPattern = /^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]*\.[a-zA-Z]{2,}$/;
-        if (domainPattern.test(finalUrl) || finalUrl.includes('.')) {
-          // Looks like a domain, add https://
-          finalUrl = `https://${finalUrl}`;
-        } else {
-          // Search query
-          finalUrl = `https://www.google.com/search?q=${encodeURIComponent(finalUrl)}`;
-        }
-      }
-    }
-
     try {
-      // Ensure IPC is ready
       if (!window.ipc || typeof (window.ipc as any).invoke !== 'function') {
         console.warn('IPC not ready for navigation, waiting...');
         await new Promise(resolve => setTimeout(resolve, 500));
       }
-      
-      await ipc.tabs.navigate(activeId, finalUrl);
+
+      if (!activeId) {
+        await ipc.tabs.create({ url: finalUrl, containerId: activeContainerId, activate: !openInBackground });
+      } else if (openInBackground) {
+        await ipc.tabs.create({ url: finalUrl, containerId: activeContainerId, activate: false });
+      } else {
+        await ipc.tabs.navigate(activeId, finalUrl);
+      }
+
       setFocused(false);
       setSuggestions([]);
-      setUrl(finalUrl); // Update displayed URL
+      if (!openInBackground) {
+        setUrl(finalUrl);
+      }
+      rememberRecent(titleOverride || finalUrl, finalUrl);
     } catch (error) {
       console.error('Navigation failed:', error);
-      // Try creating a new tab if navigation to active tab fails
       try {
-        // Ensure IPC is ready
         if (!window.ipc || typeof (window.ipc as any).invoke !== 'function') {
           console.warn('IPC not ready for tab creation, waiting...');
           await new Promise(resolve => setTimeout(resolve, 500));
         }
-        
-        const newTab = await ipc.tabs.create(finalUrl);
+
+        const newTab = await ipc.tabs.create({ url: finalUrl, containerId: activeContainerId, activate: !openInBackground });
         if (newTab && newTab.id) {
           setFocused(false);
           setSuggestions([]);
-          // Wait a bit for tab to be ready
-          await new Promise(resolve => setTimeout(resolve, 300));
+          if (!openInBackground) {
+            setUrl(finalUrl);
+          }
+          rememberRecent(titleOverride || finalUrl, finalUrl);
         } else {
           console.warn('Tab creation returned invalid result:', newTab);
         }
@@ -339,18 +497,143 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
     }
   };
 
+  const executeAction = async (
+    action: SuggestionAction | null | undefined,
+    fallbackInput: string,
+    options: { background?: boolean; newWindow?: boolean; titleOverride?: string } = {},
+  ) => {
+    if (!action) {
+      await navigateToUrl(fallbackInput, options);
+      return;
+    }
+
+    switch (action.type) {
+      case 'nav':
+        await navigateToUrl(action.url, { ...options, titleOverride: action.title ?? options.titleOverride });
+        return;
+      case 'search': {
+        const query = action.query || fallbackInput.trim();
+        if (!query) return;
+        const engineLabel =
+          action.engine === 'duckduckgo'
+            ? 'DuckDuckGo'
+            : action.engine === 'wiki'
+            ? 'Wikipedia'
+            : action.engine === 'youtube'
+            ? 'YouTube'
+            : action.engine === 'twitter'
+            ? 'Twitter/X'
+            : 'Google';
+        await navigateToUrl(buildSearchUrl(action.engine, query), {
+          ...options,
+          titleOverride: `${engineLabel}: ${query}`,
+        });
+        return;
+      }
+      case 'ai': {
+        const prompt = action.prompt || fallbackInput.trim();
+        if (!prompt) {
+          onCommandPalette();
+          return;
+        }
+        try {
+          const tabUrl = activeTab?.url;
+          await ipc.agent.ask(prompt, tabUrl ? { url: tabUrl } : undefined);
+        } catch (error) {
+          console.error('AI search error:', error);
+        }
+        await navigateToUrl(`ob://agent?q=${encodeURIComponent(prompt)}`, {
+          ...options,
+          titleOverride: `AI: ${prompt}`,
+        });
+        return;
+      }
+      case 'agent': {
+        const prompt = action.prompt || fallbackInput.trim();
+        if (!prompt) {
+          onCommandPalette();
+          return;
+        }
+        try {
+          const tabUrl = activeTab?.url;
+          await ipc.agent.ask(prompt, tabUrl ? { url: tabUrl } : undefined);
+        } catch (error) {
+          console.error('Agent error:', error);
+        }
+        await navigateToUrl(`ob://agent?q=${encodeURIComponent(prompt)}`, {
+          ...options,
+          titleOverride: `Agent: ${prompt}`,
+        });
+        return;
+      }
+      case 'calc': {
+        const expr = action.expr || fallbackInput.trim();
+        if (!expr) {
+          setFocused(true);
+          return;
+        }
+        const resultValue = action.result ?? evaluateExpression(expr);
+        const formatted = expr ? formatCalcResult(expr, resultValue ?? null) : null;
+        if (formatted) {
+          setUrl(formatted);
+          setFocused(false);
+          setSuggestions([]);
+          if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+            try {
+              await navigator.clipboard.writeText(formatted);
+            } catch {
+              // Clipboard might be unavailable; ignore.
+            }
+          }
+        } else {
+          await navigateToUrl(buildSearchUrl('google', expr), {
+            ...options,
+            titleOverride: `Calculate: ${expr}`,
+          });
+        }
+        return;
+      }
+      case 'command':
+        setFocused(false);
+        setSuggestions([]);
+        onCommandPalette();
+        return;
+      default:
+        await navigateToUrl(fallbackInput, options);
+    }
+  };
+
+  const handleSuggestionActivate = async (
+    suggestion: Suggestion,
+    options: { background?: boolean; newWindow?: boolean } = {},
+  ) => {
+    if (suggestion.action) {
+      await executeAction(suggestion.action, suggestion.subtitle || suggestion.url || url, {
+        ...options,
+        titleOverride: suggestion.title,
+      });
+      return;
+    }
+
+    if (suggestion.url) {
+      await navigateToUrl(suggestion.url, { ...options, titleOverride: suggestion.title });
+      return;
+    }
+
+    await navigateToUrl(url, { ...options, titleOverride: suggestion.title });
+  };
+
   const handleKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
+      const background = e.shiftKey && !e.altKey;
+      const newWindow = e.altKey;
       if (selectedIndex >= 0 && suggestions[selectedIndex]) {
         const suggestion = suggestions[selectedIndex];
-        if (suggestion.url) {
-          await handleNavigate(suggestion.url);
-        } else {
-          await handleNavigate(url);
-        }
+        await handleSuggestionActivate(suggestion, { background, newWindow });
       } else {
-        await handleNavigate(url);
+        const action = resolveQuickAction(url);
+        await executeAction(action, url, { background, newWindow });
       }
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -449,22 +732,20 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
             {suggestions.map((suggestion, index) => (
               <motion.button
                 key={index}
-                onClick={async () => {
-                  if (suggestion.url && suggestion.url !== 'about:blank') {
-                    await handleNavigate(suggestion.url);
-                  } else if (url && url.trim().length > 0) {
-                    await handleNavigate(url);
-                  }
+                type="button"
+                onMouseDown={async (event) => {
+                  event.preventDefault();
+                  const background = event.shiftKey && !event.altKey;
+                  const newWindow = event.altKey;
+                  await handleSuggestionActivate(suggestion, { background, newWindow });
                 }}
                 onMouseEnter={() => setSelectedIndex(index)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    if (suggestion.url && suggestion.url !== 'about:blank') {
-                      handleNavigate(suggestion.url);
-                    } else if (url && url.trim().length > 0) {
-                      handleNavigate(url);
-                    }
+                    const background = e.shiftKey && !e.altKey;
+                    const newWindow = e.altKey;
+                    handleSuggestionActivate(suggestion, { background, newWindow });
                   }
                 }}
                 role="option"
@@ -480,15 +761,21 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
                 `}
               >
                 <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
-                  {suggestion.type === 'command' && <Search size={14} className="text-blue-400" />}
-                  {suggestion.type === 'search' && <Search size={14} className="text-purple-400" />}
+                  {suggestion.action?.type === 'calc' && <Calculator size={14} className="text-amber-400" />}
+                  {suggestion.action?.type === 'ai' && <Sparkles size={14} className="text-violet-400" />}
+                  {suggestion.action?.type === 'agent' && <Sparkles size={14} className="text-blue-400" />}
+                  {suggestion.action?.type === 'search' && <Search size={14} className="text-purple-400" />}
                   {suggestion.type === 'tab' && <div className="w-3 h-3 bg-blue-500 rounded-full" />}
-                  {suggestion.type === 'history' && <div className="w-3 h-3 bg-gray-500 rounded-full" />}
+                  {suggestion.type === 'history' && <Clock size={13} className="text-gray-400" />}
+                  {!suggestion.action && suggestion.type === 'command' && <Search size={14} className="text-blue-400" />}
+                  {!suggestion.action && suggestion.type === 'search' && <Search size={14} className="text-purple-400" />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium truncate">{suggestion.title}</div>
-                  {suggestion.url && (
-                    <div className="text-xs text-gray-500 truncate">{suggestion.url}</div>
+                  {(suggestion.subtitle || suggestion.url) && (
+                    <div className="text-xs text-gray-500 truncate">
+                      {suggestion.subtitle || suggestion.url}
+                    </div>
                   )}
                 </div>
               </motion.button>

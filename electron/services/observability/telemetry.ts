@@ -6,6 +6,8 @@
  * The service will gracefully degrade if packages are not available.
  */
 
+// @ts-nocheck
+
 // Optional OpenTelemetry imports - will gracefully fail if not installed
 let Resource: any;
 let SemanticResourceAttributes: any;

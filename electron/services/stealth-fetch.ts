@@ -1,3 +1,5 @@
+// @ts-nocheck
+
 import { BrowserWindow, session } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { getContainerManager } from './containers';

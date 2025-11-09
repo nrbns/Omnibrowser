@@ -1,9 +1,13 @@
 import { registry } from './registry';
 import { extractFirstTable, extractAllTables } from '../../extractors/table';
-import { chromium } from 'playwright-core';
 import { cfg } from '../../../config';
+import { getPlaywrightChromium } from '../../utils/playwright';
 
 async function fetchHtml(url: string) {
+  const chromium = getPlaywrightChromium();
+  if (!chromium) {
+    throw new Error('Playwright automation is not available in this build. Install "playwright-core" to enable table extraction.');
+  }
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ userAgent: cfg.userAgent });
   try {

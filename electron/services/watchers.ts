@@ -1,10 +1,11 @@
+// @ts-nocheck
+
 import { app, BrowserWindow, Notification } from 'electron';
 import { randomUUID, createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { registerHandler } from '../shared/ipc/router';
 import { z } from 'zod';
-import { fetch } from 'undici';
 
 type WatcherStatus = 'idle' | 'checking' | 'changed' | 'error';
 

@@ -4,11 +4,13 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Ghost, Flame, Clock, Copy, X, Boxes } from 'lucide-react';
+import { Ghost, Flame, Clock, Copy, Boxes, Eye, Sun, MoonStar } from 'lucide-react';
 import { ipc } from '../../lib/ipc-typed';
 import { useProfileStore } from '../../state/profileStore';
 import { useContainerStore } from '../../state/containerStore';
 import { ContainerInfo } from '../../lib/ipc-events';
+import { useTabsStore } from '../../state/tabsStore';
+import { usePeekPreviewStore } from '../../state/peekStore';
 
 interface TabContextMenuProps {
   tabId: string;
@@ -17,6 +19,7 @@ interface TabContextMenuProps {
   containerName?: string;
   containerColor?: string;
   mode?: 'normal' | 'ghost' | 'private';
+  sleeping?: boolean;
   onClose: () => void;
 }
 
@@ -27,6 +30,7 @@ export function TabContextMenu({
   containerName,
   containerColor,
   mode,
+  sleeping,
   onClose,
 }: TabContextMenuProps) {
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -38,6 +42,9 @@ export function TabContextMenu({
     containers: state.containers,
     setContainers: state.setContainers,
   }));
+  const tab = useTabsStore((state) => state.tabs.find((t) => t.id === tabId));
+  const openPeek = usePeekPreviewStore((state) => state.open);
+  const isSleeping = (sleeping ?? tab?.sleeping) ?? false;
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -50,7 +57,6 @@ export function TabContextMenu({
   }, [onClose]);
 
   useEffect(() => {
-    // Get last right-click position from global state or event
     const storedPos = (window as any).__lastContextMenuPos || { x: 0, y: 0 };
     setPosition({ x: storedPos.x, y: storedPos.y });
   }, []);
@@ -69,6 +75,21 @@ export function TabContextMenu({
         });
     }
   }, [containers.length, setContainers]);
+
+  const resolveTab = () => ({
+    id: tab?.id ?? tabId,
+    title: tab?.title ?? tab?.url ?? url ?? 'New Tab',
+    url: tab?.url ?? url ?? 'about:blank',
+    containerId: tab?.containerId ?? containerId,
+    containerName: tab?.containerName ?? containerName,
+    containerColor: tab?.containerColor ?? containerColor,
+    mode: tab?.mode ?? mode,
+    createdAt: tab?.createdAt,
+    lastActiveAt: tab?.lastActiveAt,
+    sessionId: tab?.sessionId,
+    profileId: tab?.profileId,
+    sleeping: tab?.sleeping ?? sleeping ?? false,
+  });
 
   const handleOpenAsGhost = async () => {
     if (ghostDisabled) return;
@@ -105,9 +126,13 @@ export function TabContextMenu({
     }
   };
 
-  const handleDuplicate = async () => {
+  const handleDuplicate = async (targetContainerId?: string, activate = true) => {
     try {
-      await ipc.tabs.create({ url: url || 'about:blank', containerId });
+      await ipc.tabs.create({
+        url: url || 'about:blank',
+        containerId: targetContainerId ?? containerId,
+        activate,
+      });
       onClose();
     } catch (error) {
       console.error('Failed to duplicate tab:', error);
@@ -131,11 +156,26 @@ export function TabContextMenu({
     }
   };
 
+  const handlePeek = () => {
+    openPeek(resolveTab());
+    onClose();
+  };
+
+  const handleWake = async () => {
+    try {
+      await ipc.tabs.wake(tabId);
+      onClose();
+    } catch (error) {
+      console.error('Failed to wake tab:', error);
+    }
+  };
+
   const isGhost = mode === 'ghost';
   const isPrivate = mode === 'private';
 
   const menuItems = [
-    { icon: Copy, label: 'Duplicate Tab', action: handleDuplicate, disabled: isGhost || isPrivate },
+    { icon: Eye, label: 'Peek preview', action: handlePeek },
+    { icon: Copy, label: 'Duplicate Tab', action: () => handleDuplicate(containerId, true), disabled: isGhost || isPrivate },
     {
       icon: Ghost,
       label: 'Open as Ghost',
@@ -152,11 +192,19 @@ export function TabContextMenu({
       disabled: privateDisabled,
       disabledReason: 'Disabled by profile policy',
     },
+    {
+      icon: Sun,
+      label: 'Wake tab',
+      action: handleWake,
+      hide: !isSleeping,
+    },
   ].filter(item => !item.hide);
 
   const moveTargets = !isGhost && !isPrivate
     ? containers.filter((c: ContainerInfo) => c.id !== containerId)
     : [];
+
+  const openTargets = containers.filter((c: ContainerInfo) => c.id !== containerId);
 
   return (
     <AnimatePresence>
@@ -166,16 +214,23 @@ export function TabContextMenu({
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
         transition={{ duration: 0.15 }}
-        className="fixed z-50 bg-gray-800/95 backdrop-blur-md border border-gray-700/50 rounded-lg shadow-xl py-1 min-w-[180px]"
+        className="fixed z-50 bg-surface-elevated text-foreground border border-subtle rounded-lg shadow-elevated py-1 min-w-[200px]"
         style={{
           left: `${position.x}px`,
           top: `${position.y}px`,
         }}
       >
+        {isSleeping && (
+          <div className="px-3 py-2 text-xs text-amber-500 bg-amber-500/10 border-b border-subtle flex items-center gap-2">
+            <MoonStar size={14} />
+            <span>Tab is hibernating</span>
+          </div>
+        )}
+
         {(containerId || containerName) && (
-          <div className="px-3 py-2 text-xs text-gray-400 border-b border-gray-800/50 flex items-center gap-2">
+          <div className="px-3 py-2 text-xs text-muted border-b border-subtle flex items-center gap-2">
             <div
-              className="w-2.5 h-2.5 rounded-full border border-gray-700/60"
+              className="w-2.5 h-2.5 rounded-full border border-gray-500/30"
               style={{ backgroundColor: containerColor || '#6366f1' }}
             />
             <span>{containerName || (containerId === 'default' ? 'Default container' : containerId)}</span>
@@ -191,10 +246,10 @@ export function TabContextMenu({
               onClick={item.action}
               className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors ${
                 item.danger
-                  ? 'text-red-400 hover:text-red-300'
+                  ? 'text-red-500 hover:bg-red-500/10'
                   : item.disabled
-                  ? 'text-gray-500 cursor-not-allowed'
-                  : 'text-gray-300 hover:text-gray-100'
+                  ? 'text-muted cursor-not-allowed'
+                  : 'text-foreground hover:bg-[color:var(--surface-muted)]/45'
               }`}
               disabled={item.disabled}
               title={
@@ -209,9 +264,34 @@ export function TabContextMenu({
           );
         })}
 
+        {openTargets.length > 0 && (
+          <div className="mt-1 border-t border-subtle pt-1.5">
+            <div className="px-3 py-1 text-[11px] uppercase tracking-wide text-muted flex items-center gap-2">
+              <Boxes size={12} />
+              Open copy in container
+            </div>
+            <div className="flex flex-col">
+              {openTargets.map((container) => (
+                <motion.button
+                  key={`open-${container.id}`}
+                  whileHover={{ scale: 1.01 }}
+                  onClick={() => handleDuplicate(container.id, true)}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-foreground hover:bg-[color:var(--surface-muted)]/45 transition-colors"
+                >
+                  <span
+                    className="w-2.5 h-2.5 rounded-full border border-gray-500/30"
+                    style={{ backgroundColor: container.color || '#6366f1' }}
+                  />
+                  <span className="truncate">{container.name}</span>
+                </motion.button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {moveTargets.length > 0 && (
-          <div className="mt-1 border-t border-gray-800/60 pt-1.5">
-            <div className="px-3 py-1 text-[11px] uppercase tracking-wide text-gray-500 flex items-center gap-2">
+          <div className="mt-1 border-t border-subtle pt-1.5">
+            <div className="px-3 py-1 text-[11px] uppercase tracking-wide text-muted flex items-center gap-2">
               <Boxes size={12} />
               Move to container
             </div>
@@ -221,10 +301,10 @@ export function TabContextMenu({
                   key={container.id}
                   whileHover={{ scale: 1.01 }}
                   onClick={() => handleMoveToContainer(container.id)}
-                  className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-300 hover:text-gray-100 hover:bg-gray-800/40 transition-colors"
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-foreground hover:bg-[color:var(--surface-muted)]/45 transition-colors"
                 >
                   <span
-                    className="w-2.5 h-2.5 rounded-full border border-gray-700/60"
+                    className="w-2.5 h-2.5 rounded-full border border-gray-500/30"
                     style={{ backgroundColor: container.color || '#6366f1' }}
                   />
                   <span className="truncate">{container.name}</span>

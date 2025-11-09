@@ -1,15 +1,24 @@
 from datetime import datetime, timezone
+import logging
 import os
-from typing import Annotated, Any
+import re
+from typing import Annotated, Any, Dict
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field, validator
 
-from db import insert_memory, vector_search  # type: ignore
+from db import check_health, insert_memory, vector_search  # type: ignore
 from embed import embed_text  # type: ignore
 from memory_queue import enqueue_memory  # type: ignore
 
+
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+logger = logging.getLogger("redix.api")
 
 app = FastAPI(
     title="Redix Memory API",
@@ -17,10 +26,19 @@ app = FastAPI(
     version="0.1.0",
 )
 
-
 JWT_SECRET = os.getenv("JWT_SECRET", "dev-super-secret-change-in-prod")
 JWT_ALGORITHM = "HS256"
 ASYNC_EMBED = os.getenv("ASYNC_EMBED", "false").lower() in {"1", "true", "yes"}
+ALLOWED_PROJECTS = {
+    project.strip()
+    for project in os.getenv("ALLOWED_PROJECTS", "omnibrowser,redix").split(",")
+    if project.strip()
+}
+
+PII_PATTERNS: dict[str, re.Pattern[str]] = {
+    "email": re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE),
+    "phone": re.compile(r"\+?\d[\d\s().-]{7,}\d"),
+}
 
 
 class AuthContext(BaseModel):
@@ -68,6 +86,31 @@ class MemorySearchRequest(BaseModel):
     with_sources: bool | None = False
 
 
+def _detect_pii(text: str) -> dict[str, int]:
+    matches: dict[str, int] = {}
+    for label, pattern in PII_PATTERNS.items():
+        found = pattern.findall(text)
+        if found:
+            matches[label] = len(found)
+    return matches
+
+
+def _merge_pii(original: dict[str, Any] | None, detected: dict[str, int]) -> dict[str, Any] | None:
+    if not detected:
+        return original
+    merged: dict[str, Any]
+    if isinstance(original, dict):
+        merged = {**original}
+    else:
+        merged = {}
+    auto = merged.get("auto")
+    if isinstance(auto, dict):
+        auto.update(detected)
+    else:
+        merged["auto"] = detected
+    return merged
+
+
 @app.post("/v1/memory.write")
 def memory_write(
     payload: MemoryWriteRequest,
@@ -78,6 +121,15 @@ def memory_write(
     """
     memory_id = str(uuid4())
     created_at = datetime.now(timezone.utc)
+
+    if ALLOWED_PROJECTS and payload.project not in ALLOWED_PROJECTS:
+        logger.warning(
+            "Rejected memory write for disallowed project",
+            extra={"project": payload.project, "tenant_id": auth.tenant_id},
+        )
+        raise HTTPException(status_code=403, detail="Project not permitted")
+
+    pii_summary = _detect_pii(payload.text)
 
     memory_data = dict(
         id=memory_id,
@@ -92,17 +144,65 @@ def memory_write(
         origin=payload.origin,
         rich=payload.rich,
         acl=payload.acl,
-        pii=payload.pii,
+        pii=_merge_pii(payload.pii, pii_summary),
         created_at=created_at,
     )
 
     if ASYNC_EMBED:
-        enqueue_memory(memory_data)
-        return {"id": memory_id, "queued": True}
+        try:
+            enqueue_memory(memory_data)
+            logger.info(
+                "Queued memory for async embedding",
+                extra={
+                    "id": memory_id,
+                    "project": payload.project,
+                    "tenant_id": auth.tenant_id,
+                    "text_length": len(payload.text),
+                    "pii_flags": list(pii_summary.keys()),
+                },
+            )
+            return {"id": memory_id, "queued": True}
+        except Exception as exc:  # Redis failure fallback
+            logger.exception(
+                "Async queue unavailable; falling back to inline embedding",
+                extra={"id": memory_id, "error": str(exc)},
+            )
 
-    embedding = embed_text(payload.text)
+    try:
+        embedding = embed_text(payload.text)
+    except Exception as exc:
+        logger.exception(
+            "Embedding failed",
+            extra={"id": memory_id, "project": payload.project, "error": str(exc)},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate embedding",
+        ) from exc
 
-    insert_memory(**memory_data, embedding=embedding)
+    try:
+        insert_memory(**memory_data, embedding=embedding)
+    except Exception as exc:
+        logger.exception(
+            "Failed to persist memory",
+            extra={"id": memory_id, "project": payload.project, "error": str(exc)},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to persist memory",
+        ) from exc
+
+    logger.info(
+        "Memory persisted",
+        extra={
+            "id": memory_id,
+            "project": payload.project,
+            "tenant_id": auth.tenant_id,
+            "text_length": len(payload.text),
+            "async": False,
+            "pii_flags": list(pii_summary.keys()),
+        },
+    )
 
     return {"id": memory_id}
 
@@ -118,11 +218,28 @@ def memory_search(
     filters = payload.filters or {}
     filters.setdefault("tenant_id", auth.tenant_id)
 
-    results = vector_search(
-        query=payload.query,
-        top_k=payload.top_k or 10,
-        filters=filters,
-        with_sources=payload.with_sources or False,
+    try:
+        results = vector_search(
+            query=payload.query,
+            top_k=payload.top_k or 10,
+            filters=filters,
+            with_sources=payload.with_sources or False,
+        )
+    except Exception as exc:
+        logger.exception(
+            "Vector search failed",
+            extra={"tenant_id": auth.tenant_id, "error": str(exc)},
+        )
+        raise HTTPException(status_code=500, detail="Search failed") from exc
+
+    logger.info(
+        "Search completed",
+        extra={
+            "tenant_id": auth.tenant_id,
+            "project_filter": filters.get("project"),
+            "result_count": len(results),
+            "query_length": len(payload.query),
+        },
     )
 
     return {"results": results}
@@ -130,5 +247,10 @@ def memory_search(
 
 @app.get("/healthz")
 def healthcheck() -> dict[str, str]:
-    return {"status": "ok"}
+    status = check_health()
+    if status.get("database") == "error" or status.get("vector") == "error":
+        overall = "degraded"
+    else:
+        overall = "ok"
+    return {"status": overall, **status}
 

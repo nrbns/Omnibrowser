@@ -32,7 +32,6 @@ export interface ScrapingResult {
  * Worker thread function (would be in separate file)
  */
 async function workerFunction(task: ScrapingTask): Promise<ScrapingResult> {
-  const { fetch } = await import('undici');
   const results: ScrapingResult['results'] = [];
   
   for (let i = 0; i < task.urls.length; i++) {
@@ -85,7 +84,6 @@ export class ScrapingWorker {
     task: ScrapingTask,
     onProgress: (completed: number, total: number) => void
   ): Promise<ScrapingResult> {
-    const { fetch } = await import('undici');
     const results: ScrapingResult['results'] = [];
     
     for (let i = 0; i < task.urls.length; i++) {

@@ -1,7 +1,11 @@
-import { chromium, Page } from 'playwright-core';
 import { cfg } from '../config';
+import { getPlaywrightChromium, PlaywrightPage } from './utils/playwright';
 
-async function withPage<T>(fn: (page: Page)=>Promise<T>) {
+async function withPage<T>(fn: (page: PlaywrightPage)=>Promise<T>) {
+  const chromium = getPlaywrightChromium();
+  if (!chromium) {
+    throw new Error('Playwright automation is not available in this build. Install "playwright-core" to enable browser actions.');
+  }
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ userAgent: cfg.userAgent });
   try {

@@ -54,3 +54,5 @@ tmp/
 FILES_STRUCTURE.md
 PRIVACY_STACK_IMPLEMENTATION.md
 
+perf/*.json
+

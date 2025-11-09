@@ -4,7 +4,7 @@
  */
 
 import * as dns from 'node:dns';
-import { promises as dnsPromises } from 'node:dns';
+import { createLogger } from './utils/logger';
 
 const DOH_PROVIDERS = {
   cloudflare: 'https://cloudflare-dns.com/dns-query',
@@ -16,18 +16,15 @@ type DoHProvider = keyof typeof DOH_PROVIDERS;
 let dohEnabled = false;
 let dohProvider: DoHProvider = 'cloudflare';
 
+const logger = createLogger('dns');
+
 /**
  * Enable DoH
  */
 export async function enableDoH(provider: DoHProvider = 'cloudflare'): Promise<void> {
   dohEnabled = true;
   dohProvider = provider;
-
-  // DoH is enabled - lookups will go through dohLookup function
-  // We don't modify the system dns.lookup as it's read-only
-  // Instead, we route through dohLookup which uses DoH API when enabled
-
-  console.log(`[DNS] DoH enabled with provider: ${provider}`);
+  logger.info('DoH enabled', { provider });
 }
 
 /**
@@ -35,9 +32,7 @@ export async function enableDoH(provider: DoHProvider = 'cloudflare'): Promise<v
  */
 export function disableDoH(): void {
   dohEnabled = false;
-  
-  // DoH disabled - lookups will use system DNS
-  console.log('[DNS] DoH disabled, using system DNS');
+  logger.info('DoH disabled, falling back to system DNS');
 }
 
 /**
@@ -54,46 +49,45 @@ export function getDoHProvider(): DoHProvider {
   return dohProvider;
 }
 
+const fallbackLookup = (hostname: string): Promise<string[]> =>
+  new Promise((resolve, reject) => {
+    dns.lookup(hostname, { all: true }, (err: NodeJS.ErrnoException | null, addresses?: dns.LookupAddress[]) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve((addresses || []).map((a: dns.LookupAddress) => a.address));
+      }
+    });
+  });
+
 /**
  * Perform DoH lookup (simplified - would need full DNS-over-HTTPS implementation)
  */
 export async function dohLookup(hostname: string): Promise<string[]> {
   if (!dohEnabled) {
-    // Fall back to system DNS
-    return new Promise((resolve, reject) => {
-      dns.lookup(hostname, { all: true }, (err: NodeJS.ErrnoException | null, addresses?: dns.LookupAddress[]) => {
-        if (err) reject(err);
-        else resolve((addresses || []).map((a: dns.LookupAddress) => a.address));
-      });
-    });
+    return fallbackLookup(hostname);
   }
 
-  // DoH query implementation
   try {
-    const { fetch } = await import('undici');
     const dohUrl = `${DOH_PROVIDERS[dohProvider]}?name=${encodeURIComponent(hostname)}&type=A`;
     const response = await fetch(dohUrl, {
       headers: {
-        'Accept': 'application/dns-json',
+        Accept: 'application/dns-json',
       },
     });
-    
+
     if (response.ok) {
-      const data = await response.json() as { Answer?: Array<{ data: string }> };
+      const data = (await response.json()) as { Answer?: Array<{ data: string }> };
       if (data.Answer && data.Answer.length > 0) {
         return data.Answer.map((answer: { data: string }) => answer.data);
       }
+    } else {
+      logger.warn('DoH lookup returned non-200 status', { status: response.status });
     }
   } catch (error) {
-    console.warn('[DNS] DoH lookup failed, falling back to system DNS:', error);
+    logger.warn('DoH lookup failed, falling back to system DNS', { error });
   }
 
-  // Fallback to system DNS
-  return new Promise((resolve, reject) => {
-    dns.lookup(hostname, { all: true }, (err: NodeJS.ErrnoException | null, addresses?: dns.LookupAddress[]) => {
-      if (err) reject(err);
-      else resolve((addresses || []).map((a: dns.LookupAddress) => a.address));
-    });
-  });
+  return fallbackLookup(hostname);
 }
 

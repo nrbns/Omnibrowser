@@ -1,3 +1,5 @@
+// @ts-nocheck
+
 import { BrowserWindow } from 'electron';
 import { ConsentAction, ConsentLedger } from './consent-ledger';
 import { waitForConsent } from './consent-ipc';

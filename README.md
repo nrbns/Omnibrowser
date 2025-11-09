@@ -49,6 +49,16 @@ npm run build
 ```
 Outputs platform installers via electron-builder.
 
+## Testing
+
+Playwright-based Electron smoke tests cover the tab strip and critical UI ergonomics. Run them with:
+
+```bash
+npm run test:e2e
+```
+
+The first run may prompt Playwright to download browser dependencies. In CI the suite runs headlessly and fails the pipeline if any smoke assertion regresses.
+
 ## Safety
 - Video download requires explicit consent in Settings.
 - Threat Analysis is informational only.

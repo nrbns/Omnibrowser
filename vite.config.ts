@@ -9,6 +9,17 @@ export default defineConfig({
     electron({
       main: {
         entry: 'electron/main.ts',
+        vite: {
+          build: {
+            rollupOptions: {
+              external: ['electron', 'jsdom', 'canvas', 'bufferutil', 'utf-8-validate'],
+              output: {
+                entryFileNames: 'main.js',
+                format: 'cjs',
+              },
+            }
+          }
+        }
       },
       preload: {
         input: {
@@ -22,9 +33,11 @@ export default defineConfig({
   root: resolve(__dirname),
   publicDir: 'public',
   build: {
-    outDir: 'dist',
+    outDir: 'dist-web',
     sourcemap: true,
     emptyOutDir: true,
+    minify: 'esbuild',
+    chunkSizeWarningLimit: 750,
     rollupOptions: {
       external: [
         '@ghostery/adblocker-electron',
@@ -33,6 +46,9 @@ export default defineConfig({
         'chromium-bidi/lib/cjs/cdp/CdpConnection'
       ],
     }
+  },
+  optimizeDeps: {
+    exclude: ['electron']
   },
   server: {
     port: 5173,
@@ -45,7 +61,11 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': resolve(__dirname, './src')
+      '@': resolve(__dirname, './src'),
+      canvas: resolve(__dirname, './stubs/canvas-stub/index.js'),
+      bufferutil: resolve(__dirname, './stubs/bufferutil-stub/index.js'),
+      'utf-8-validate': resolve(__dirname, './stubs/utf-8-validate-stub/index.js'),
+      './xhr-sync-worker.js': resolve(__dirname, './stubs/xhr-sync-worker.js')
     }
   }
 });

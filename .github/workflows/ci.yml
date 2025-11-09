@@ -2,6 +2,45 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - '**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript type check
+        run: npm run build:types
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Production vulnerability scan
+        run: npm run audit:prod
+
+      - name: Bundle renderer assets
+        run: npm run build
+name: CI
+
+on:
+  push:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
@@ -61,7 +100,7 @@ jobs:
         run: npm run build
 
       - name: Run E2E tests
-        run: npm run test:e2e || true
+        run: npm run test:e2e
         env:
           CI: true
 

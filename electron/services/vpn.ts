@@ -6,6 +6,7 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { EventEmitter } from 'events';
+import { createLogger } from './utils/logger';
 
 const execAsync = promisify(exec);
 
@@ -20,6 +21,7 @@ export interface VPNStatus {
 class VPNService extends EventEmitter {
   private status: VPNStatus = { connected: false };
   private checkInterval: NodeJS.Timeout | null = null;
+  private logger = createLogger('vpn');
 
   constructor() {
     super();
@@ -30,6 +32,7 @@ class VPNService extends EventEmitter {
    * Start monitoring VPN status
    */
   private startMonitoring(): void {
+    this.logger.info('Starting VPN monitor');
     this.checkStatus();
     this.checkInterval = setInterval(() => {
       this.checkStatus();
@@ -52,12 +55,15 @@ class VPNService extends EventEmitter {
         newStatus = await this.checkLinuxVPN();
       }
     } catch (error) {
-      console.warn('VPN check failed:', error);
+      this.logger.warn('VPN check failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
 
     if (JSON.stringify(newStatus) !== JSON.stringify(this.status)) {
       this.status = newStatus;
       this.emit('status', this.status);
+      this.logger.info('VPN status updated', this.status);
     }
 
     return this.status;

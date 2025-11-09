@@ -3,9 +3,13 @@
 process.env.JSDOM_NO_CANVAS = '1';
 
 import 'dotenv/config';
-import 'source-map-support/register';
+import 'source-map-support/register.js';
 import { app, BrowserWindow, ipcMain, session, shell } from 'electron';
 import * as path from 'node:path';
+
+// Constrain the renderer V8 heap to keep memory footprint under ~150MB
+app.commandLine.appendSwitch('js-flags', '--max_old_space_size=150');
+
 import { applySecurityPolicies } from './security';
 import { randomUUID } from 'node:crypto';
 import { AgentStore } from './services/agent/store';

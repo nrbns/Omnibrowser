@@ -6,7 +6,6 @@
 import { getFileAnalyzer } from './file-analyzer';
 import { getFingerprintLibrary } from './fingerprint-lib';
 import { getThreatGraphService } from '../self-defense/threat-graph';
-import { fetch } from 'undici';
 
 export interface EnhancedScanResult {
   url?: string;

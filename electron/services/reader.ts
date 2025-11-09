@@ -1,7 +1,6 @@
 import { BrowserWindow, app, shell } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { fetch } from 'undici';
 import { z } from 'zod';
 import { registerHandler } from '../shared/ipc/router';
 import {

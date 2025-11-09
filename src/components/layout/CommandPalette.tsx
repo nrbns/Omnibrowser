@@ -644,8 +644,8 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
                             <ArrowRight size={16} className="text-gray-500" />
                           </div>
                         </motion.button>
-                        </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               ))}

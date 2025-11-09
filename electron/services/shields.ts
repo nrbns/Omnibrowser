@@ -93,8 +93,6 @@ class ShieldsService extends EventEmitter {
         this.setupFallbackAdBlocking();
         return;
       }
-      const { fetch } = await import('undici');
-
       // Load comprehensive blocklists: EasyList, EasyPrivacy, and uBO annoyances
       try {
         // Try to load full lists (ads + privacy + annoyances)

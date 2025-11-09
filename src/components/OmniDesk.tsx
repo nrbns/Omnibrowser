@@ -16,7 +16,7 @@ import { useNavigate } from 'react-router-dom';
 import { ipcEvents } from '../lib/ipc-events';
 
 export function OmniDesk() {
-  const { tabs } = useTabsStore();
+  const { tabs, activeId } = useTabsStore();
   const { mode, setMode } = useAppStore();
   const navigate = useNavigate();
   const [recentWorkspaces, setRecentWorkspaces] = useState<any[]>([]);
@@ -121,7 +121,8 @@ export function OmniDesk() {
       action: async () => {
         navigate('/agent');
       }, 
-      color: 'from-blue-500 to-cyan-500' 
+    color: 'from-blue-500 to-cyan-500',
+    description: 'Open the agent console to start a guided workflow.'
     },
     { 
       icon: Search, 
@@ -131,7 +132,8 @@ export function OmniDesk() {
         setMode('Research');
         await ipc.tabs.create('about:blank');
       }, 
-      color: 'from-purple-500 to-pink-500' 
+    color: 'from-purple-500 to-pink-500',
+    description: 'Launch AI-powered research with citations-first results.'
     },
     { 
       icon: FileText, 
@@ -140,7 +142,8 @@ export function OmniDesk() {
         setMode('Research');
         await ipc.tabs.create('about:blank');
       }, 
-      color: 'from-green-500 to-emerald-500' 
+    color: 'from-green-500 to-emerald-500',
+    description: 'Capture structured notes that sync with your highlights.'
     },
     { 
       icon: Workflow, 
@@ -148,7 +151,8 @@ export function OmniDesk() {
       action: () => {
         navigate('/playbooks');
       }, 
-      color: 'from-orange-500 to-red-500' 
+    color: 'from-orange-500 to-red-500',
+    description: 'Automate multi-step workflows with reusable recipes.'
     },
   ];
 
@@ -214,8 +218,16 @@ export function OmniDesk() {
     }
   };
 
-  // Only show when no tabs
-  if (tabs.length > 0) return null;
+  const activeTab = tabs.find((tab) => tab.id === activeId);
+  const shouldShowDashboard =
+    tabs.length === 0 ||
+    !activeTab ||
+    !activeTab.url ||
+    activeTab.url === 'about:blank' ||
+    activeTab.url.startsWith('ob://newtab') ||
+    activeTab.url.startsWith('ob://home');
+
+  if (!shouldShowDashboard) return null;
 
   return (
     <div className="absolute inset-0 h-full w-full bg-gradient-to-br from-[#1A1D28] via-[#1F2332] to-[#1A1D28] flex items-center justify-center p-8 overflow-auto z-10">
@@ -224,12 +236,17 @@ export function OmniDesk() {
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="text-center mb-12"
+          className="mb-10 space-y-3 text-left"
         >
-          <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 mb-2">
+          <p className="text-xs uppercase tracking-[0.3em] text-gray-500">
+            Command Center
+          </p>
+          <h1 className="text-4xl font-semibold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400">
             OmniBrowser
           </h1>
-          <p className="text-gray-400">Your intelligent workspace</p>
+          <p className="max-w-2xl text-sm text-gray-400">
+            Launch an agentic workspace, resume a saved session, or jump straight into a trusted playbook.
+          </p>
         </motion.div>
 
         {/* Quick Actions */}
@@ -237,21 +254,32 @@ export function OmniDesk() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
-          className="grid grid-cols-2 md:grid-cols-4 gap-4"
+          className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
         >
-          {quickActions.map((action, idx) => {
+          {quickActions.map((action) => {
             const Icon = action.icon;
             return (
               <motion.button
-                key={idx}
+                key={action.label}
                 onClick={action.action}
-                whileHover={{ scale: 1.05, y: -2 }}
-                whileTap={{ scale: 0.95 }}
-                className={`p-6 rounded-xl bg-gradient-to-br ${action.color} bg-opacity-10 hover:bg-opacity-20 border border-gray-700/50 backdrop-blur-sm transition-all group cursor-pointer`}
+                whileHover={{ y: -2 }}
+                whileTap={{ scale: 0.97 }}
+                className="group flex h-full flex-col items-start gap-3 rounded-xl border border-gray-700/50 bg-gray-800/60 px-4 py-5 text-left transition-all hover:border-gray-600 hover:bg-gray-800/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900"
               >
-                <Icon className="w-8 h-8 mx-auto mb-2 text-gray-300 group-hover:text-white transition-colors" />
-                <div className="text-sm font-medium text-gray-300 group-hover:text-white transition-colors">
-                  {action.label}
+                <span
+                  className={`inline-flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br ${action.color} text-white shadow-lg shadow-black/20`}
+                >
+                  <Icon className="h-5 w-5" />
+                </span>
+                <div className="space-y-1">
+                  <div className="text-sm font-semibold text-gray-100 group-hover:text-white transition-colors">
+                    {action.label}
+                  </div>
+                  {action.description ? (
+                    <p className="text-xs leading-snug text-gray-500 group-hover:text-gray-300 transition-colors">
+                      {action.description}
+                    </p>
+                  ) : null}
                 </div>
               </motion.button>
             );

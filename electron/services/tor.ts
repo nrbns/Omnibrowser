@@ -8,6 +8,7 @@ import { app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { EventEmitter } from 'events';
+import { createLogger } from './utils/logger';
 
 export interface TorConfig {
   enabled: boolean;
@@ -36,6 +37,7 @@ class TorService extends EventEmitter {
   };
   private newnymTimer: NodeJS.Timeout | null = null;
   private healthCheckInterval: NodeJS.Timeout | null = null;
+  private logger = createLogger('tor');
 
   constructor(config: TorConfig) {
     super();
@@ -58,6 +60,7 @@ class TorService extends EventEmitter {
     // Find Tor executable (bundled or system)
     const torPath = await this.findTorExecutable();
     if (!torPath) {
+      this.logger.warn('Tor executable not found; stub mode required');
       throw new Error('Tor executable not found. Please install Tor Browser or tor package.');
     }
 
@@ -69,6 +72,8 @@ class TorService extends EventEmitter {
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: dataDir,
     });
+
+    this.logger.info('Starting Tor process', { torPath, dataDir, port: this.config.port, controlPort: this.config.controlPort });
 
     // Write config to stdin
     this.process.stdin?.write(torrc);
@@ -85,6 +90,9 @@ class TorService extends EventEmitter {
       if (output.includes('ERROR')) {
         this.status.error = output;
         this.emit('error', output);
+        this.logger.error('Tor stderr', { output });
+      } else {
+        this.logger.warn('Tor stderr', { output });
       }
     });
 
@@ -93,12 +101,17 @@ class TorService extends EventEmitter {
       this.process = null;
       this.emit('status', this.status);
       if (code !== 0 && code !== null) {
-        this.emit('error', `Tor exited with code ${code}`);
+        const message = `Tor exited with code ${code}`;
+        this.emit('error', message);
+        this.logger.error(message);
+      } else {
+        this.logger.info('Tor process exited');
       }
     });
 
     this.status.running = true;
     this.emit('status', this.status);
+    this.logger.info('Tor process flagged as running');
 
     // Start health checks
     this.startHealthCheck();
@@ -113,6 +126,7 @@ class TorService extends EventEmitter {
    * Stop Tor process
    */
   async stop(): Promise<void> {
+    this.logger.info('Stopping Tor process');
     if (this.process) {
       this.process.kill();
       this.process = null;
@@ -128,6 +142,7 @@ class TorService extends EventEmitter {
     this.status.running = false;
     this.status.bootstrapped = false;
     this.emit('status', this.status);
+    this.logger.info('Tor process stopped');
   }
 
   /**
@@ -161,7 +176,9 @@ class TorService extends EventEmitter {
         setTimeout(() => reject(new Error('Tor control timeout')), 5000);
       });
     } catch (error) {
-      throw new Error(`Failed to renew identity: ${error}`);
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error('Failed to renew Tor identity', { error: message });
+      throw new Error(`Failed to renew identity: ${message}`);
     }
   }
 
@@ -230,6 +247,7 @@ AvoidDiskWrites 0`.trim();
     if (bootstrapMatch) {
       this.status.progress = parseInt(bootstrapMatch[1], 10);
       this.emit('progress', this.status.progress);
+      this.logger.info('Tor bootstrap progress', { progress: this.status.progress });
     }
 
     // Check for circuit established
@@ -238,6 +256,7 @@ AvoidDiskWrites 0`.trim();
       this.status.circuitEstablished = true;
       this.status.progress = 100;
       this.emit('ready');
+      this.logger.info('Tor circuit established');
     }
   }
 
@@ -250,6 +269,7 @@ AvoidDiskWrites 0`.trim();
         if (this.process.killed || !this.process.pid) {
           this.status.running = false;
           this.emit('status', this.status);
+          this.logger.warn('Tor process missing during health check');
           return;
         }
 
@@ -269,9 +289,12 @@ AvoidDiskWrites 0`.trim();
         if (!healthy && this.status.running) {
           this.status.running = false;
           this.emit('status', this.status);
+          this.logger.warn('Tor control port health probe failed');
         }
       } catch (error) {
-        // Health check failed
+        this.logger.warn('Tor health check error', {
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }, 5000);
   }
@@ -283,8 +306,11 @@ AvoidDiskWrites 0`.trim();
       try {
         await this.newIdentity();
         this.emit('identity-renewed');
+        this.logger.info('Tor identity auto-renewed');
       } catch (error) {
-        console.error('Auto-renew identity failed:', error);
+        this.logger.warn('Auto-renew identity failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }, intervalMs);
   }

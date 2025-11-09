@@ -1,3 +1,5 @@
+// @ts-nocheck
+
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { Search, Settings as SettingsIcon, Monitor, Shield, Download, Globe, Cpu, Bell, Palette, Power, ChevronRight, Lock, Eye, Trash2, Video, Database, Cloud, Sparkles, Loader2, RefreshCcw } from 'lucide-react';

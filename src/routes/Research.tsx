@@ -1,21 +1,42 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AlertCircle, BookOpen, Loader2, Sparkles, ShieldAlert } from 'lucide-react';
+import { AlertCircle, BookOpen, Loader2, Sparkles, ShieldAlert, Calculator, Clock } from 'lucide-react';
 import { ipc } from '../lib/ipc-typed';
 import { useResearchStore } from '../state/researchStore';
 import { useTabsStore } from '../state/tabsStore';
+import { Portal } from '../components/common/Portal';
+import { RedixStatus, ResearchSkeleton } from '../components/research/RedixStatus';
 
 const ISSUE_DESCRIPTIONS: Record<string, string> = {
   uncited: 'Sentence has no supporting citation',
   contradiction: 'Verification found a conflicting claim',
 };
 
-function CitationChip({ citeId, index, onHover, onLeave }: { citeId: string; index: number; onHover?: () => void; onLeave?: () => void }) {
+function CitationChip({
+  citeId,
+  index,
+  onHover,
+  onLeave,
+  onClick,
+  active,
+}: {
+  citeId: string;
+  index: number;
+  onHover?: () => void;
+  onLeave?: () => void;
+  onClick?: () => void;
+  active?: boolean;
+}) {
   return (
     <button
       onMouseEnter={onHover}
       onMouseLeave={onLeave}
-      className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 text-blue-200 border border-blue-500/40 text-xs px-2 py-0.5 hover:bg-blue-500/20 transition-colors"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1 rounded-full border text-xs px-2 py-0.5 transition-colors ${
+        active
+          ? 'bg-blue-500/30 text-blue-50 border-blue-400 shadow shadow-blue-500/20'
+          : 'bg-blue-500/10 text-blue-200 border-blue-500/40 hover:bg-blue-500/20'
+      }`}
     >
       <span className="text-[10px]">[{index + 1}]</span>
       <span className="uppercase tracking-wide text-[9px]">cite</span>
@@ -34,11 +55,23 @@ function IssueBadge({ issue }: { issue: { type: 'uncited' | 'contradiction'; det
   );
 }
 
-function SourceCard({ cite, index }: { cite: { id: string; title: string; url: string; snippet?: string; publishedAt?: string }; index: number }) {
+function SourceCard({
+  cite,
+  index,
+  active,
+  onPreview,
+}: {
+  cite: { id: string; title: string; url: string; snippet?: string; publishedAt?: string };
+  index: number;
+  active?: boolean;
+  onPreview?: () => void;
+}) {
   return (
     <motion.li
       layout
-      className="rounded-xl border border-gray-800/60 bg-gray-900/60 px-3 py-2 space-y-1"
+      className={`rounded-xl border px-3 py-2 space-y-1 transition-colors ${
+        active ? 'border-blue-500/60 bg-blue-500/10 shadow-lg shadow-blue-500/10' : 'border-gray-800/60 bg-gray-900/60'
+      }`}
     >
       <div className="flex items-center gap-2">
         <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-blue-500/20 text-blue-200 text-xs font-semibold">
@@ -46,7 +79,7 @@ function SourceCard({ cite, index }: { cite: { id: string; title: string; url: s
         </span>
         <div className="flex-1">
           <button
-            onClick={() => window.open(cite.url, '_blank')}
+            onClick={() => window.open(cite.url, '_blank', 'noopener')}
             className="text-sm font-semibold text-blue-200 hover:text-blue-100 transition-colors"
           >
             {cite.title}
@@ -55,6 +88,15 @@ function SourceCard({ cite, index }: { cite: { id: string; title: string; url: s
             <p className="text-[11px] text-gray-400">Published {cite.publishedAt}</p>
           )}
         </div>
+        {onPreview && (
+          <button
+            type="button"
+            onClick={onPreview}
+            className="rounded-lg border border-blue-500/40 px-2 py-1 text-[11px] text-blue-200 hover:bg-blue-500/20 transition-colors"
+          >
+            Preview
+          </button>
+        )}
       </div>
       {cite.snippet && (
         <p className="text-xs text-gray-400 leading-relaxed">{cite.snippet}</p>
@@ -79,12 +121,14 @@ export function Research() {
     issues,
     setError,
     error,
+    previewCiteId,
+    setPreviewCite,
   } = useResearchStore();
   const { activeId, tabs } = useTabsStore();
   const activeTab = useMemo(() => tabs.find((tab) => tab.id === activeId), [tabs, activeId]);
-  const [previewCiteId, setPreviewCiteId] = useState<string | null>(null);
   const [jobChannel, setJobChannel] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [lastCompletedAt, setLastCompletedAt] = useState<number | null>(null);
 
   const sourcesAsFlat = useMemo(() => {
     const entries: Array<{ cite: any; idx: number }> = [];
@@ -96,6 +140,11 @@ export function Research() {
     return entries;
   }, [sources]);
 
+  const previewEntries = useMemo(() => {
+    if (!previewCiteId) return [];
+    return sources[previewCiteId] ?? [];
+  }, [previewCiteId, sources]);
+
   useEffect(() => {
     return () => {
       if (jobChannel && window.ipc?.removeAllListeners) {
@@ -103,6 +152,16 @@ export function Research() {
       }
     };
   }, [jobChannel]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setPreviewCite(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [setPreviewCite]);
 
   const startResearch = useCallback(async (mode?: 'default' | 'threat' | 'trade') => {
     if (!question.trim()) return;
@@ -145,6 +204,12 @@ export function Research() {
       setLoading(false);
     }
   }, [appendChunk, question, reset, setError, setIssues, setLoading, setSources]);
+
+  useEffect(() => {
+    if (!isLoading && chunks.length > 0) {
+      setLastCompletedAt(Date.now());
+    }
+  }, [isLoading, chunks.length]);
 
   const formattedAnswer = useMemo(() => {
     let offset = 0;
@@ -222,6 +287,12 @@ export function Research() {
               </div>
             </div>
           )}
+
+          <RedixStatus
+            loading={isLoading}
+            hasIssues={issues.length > 0}
+            lastRunAt={lastCompletedAt}
+          />
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)]">
@@ -235,11 +306,18 @@ export function Research() {
               )}
             </header>
 
+            {isLoading && (
+              <div className="rounded-xl border border-slate-800/60 bg-slate-900/60 p-6">
+                <ResearchSkeleton />
+              </div>
+            )}
+
             {chunks.length === 0 && !isLoading ? (
               <div className="rounded-xl border border-slate-800/60 bg-slate-900/60 p-6 text-sm text-slate-400">
                 Results will appear here as soon as you run a question.
               </div>
             ) : (
+              !isLoading && (
               <div className="space-y-4">
                 {formattedAnswer.map(({ decorated, chunkIndex }) => (
                   <motion.article
@@ -261,8 +339,8 @@ export function Research() {
                               key={`${chunkIndex}-${sentenceIdx}-cite-${citeId}-${idx}`}
                               citeId={citeId}
                               index={idx}
-                              onHover={() => setPreviewCiteId(citeId)}
-                              onLeave={() => setPreviewCiteId((prev) => (prev === citeId ? null : prev))}
+                              active={previewCiteId === citeId}
+                              onClick={() => setPreviewCite(previewCiteId === citeId ? null : citeId)}
                             />
                           ))}
                         </div>
@@ -271,6 +349,7 @@ export function Research() {
                   </motion.article>
                 ))}
               </div>
+              )
             )}
           </section>
 
@@ -282,7 +361,13 @@ export function Research() {
               <ul className="mt-4 space-y-3">
                 <AnimatePresence initial={false}>
                   {sourcesAsFlat.map(({ cite, idx }) => (
-                    <SourceCard key={`${cite.id}-${idx}`} cite={cite} index={idx} />
+                    <SourceCard
+                      key={`${cite.id}-${idx}`}
+                      cite={cite}
+                      index={idx}
+                      active={previewCiteId === cite.id}
+                      onPreview={() => setPreviewCite(cite.id)}
+                    />
                   ))}
                 </AnimatePresence>
               </ul>
@@ -306,6 +391,81 @@ export function Research() {
           </aside>
         </div>
       </div>
+      {previewCiteId && previewEntries.length > 0 && (
+        <Portal>
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm px-4 py-6 sm:items-center">
+            <motion.div
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 24 }}
+              className="w-full max-w-3xl overflow-hidden rounded-2xl border border-blue-500/30 bg-slate-950/95 shadow-xl shadow-blue-500/10"
+            >
+              <header className="flex flex-col gap-3 border-b border-blue-500/20 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-widest text-blue-300">Evidence Preview</p>
+                  <h2 className="text-lg font-semibold text-blue-100">{previewEntries[0]?.title}</h2>
+                  <p className="text-xs text-slate-400 break-all">{previewEntries[0]?.url}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = previewEntries[0]?.url;
+                      if (target) {
+                        window.open(target, '_blank', 'noopener');
+                      }
+                    }}
+                    className="inline-flex items-center gap-2 rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-1.5 text-sm font-medium text-blue-100 transition-colors hover:bg-blue-500/20"
+                  >
+                    <Sparkles size={14} /> Open Source
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewCite(null)}
+                    className="rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-sm text-slate-300 transition-colors hover:bg-slate-700"
+                  >
+                    Close
+                  </button>
+                </div>
+              </header>
+              <div className="max-h-[60vh] overflow-y-auto px-5 py-4 space-y-4">
+                {previewEntries.map((entry, idx) => (
+                  <motion.article
+                    key={`${entry.id}-${idx}`}
+                    layout
+                    className="rounded-xl border border-blue-500/20 bg-slate-900/70 p-4 space-y-3"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-blue-300">
+                        <Calculator size={12} />
+                        Evidence {idx + 1}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => window.open(entry.url, '_blank', 'noopener')}
+                        className="text-[11px] text-blue-300 underline-offset-2 hover:underline"
+                      >
+                        Open in new tab
+                      </button>
+                    </div>
+                    {entry.snippet ? (
+                      <blockquote className="border-l-2 border-blue-500/50 pl-3 text-sm leading-relaxed text-slate-200">
+                        {entry.snippet}
+                      </blockquote>
+                    ) : (
+                      <p className="text-sm text-slate-300">No snippet available. Open the source to review.</p>
+                    )}
+                    <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                      <Clock size={12} />
+                      <span>{entry.publishedAt ? `Published ${entry.publishedAt}` : 'No publish date'}</span>
+                    </div>
+                  </motion.article>
+                ))}
+              </div>
+            </motion.div>
+          </div>
+        </Portal>
+      )}
     </div>
   );
 }

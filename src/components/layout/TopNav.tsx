@@ -3,7 +3,33 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, ArrowRight, RefreshCw, Camera, PictureInPicture, Search, Download, History, Settings, Bot, ChevronDown, Workflow, Home, ZoomIn, ZoomOut, Code, FileText, Network, Layers, Activity } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  RefreshCw,
+  Search,
+  Download,
+  History,
+  Settings,
+  Bot,
+  ChevronDown,
+  Workflow,
+  Camera,
+  PictureInPicture,
+  Home,
+  ZoomIn,
+  ZoomOut,
+  Code,
+  FileText,
+  Network,
+  Layers,
+  Activity,
+  Sparkles,
+  Highlighter,
+  Shield,
+  Wifi,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useTabsStore } from '../../state/tabsStore';
@@ -11,7 +37,6 @@ import { ipc } from '../../lib/ipc-typed';
 import { ModeSwitch } from '../TopNav/ModeSwitch';
 import { Omnibox } from '../TopNav/Omnibox';
 import { ProgressBar } from '../TopNav/ProgressBar';
-import { QuickActions } from '../TopNav/QuickActions';
 import { ShieldsButton } from '../TopNav/ShieldsButton';
 import { NetworkButton } from '../TopNav/NetworkButton';
 import { SessionSwitcher } from '../sessions/SessionSwitcher';
@@ -19,6 +44,23 @@ import { ProfileQuickSwitcher } from '../sessions/ProfileQuickSwitcher';
 import { ContainerSwitcher } from '../sessions/ContainerSwitcher';
 import { useIPCEvent } from '../../lib/use-ipc-event';
 import { DownloadUpdate, TabNavigationState } from '../../lib/ipc-events';
+
+type MenuId = 'view' | 'workspace' | 'tools' | 'agent' | 'security';
+
+type MenuEntry =
+  | {
+      type: 'item';
+      key: string;
+      icon: LucideIcon;
+      label: string;
+      shortcut?: string;
+      disabled?: boolean;
+      onSelect: () => void | Promise<void>;
+    }
+  | {
+      type: 'divider';
+      key: string;
+    };
 
 interface TopNavProps {
   onAgentToggle: () => void;
@@ -35,10 +77,14 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
   const [isLoading, setIsLoading] = useState(false);
   const [downloadCount, setDownloadCount] = useState(0);
   const [agentActive, setAgentActive] = useState(false);
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [hierarchyOpen, setHierarchyOpen] = useState(false);
-  const closeDropdown = useCallback(() => setDropdownOpen(false), []);
-  const closeHierarchy = useCallback(() => setHierarchyOpen(false), []);
+  const [activeMenu, setActiveMenu] = useState<MenuId | null>(null);
+  const closeMenus = useCallback(() => setActiveMenu(null), []);
+  const toggleMenu = useCallback(
+    (menu: MenuId) => {
+      setActiveMenu((current) => (current === menu ? null : menu));
+    },
+    []
+  );
   const navigationStateRef = useRef({
     activeId: activeId ?? null,
     canGoBack: false,
@@ -64,17 +110,16 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
   }, []);
 
   useEffect(() => {
-    if (!dropdownOpen && !hierarchyOpen) return;
+    if (!activeMenu) return;
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        if (dropdownOpen) closeDropdown();
-        if (hierarchyOpen) closeHierarchy();
+        closeMenus();
       }
     };
     const options: AddEventListenerOptions = { capture: true };
     window.addEventListener('keydown', handleEscape, options);
     return () => window.removeEventListener('keydown', handleEscape, options);
-  }, [dropdownOpen, hierarchyOpen, closeDropdown, closeHierarchy]);
+  }, [activeMenu, closeMenus]);
 
   // Listen for download updates
   useIPCEvent<DownloadUpdate>('downloads:started', () => {
@@ -302,25 +347,345 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
     }
   };
 
+  const handleFindInPage = useCallback(async () => {
+    if (!activeId) return;
+    try {
+      await ipc.tabs.find(activeId);
+    } catch (error) {
+      console.error('Failed to open find:', error);
+    }
+  }, [activeId]);
+
+  const handleToggleDevtools = useCallback(async () => {
+    if (!activeId) return;
+    try {
+      await ipc.tabs.devtools(activeId);
+    } catch (error) {
+      console.error('Failed to toggle DevTools:', error);
+    }
+  }, [activeId]);
+
+  const handleMenuSelect = useCallback(
+    (entry: MenuEntry) => {
+      if (entry.type !== 'item' || entry.disabled) return;
+      const result = entry.onSelect();
+      if (result && typeof (result as Promise<void>).then === 'function') {
+        (result as Promise<void>)
+          .catch((error) => {
+            console.error(`Failed to run menu action "${entry.key}"`, error);
+          })
+          .finally(() => closeMenus());
+      } else {
+        closeMenus();
+      }
+    },
+    [closeMenus]
+  );
+
+  const isMac = typeof navigator !== 'undefined' && navigator.platform?.toUpperCase().includes('MAC');
+
+  const viewMenuEntries: MenuEntry[] = [
+    {
+      type: 'item',
+      key: 'zoom-in',
+      icon: ZoomIn,
+      label: 'Zoom In',
+      shortcut: isMac ? '⌘ +' : 'Ctrl +',
+      disabled: !activeId,
+      onSelect: async () => {
+        if (!activeId) return;
+        await ipc.tabs.zoomIn(activeId);
+      },
+    },
+    {
+      type: 'item',
+      key: 'zoom-out',
+      icon: ZoomOut,
+      label: 'Zoom Out',
+      shortcut: isMac ? '⌘ -' : 'Ctrl -',
+      disabled: !activeId,
+      onSelect: async () => {
+        if (!activeId) return;
+        await ipc.tabs.zoomOut(activeId);
+      },
+    },
+    {
+      type: 'item',
+      key: 'zoom-reset',
+      icon: Search,
+      label: 'Reset Zoom',
+      shortcut: isMac ? '⌘ 0' : 'Ctrl 0',
+      disabled: !activeId,
+      onSelect: async () => {
+        if (!activeId) return;
+        await ipc.tabs.zoomReset(activeId);
+      },
+    },
+  ];
+
+  const workspaceMenuEntries: MenuEntry[] = [
+    {
+      type: 'item',
+      key: 'knowledge-graph',
+      icon: Layers,
+      label: 'Knowledge Graph',
+      onSelect: () => {
+        navigate('/');
+      },
+    },
+    {
+      type: 'item',
+      key: 'history-graph',
+      icon: Network,
+      label: 'History Graph',
+      onSelect: () => {
+        navigate('/history');
+      },
+    },
+    { type: 'divider', key: 'workspace-divider' },
+    {
+      type: 'item',
+      key: 'workspaces',
+      icon: FileText,
+      label: 'Workspaces',
+      onSelect: () => {
+        navigate('/workspace');
+      },
+    },
+    {
+      type: 'item',
+      key: 'playbooks',
+      icon: Workflow,
+      label: 'Playbooks',
+      onSelect: () => {
+        navigate('/playbooks');
+      },
+    },
+    {
+      type: 'item',
+      key: 'automation-runs',
+      icon: Bot,
+      label: 'Automation Runs',
+      onSelect: () => {
+        navigate('/runs');
+      },
+    },
+  ];
+
+  const toolsMenuEntries: MenuEntry[] = [
+    {
+      type: 'item',
+      key: 'find',
+      icon: Search,
+      label: 'Find in Page',
+      shortcut: isMac ? '⌘ F' : 'Ctrl F',
+      disabled: !activeId,
+      onSelect: handleFindInPage,
+    },
+    {
+      type: 'item',
+      key: 'screenshot',
+      icon: Camera,
+      label: 'Capture Screenshot',
+      disabled: !activeId,
+      onSelect: handleScreenshot,
+    },
+    {
+      type: 'item',
+      key: 'pip',
+      icon: PictureInPicture,
+      label: 'Picture-in-Picture',
+      disabled: !activeId,
+      onSelect: handlePIP,
+    },
+    {
+      type: 'item',
+      key: 'devtools',
+      icon: Code,
+      label: 'Toggle DevTools',
+      shortcut: isMac ? '⌘ ⇧ I' : 'Ctrl ⇧ I',
+      disabled: !activeId,
+      onSelect: handleToggleDevtools,
+    },
+    { type: 'divider', key: 'tools-divider' },
+    {
+      type: 'item',
+      key: 'watchers',
+      icon: Activity,
+      label: 'Page Watchers',
+      onSelect: () => {
+        navigate('/watchers');
+      },
+    },
+    {
+      type: 'item',
+      key: 'history',
+      icon: History,
+      label: 'History',
+      onSelect: () => {
+        navigate('/history');
+      },
+    },
+  ];
+
+  const agentMenuEntries: MenuEntry[] = [
+    {
+      type: 'item',
+      key: 'agent-console',
+      icon: Bot,
+      label: 'Open Agent Console',
+      shortcut: isMac ? '⌘⇧A' : 'Ctrl+Shift+A',
+      onSelect: () => onAgentToggle(),
+    },
+    {
+      type: 'item',
+      key: 'ask-agent',
+      icon: Sparkles,
+      label: 'Ask Agent',
+      shortcut: isMac ? '⌘K' : 'Ctrl+K',
+      onSelect: () => onCommandPalette(),
+    },
+    { type: 'divider', key: 'agent-divider' },
+    {
+      type: 'item',
+      key: 'clip-highlight',
+      icon: Highlighter,
+      label: 'Clip Highlight',
+      shortcut: isMac ? '⌘⇧H' : 'Ctrl+Shift+H',
+      onSelect: () => onClipperToggle(),
+    },
+    {
+      type: 'item',
+      key: 'reader-mode',
+      icon: FileText,
+      label: 'Reader Mode',
+      shortcut: isMac ? '⌘⇧R' : 'Ctrl+Shift+R',
+      onSelect: () => onReaderToggle(),
+    },
+  ];
+
+  const securityMenuEntries: MenuEntry[] = [
+    {
+      type: 'item',
+      key: 'privacy-shields',
+      icon: Shield,
+      label: 'Privacy Shields',
+      onSelect: () => {
+        const target = document.querySelector('[data-shields-button]') as HTMLElement | null;
+        target?.click();
+      },
+    },
+    {
+      type: 'item',
+      key: 'network-controls',
+      icon: Wifi,
+      label: 'Network Controls',
+      onSelect: () => {
+        const target = document.querySelector('[data-network-button]') as HTMLElement | null;
+        target?.click();
+      },
+    },
+    { type: 'divider', key: 'security-divider' },
+    {
+      type: 'item',
+      key: 'history-graph',
+      icon: History,
+      label: 'History Graph',
+      onSelect: () => navigate('/history'),
+    },
+  ];
+
+  const renderMenuButton = (menuId: MenuId, label: string, entries: MenuEntry[]) => {
+    const isOpen = activeMenu === menuId;
+    return (
+      <div key={menuId} className="relative">
+        <motion.button
+          type="button"
+          onClick={() => toggleMenu(menuId)}
+          aria-expanded={isOpen}
+          aria-haspopup="true"
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-700/50 bg-gray-800/60 text-sm text-gray-300 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
+            isOpen ? 'bg-gray-800/80 text-gray-100' : 'hover:bg-gray-800/80 hover:text-gray-100'
+          }`}
+          title={`${label} menu`}
+        >
+          <span>{label}</span>
+          <ChevronDown size={14} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        </motion.button>
+
+        <AnimatePresence>
+          {isOpen && (
+            <>
+              <motion.button
+                key={`${menuId}-backdrop`}
+                type="button"
+                aria-label={`Close ${label} menu`}
+                className="fixed inset-0 z-40 bg-transparent pointer-events-auto focus:outline-none"
+                onClick={closeMenus}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+              />
+              <motion.div
+                key={`${menuId}-menu`}
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.15 }}
+                className="absolute right-0 top-full mt-2 w-56 bg-gray-900/95 backdrop-blur-xl border border-gray-700/50 rounded-lg shadow-2xl z-50 py-2"
+              >
+                {entries.map((entry) =>
+                  entry.type === 'divider' ? (
+                    <div key={entry.key} className="h-px my-1 bg-gray-700/50" />
+                  ) : (
+                    <button
+                      key={entry.key}
+                      type="button"
+                      disabled={entry.disabled}
+                      onClick={() => handleMenuSelect(entry)}
+                      className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:bg-gray-800/60"
+                    >
+                      <entry.icon size={16} className="text-gray-400" />
+                      <span className="flex-1 text-left">{entry.label}</span>
+                      {entry.shortcut && (
+                        <kbd className="text-xs text-gray-500 bg-gray-800/80 border border-gray-700/50 rounded px-1.5 py-0.5">
+                          {entry.shortcut}
+                        </kbd>
+                      )}
+                    </button>
+                  )
+                )}
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  };
+
   return (
-    <div className="h-14 flex items-center px-4 gap-4 bg-gray-900/80 backdrop-blur-xl border-b border-gray-800/50 shadow-lg">
-          {/* Left: Mode Switch + Session Switcher */}
-      <div className="flex-shrink-0 flex items-center gap-3">
+    <div className="drag h-14 flex items-center px-4 gap-4 bg-gray-900/80 backdrop-blur-xl border-b border-gray-800/50 shadow-lg">
+      {/* Left: Mode & Session controls */}
+      <div className="no-drag flex items-center gap-2">
         <ModeSwitch />
-        <ProfileQuickSwitcher />
         <SessionSwitcher />
-            <ContainerSwitcher />
-          </div>
+        <div className="hidden xl:flex items-center gap-2">
+          <ProfileQuickSwitcher />
+          <ContainerSwitcher />
+        </div>
+      </div>
 
       {/* Browser Navigation Controls */}
-      <div className="flex items-center gap-1.5 flex-shrink-0">
+      <div className="no-drag flex items-center gap-1.5 flex-shrink-0">
         {/* Home Button */}
         <motion.button
           onClick={() => navigate('/')}
           aria-label="Go to home"
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          className="p-2.5 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-300 hover:text-blue-400 transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
+          className="no-drag p-2.5 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-300 hover:text-blue-400 transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
           title="Home (Go to home screen)"
         >
           <Home size={18} />
@@ -333,7 +698,7 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
           aria-disabled={!canGoBack || !activeId}
           whileHover={{ scale: canGoBack && activeId ? 1.05 : 1 }}
           whileTap={{ scale: canGoBack && activeId ? 0.95 : 1 }}
-          className={`p-2.5 rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
+          className={`no-drag p-2.5 rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
             canGoBack && activeId
               ? 'bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-300 hover:text-gray-100 cursor-pointer'
               : 'text-gray-600 cursor-not-allowed opacity-50'
@@ -349,7 +714,7 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
           aria-disabled={!canGoForward || !activeId}
           whileHover={{ scale: canGoForward && activeId ? 1.05 : 1 }}
           whileTap={{ scale: canGoForward && activeId ? 0.95 : 1 }}
-          className={`p-2.5 rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
+          className={`no-drag p-2.5 rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
             canGoForward && activeId
               ? 'bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-300 hover:text-gray-100 cursor-pointer'
               : 'text-gray-600 cursor-not-allowed opacity-50'
@@ -365,7 +730,7 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
           aria-disabled={!activeId}
           whileHover={{ scale: activeId ? 1.05 : 1 }}
           whileTap={{ scale: activeId ? 0.95 : 1 }}
-          className={`p-2.5 rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
+          className={`no-drag p-2.5 rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
             activeId
               ? 'bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-300 hover:text-gray-100 cursor-pointer'
               : 'text-gray-600 cursor-not-allowed opacity-50'
@@ -383,398 +748,30 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
       </div>
 
       {/* Center: Omnibox with Progress Bar */}
-      <div className="flex-1 relative mx-4">
+      <div className="no-drag flex-1 relative mx-4">
         <Omnibox onCommandPalette={onCommandPalette} />
         <ProgressBar />
       </div>
 
       {/* Right: Actions & Badges */}
-      <div className="flex items-center gap-1.5">
-        {/* Shields Button */}
-        <ShieldsButton />
-
-        {/* Network Button */}
-        <NetworkButton />
-
-        {/* Quick Actions */}
-        <QuickActions onReaderToggle={onReaderToggle} onClipperToggle={onClipperToggle} />
-
-        {/* Options Dropdown */}
-        <div className="relative">
-          <motion.button
-            onClick={() => setDropdownOpen(!dropdownOpen)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                setDropdownOpen(!dropdownOpen);
-              } else if (e.key === 'Escape' && dropdownOpen) {
-                setDropdownOpen(false);
-              }
-            }}
-            aria-expanded={dropdownOpen}
-            aria-haspopup="true"
-            aria-label="Options menu"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            className="relative p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
-            title="Options"
-          >
-            <ChevronDown size={18} />
-          </motion.button>
-
-          <AnimatePresence>
-            {dropdownOpen && (
-              <>
-                <motion.button
-                  key="dropdown-backdrop"
-                  type="button"
-                  aria-label="Close options menu"
-                  className="fixed inset-0 z-40 bg-transparent pointer-events-auto focus:outline-none"
-                  onClick={closeDropdown}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                />
-                <motion.div
-                  key="dropdown-menu"
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="absolute right-0 top-full mt-2 w-56 bg-gray-900/95 backdrop-blur-xl border border-gray-700/50 rounded-lg shadow-2xl z-50 py-2"
-                >
-                  <button
-                    onClick={() => {
-                      if (activeId) {
-                        ipc.tabs.zoomIn(activeId).catch(console.error);
-                      }
-                      closeDropdown();
-                    }}
-                    disabled={!activeId}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        if (activeId) {
-                          ipc.tabs.zoomIn(activeId).catch(console.error);
-                          closeDropdown();
-                        }
-                      }
-                    }}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:bg-gray-800/60"
-                    aria-label="Zoom in (Ctrl+Plus)"
-                    title="Zoom in (Ctrl+Plus)"
-                  >
-                    <ZoomIn size={16} />
-                    <span>Zoom In</span>
-                    <kbd className="ml-auto text-xs text-gray-500">Ctrl+Plus</kbd>
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (activeId) {
-                        ipc.tabs.zoomOut(activeId).catch(console.error);
-                      }
-                      closeDropdown();
-                    }}
-                    disabled={!activeId}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        if (activeId) {
-                          ipc.tabs.zoomOut(activeId).catch(console.error);
-                          closeDropdown();
-                        }
-                      }
-                    }}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:bg-gray-800/60"
-                    aria-label="Zoom out (Ctrl+Minus)"
-                    title="Zoom out (Ctrl+Minus)"
-                  >
-                    <ZoomOut size={16} />
-                    <span>Zoom Out</span>
-                    <kbd className="ml-auto text-xs text-gray-500">Ctrl+-</kbd>
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (activeId) {
-                        ipc.tabs.zoomReset(activeId).catch(console.error);
-                      }
-                      closeDropdown();
-                    }}
-                    disabled={!activeId}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        if (activeId) {
-                          ipc.tabs.zoomReset(activeId).catch(console.error);
-                          closeDropdown();
-                        }
-                      }
-                    }}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:bg-gray-800/60"
-                    aria-label="Reset zoom (Ctrl+0)"
-                    title="Reset zoom (Ctrl+0)"
-                  >
-                    <Search size={16} className="rotate-45" />
-                    <span>Reset Zoom</span>
-                    <kbd className="ml-auto text-xs text-gray-500">Ctrl+0</kbd>
-                  </button>
-                  <div className="h-px bg-gray-700/50 my-1" />
-                  <button
-                    onClick={() => {
-                      navigate('/workspace');
-                      closeDropdown();
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        navigate('/workspace');
-                        closeDropdown();
-                      }
-                    }}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors focus:outline-none focus:bg-gray-800/60"
-                    aria-label="Open workspaces"
-                  >
-                    <FileText size={16} />
-                    <span>Workspaces</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      navigate('/playbooks');
-                      closeDropdown();
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        navigate('/playbooks');
-                        closeDropdown();
-                      }
-                    }}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors focus:outline-none focus:bg-gray-800/60"
-                    aria-label="Open playbooks"
-                  >
-                    <Workflow size={16} />
-                    <span>Playbooks</span>
-                  </button>
-                </motion.div>
-              </>
-            )}
-          </AnimatePresence>
+      <div className="no-drag flex items-center gap-1.5">
+        {renderMenuButton('agent', 'Agent', agentMenuEntries)}
+        {renderMenuButton('view', 'View', viewMenuEntries)}
+        {renderMenuButton('workspace', 'Workspace', workspaceMenuEntries)}
+        {renderMenuButton('tools', 'Tools', toolsMenuEntries)}
+        {renderMenuButton('security', 'Security', securityMenuEntries)}
+        <div className="hidden 2xl:flex items-center gap-1.5">
+          <ShieldsButton />
+          <NetworkButton />
         </div>
-
-        {/* Hierarchy/Structure Button */}
-        <div className="relative">
-          <motion.button
-            onClick={() => setHierarchyOpen(!hierarchyOpen)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                setHierarchyOpen(!hierarchyOpen);
-              } else if (e.key === 'Escape' && hierarchyOpen) {
-                setHierarchyOpen(false);
-              }
-            }}
-            aria-expanded={hierarchyOpen}
-            aria-haspopup="true"
-            aria-label="View hierarchy"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            className="relative p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
-            title="View Hierarchy"
-          >
-            <Workflow size={18} />
-            <ChevronDown size={12} className="absolute bottom-0 right-0" />
-          </motion.button>
-
-          <AnimatePresence>
-            {hierarchyOpen && (
-              <>
-                <motion.button
-                  key="hierarchy-backdrop"
-                  type="button"
-                  aria-label="Close hierarchy menu"
-                  className="fixed inset-0 z-40 bg-transparent pointer-events-auto focus:outline-none"
-                  onClick={closeHierarchy}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                />
-                <motion.div
-                  key="hierarchy-menu"
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="absolute right-0 top-full mt-2 w-64 bg-gray-900/95 backdrop-blur-xl border border-gray-700/50 rounded-lg shadow-2xl z-50 py-2"
-                >
-                  <button
-                    onClick={() => {
-                      navigate('/');
-                      closeHierarchy();
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        navigate('/');
-                        closeHierarchy();
-                      }
-                    }}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors focus:outline-none focus:bg-gray-800/60"
-                    aria-label="Open knowledge graph"
-                  >
-                    <Layers size={16} />
-                    <span>Knowledge Graph</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      navigate('/history');
-                      closeHierarchy();
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        navigate('/history');
-                        closeHierarchy();
-                      }
-                    }}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors focus:outline-none focus:bg-gray-800/60"
-                    aria-label="Open history graph"
-                  >
-                    <Network size={16} />
-                    <span>History Graph</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (activeId) {
-                        ipc.tabs.devtools(activeId).catch(console.error);
-                      }
-                      closeHierarchy();
-                    }}
-                    disabled={!activeId}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        if (activeId) {
-                          ipc.tabs.devtools(activeId).catch(console.error);
-                          closeHierarchy();
-                        }
-                      }
-                    }}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:bg-gray-800/60"
-                    aria-label="Open page structure in DevTools"
-                  >
-                    <Code size={16} />
-                    <span>Page Structure</span>
-                  </button>
-                  <div className="h-px bg-gray-700/50 my-1" />
-                  <button
-                    onClick={() => {
-                      navigate('/runs');
-                      closeHierarchy();
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        navigate('/runs');
-                        closeHierarchy();
-                      }
-                    }}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800/60 transition-colors focus:outline-none focus:bg-gray-800/60"
-                    aria-label="Open automation runs"
-                  >
-                    <Workflow size={16} />
-                    <span>Automation Runs</span>
-                  </button>
-                </motion.div>
-              </>
-            )}
-          </AnimatePresence>
-        </div>
-
-        {/* Camera/Screenshot Button */}
         <motion.button
-          onClick={handleScreenshot}
-          disabled={!activeId}
-          aria-label="Take screenshot"
-          aria-disabled={!activeId}
-          whileHover={{ scale: activeId ? 1.05 : 1 }}
-          whileTap={{ scale: activeId ? 0.95 : 1 }}
-          className={`p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
-            !activeId ? 'opacity-50 cursor-not-allowed' : ''
-          }`}
-          title="Screenshot (⌘⇧S)"
-        >
-          <Camera size={18} />
-        </motion.button>
-
-        {/* PIP Button */}
-        <motion.button
-          onClick={handlePIP}
-          disabled={!activeId}
-          aria-label="Enter picture-in-picture"
-          aria-disabled={!activeId}
-          whileHover={{ scale: activeId ? 1.05 : 1 }}
-          whileTap={{ scale: activeId ? 0.95 : 1 }}
-          className={`p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
-            !activeId ? 'opacity-50 cursor-not-allowed' : ''
-          }`}
-          title="Picture-in-Picture"
-        >
-          <PictureInPicture size={18} />
-        </motion.button>
-
-        {/* Find Button - Opens find in page */}
-        <motion.button
-          onClick={async () => {
-            if (!activeId) return;
-            try {
-              await ipc.tabs.find(activeId);
-            } catch (error) {
-              console.error('Failed to open find:', error);
-            }
+          onClick={() => {
+            navigate('/downloads');
           }}
-          disabled={!activeId}
-          aria-label="Find in page"
-          aria-disabled={!activeId}
-          whileHover={{ scale: activeId ? 1.05 : 1 }}
-          whileTap={{ scale: activeId ? 0.95 : 1 }}
-          className={`p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
-            !activeId ? 'opacity-50 cursor-not-allowed' : ''
-          }`}
-          title="Find in Page (⌘F / Ctrl+F)"
-        >
-          <Search size={18} />
-        </motion.button>
-
-        {/* DevTools Toggle Button */}
-        <motion.button
-          onClick={async () => {
-            if (!activeId) return;
-            try {
-              await ipc.tabs.devtools(activeId);
-            } catch (error) {
-              console.error('Failed to toggle DevTools:', error);
-            }
-          }}
-          disabled={!activeId}
-          aria-label="Toggle developer tools"
-          aria-disabled={!activeId}
-          whileHover={{ scale: activeId ? 1.05 : 1 }}
-          whileTap={{ scale: activeId ? 0.95 : 1 }}
-          className={`p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-blue-400 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${
-            !activeId ? 'opacity-50 cursor-not-allowed' : ''
-          }`}
-          title="Developer Tools (⌘⇧I / F12)"
-        >
-          <Code size={18} />
-        </motion.button>
-
-            {/* Download Button - Real-time count */}
-            <motion.button
-              onClick={() => {
-                navigate('/downloads');
-              }}
-              aria-label={`Downloads${downloadCount > 0 ? ` (${downloadCount} active)` : ''}`}
+          aria-label={`Downloads${downloadCount > 0 ? ` (${downloadCount} active)` : ''}`}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          className="relative p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
+          className="no-drag relative p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
           title={`Downloads${downloadCount > 0 ? ` (${downloadCount} active)` : ''}`}
         >
           <Download size={18} />
@@ -789,53 +786,22 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
             </motion.span>
           )}
         </motion.button>
-
-            {/* Watchers Button */}
-            <motion.button
-              onClick={() => {
-                navigate('/watchers');
-              }}
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          className="p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
-          title="Page watchers"
-        >
-          <Activity size={18} />
-        </motion.button>
-
-            {/* History Button */}
-            <motion.button
-              onClick={() => {
-                navigate('/history');
-              }}
-              aria-label="View history"
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          className="p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
-          title="History"
-        >
-          <History size={18} />
-        </motion.button>
-
-        {/* Settings Button */}
         <motion.button
           onClick={() => navigate('/settings')}
           aria-label="Open settings"
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          className="p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
+          className="no-drag p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-400 hover:text-gray-200 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
           title="Settings"
         >
           <Settings size={18} />
         </motion.button>
-
-        {/* Agent Console Button - With gradient and green dot */}
         <motion.button
           onClick={onAgentToggle}
           aria-label={`Agent console${agentActive ? ' (active)' : ''}`}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          className="relative p-2 rounded-lg bg-gradient-to-br from-purple-600/60 to-blue-600/60 hover:from-purple-600/80 hover:to-blue-600/80 border border-purple-500/30 text-white transition-all shadow-lg shadow-purple-500/20 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 focus:ring-offset-gray-900"
+          className="no-drag relative p-2 rounded-lg bg-gradient-to-br from-purple-600/60 to-blue-600/60 hover:from-purple-600/80 hover:to-blue-600/80 border border-purple-500/30 text-white transition-all shadow-lg shadow-purple-500/20 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 focus:ring-offset-gray-900"
           title="Agent Console (⌘⇧A)"
         >
           <Bot size={18} />

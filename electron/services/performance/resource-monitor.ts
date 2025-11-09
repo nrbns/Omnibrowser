@@ -1,6 +1,10 @@
 import os from 'node:os';
 import { BrowserWindow } from 'electron';
 import { getTabs } from '../tabs';
+import { applyEfficiencyPolicies } from './efficiency-manager';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('resource-monitor');
 
 const ALLOWED_PROJECTS = new Set(
   (process.env.ALLOWED_PROJECTS || 'omnibrowser,redix')
@@ -42,9 +46,9 @@ async function getProcessRamMb(): Promise<number> {
       const info = await process.getProcessMemoryInfo();
       return Math.round(info.private / 1024);
     } catch (error) {
-      if (process.env.NODE_ENV === 'development') {
-        console.warn('[resource-monitor] Failed to read process memory info', error);
-      }
+      logger.warn('Failed to read process memory info', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -79,18 +83,31 @@ async function pushTelemetry(): Promise<void> {
 
   const serialized = JSON.stringify(payload.rich);
   if (serialized === lastPayloadHash) {
+    applyEfficiencyPolicies({
+      batteryPct,
+      charging: batteryState.charging ?? null,
+      ramMb,
+      cpuLoad1,
+      activeTabs,
+    });
     return;
   }
 
   const baseUrl = process.env.MEMORY_BASE || process.env.REDIX_MEMORY_BASE;
   if (!baseUrl) {
-    if (process.env.NODE_ENV === 'development') {
-      console.warn('[resource-monitor] MEMORY_BASE not configured; telemetry skipped');
-    }
+    logger.warn('MEMORY_BASE not configured; telemetry skipped');
     return;
   }
 
   try {
+    applyEfficiencyPolicies({
+      batteryPct,
+      charging: batteryState.charging ?? null,
+      ramMb,
+      cpuLoad1,
+      activeTabs,
+    });
+
     const response = await fetch(`${baseUrl.replace(/\/$/, '')}/v1/memory.write`, {
       method: 'POST',
       headers: {
@@ -101,15 +118,18 @@ async function pushTelemetry(): Promise<void> {
       body: JSON.stringify(payload),
     });
 
-    if (!response.ok && process.env.NODE_ENV === 'development') {
-      console.warn('[resource-monitor] Telemetry write failed', response.status, await response.text());
+    if (!response.ok) {
+      logger.warn('Telemetry write failed', {
+        status: response.status,
+        body: await response.text(),
+      });
     }
 
     lastPayloadHash = serialized;
   } catch (error) {
-    if (process.env.NODE_ENV === 'development') {
-      console.warn('[resource-monitor] Telemetry push error', error);
-    }
+    logger.warn('Telemetry push error', {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
@@ -118,6 +138,7 @@ export function startResourceMonitor(): void {
     return;
   }
 
+  logger.info('Starting resource monitor', { intervalMs: Math.max(15_000, TELEMETRY_INTERVAL_MS) });
   monitorTimer = setInterval(() => {
     void pushTelemetry();
   }, Math.max(15_000, TELEMETRY_INTERVAL_MS));
@@ -129,5 +150,6 @@ export function stopResourceMonitor(): void {
   if (monitorTimer) {
     clearInterval(monitorTimer);
     monitorTimer = null;
+    logger.info('Resource monitor stopped');
   }
 }

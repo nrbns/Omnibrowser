@@ -204,6 +204,15 @@ export function SessionSwitcher() {
     }
   };
 
+  const isDefaultSession =
+    !activeSession ||
+    activeSession.id === 'default' ||
+    activeSession.name.toLowerCase() === 'default';
+
+  const showLabel = !isDefaultSession;
+
+  const buttonSpacing = showLabel ? 'gap-2 px-3' : 'gap-1.5 px-2.5';
+
   return (
     <div className="relative">
       {/* Session Button */}
@@ -211,20 +220,22 @@ export function SessionSwitcher() {
         onClick={() => setOpen(!open)}
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.95 }}
-        className="relative flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-300 hover:text-gray-100 transition-all"
+        className={`relative flex items-center ${buttonSpacing} py-1.5 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-300 hover:text-gray-100 transition-all`}
         title="Multi-Session Manager"
       >
         <User size={16} />
-        <span className="text-sm font-medium">
-          {activeSession?.name || 'Default'}
-        </span>
-        {activeSession?.color && (
+        {showLabel && (
+          <span className="text-sm font-medium">
+            {activeSession?.name || 'Default'}
+          </span>
+        )}
+        {!isDefaultSession && activeSession?.color && (
           <div
             className="w-3 h-3 rounded-full border border-gray-700"
             style={{ backgroundColor: activeSession.color }}
           />
         )}
-        {sessions.length > 1 && (
+        {showLabel && sessions.length > 1 && (
           <span className="text-xs text-gray-500">({sessions.length})</span>
         )}
       </motion.button>

@@ -3,7 +3,6 @@
  * Provides local LLM capabilities for agent intelligence
  */
 
-import { fetch } from 'undici';
 import { getCurrentSettings } from '../storage';
 
 export interface OllamaConfig {

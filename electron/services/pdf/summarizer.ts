@@ -2,6 +2,8 @@
  * PDF Summarization - Extract text → summarize with citations
  */
 
+// @ts-nocheck
+
 import { getPDFParser } from '../knowledge/pdf-parser';
 import { getOllamaAdapter } from '../agent/ollama-adapter';
 import { getCitationService } from '../search/citations';

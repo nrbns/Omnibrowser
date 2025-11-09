@@ -52,6 +52,28 @@ export function ContainerSwitcher() {
     }
   }, []);
 
+  const refreshPermissionState = useCallback(async (containerId: string) => {
+    const permissions = await fetchPermissions(containerId);
+    setPermissionState((prev) => ({
+      ...prev,
+      [containerId]: permissions,
+    }));
+  }, [fetchPermissions]);
+
+  const refreshSitePermissions = useCallback(async (containerId: string) => {
+    try {
+      const entries = await ipc.containers.getSitePermissions(containerId);
+      if (Array.isArray(entries)) {
+        setSitePermissionState((prev) => ({
+          ...prev,
+          [containerId]: entries as Array<{ permission: PermissionKey; origins: string[] }>,
+        }));
+      }
+    } catch (error) {
+      console.error('Failed to load site permissions:', error);
+    }
+  }, []);
+
   const loadContainers = useCallback(async () => {
     try {
       const [list, active] = await Promise.all([
@@ -103,28 +125,6 @@ export function ContainerSwitcher() {
     return () => {
       unsubscribeSite();
     };
-  }, []);
-
-  const refreshPermissionState = useCallback(async (containerId: string) => {
-    const permissions = await fetchPermissions(containerId);
-    setPermissionState((prev) => ({
-      ...prev,
-      [containerId]: permissions,
-    }));
-  }, [fetchPermissions]);
-
-  const refreshSitePermissions = useCallback(async (containerId: string) => {
-    try {
-      const entries = await ipc.containers.getSitePermissions(containerId);
-      if (Array.isArray(entries)) {
-        setSitePermissionState((prev) => ({
-          ...prev,
-          [containerId]: entries as Array<{ permission: PermissionKey; origins: string[] }>,
-        }));
-      }
-    } catch (error) {
-      console.error('Failed to load site permissions:', error);
-    }
   }, []);
 
   const handleSelect = async (container: ContainerInfo) => {
@@ -196,18 +196,29 @@ export function ContainerSwitcher() {
     }
   };
 
+  const isDefaultContainer =
+    !activeContainer ||
+    activeContainer.id === 'default' ||
+    activeContainer.name.toLowerCase() === 'default';
+
+  const showLabel = !isDefaultContainer;
+
+  const buttonSpacing = showLabel ? 'gap-2 px-3' : 'gap-1.5 px-2.5';
+
   return (
     <div className="relative">
       <motion.button
         onClick={() => setOpen(!open)}
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.95 }}
-        className="relative flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-300 hover:text-gray-100 transition-all"
+        className={`relative flex items-center ${buttonSpacing} py-1.5 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-300 hover:text-gray-100 transition-all`}
         title="Container (isolated storage)"
       >
         <Boxes size={16} />
-        <span className="text-sm font-medium">{activeContainer?.name || 'Default'}</span>
-        {activeContainer?.color && (
+        {showLabel && (
+          <span className="text-sm font-medium">{activeContainer?.name || 'Default'}</span>
+        )}
+        {!isDefaultContainer && activeContainer?.color && (
           <div
             className="w-3 h-3 rounded-full border border-gray-700"
             style={{ backgroundColor: activeContainer.color }}

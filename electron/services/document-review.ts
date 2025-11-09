@@ -5,7 +5,6 @@
 
 import { Readability } from '@mozilla/readability';
 import { JSDOM } from 'jsdom';
-import { fetch } from 'undici';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { registerHandler } from '../shared/ipc/router';

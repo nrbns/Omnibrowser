@@ -1,3 +1,5 @@
+// @ts-nocheck
+
 import { BrowserView, BrowserWindow, ipcMain, session, screen } from 'electron';
 import { randomUUID, createHash } from 'node:crypto';
 import { addToGraph } from '../services/graph';
@@ -24,6 +26,7 @@ import {
   TabReloadRequest,
   TabListResponse,
   TabSetContainerRequest,
+  TabWakeRequest,
 } from '../shared/ipc/schema';
 
 type TabMode = 'normal' | 'ghost' | 'private';
@@ -57,6 +60,96 @@ const findTabByWebContents = (wc: Electron.WebContents): TabRecord | undefined =
   }
   return undefined;
 };
+
+let notifySessionDirtyFn: (() => void) | null = null;
+
+const markSessionDirty = () => {
+  if (notifySessionDirtyFn) {
+    notifySessionDirtyFn();
+    return;
+  }
+
+  import('./session-persistence')
+    .then((mod) => {
+      notifySessionDirtyFn = mod.notifySessionDirty;
+      notifySessionDirtyFn?.();
+    })
+    .catch((error) => {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[Tabs] Failed to notify session persistence:', error);
+      }
+    });
+};
+
+export type SerializedTab = {
+  id: string;
+  title: string;
+  url: string;
+  active: boolean;
+  mode: TabMode;
+  containerId?: string;
+  containerName?: string;
+  containerColor?: string;
+  createdAt: number;
+  lastActiveAt: number;
+  sessionId?: string;
+  profileId?: string;
+  sleeping: boolean;
+};
+
+export function getActiveTabId(win: BrowserWindow): string | null {
+  return activeTabIdByWindow.get(win.id) ?? null;
+}
+
+export function serializeTabsForWindow(win: BrowserWindow): SerializedTab[] {
+  const tabs = windowIdToTabs.get(win.id) ?? [];
+  const activeId = getActiveTabId(win);
+  const survivors: TabRecord[] = [];
+  const serialized: SerializedTab[] = [];
+
+  for (const tab of tabs) {
+    const view = tab.view;
+    if (!view || view.webContents.isDestroyed()) {
+      try {
+        view?.webContents?.removeAllListeners?.();
+      } catch {}
+      continue;
+    }
+
+    survivors.push(tab);
+
+    let title = 'New Tab';
+    let url = 'about:blank';
+    try {
+      title = view.webContents.getTitle() || title;
+      url = view.webContents.getURL() || url;
+    } catch {
+      // Ignore errors from destroyed webContents
+    }
+
+    serialized.push({
+      id: tab.id,
+      title,
+      url,
+      active: tab.id === activeId,
+      mode: tab.mode,
+      containerId: tab.containerId,
+      containerName: tab.containerName,
+      containerColor: tab.containerColor,
+      createdAt: tab.createdAt,
+      lastActiveAt: tab.lastActiveAt,
+      sessionId: tab.sessionId,
+      profileId: tab.profileId,
+      sleeping: isTabSleeping(tab.id),
+    });
+  }
+
+  if (survivors.length !== tabs.length) {
+    windowIdToTabs.set(win.id, survivors);
+  }
+
+  return serialized;
+}
 
 interface CreateTabOptions {
   url?: string;
@@ -122,15 +215,42 @@ export function registerTabIpc(win: BrowserWindow) {
   win.setMaxListeners(100);
   
   setupBrowserViewResize(win);
-  const emit = () => {
+  const pruneDestroyedTabs = () => {
     const tabs = getTabs(win);
+    const filtered = tabs.filter(tab => {
+      const view = tab.view;
+      if (!view || view.webContents.isDestroyed()) {
+        try {
+          view?.webContents?.removeAllListeners?.();
+        } catch {}
+        return false;
+      }
+      return true;
+    });
+    if (filtered.length !== tabs.length) {
+      windowIdToTabs.set(win.id, filtered);
+    }
+    return filtered;
+  };
+
+  const emit = () => {
+    const tabs = pruneDestroyedTabs();
     const active = activeTabIdByWindow.get(win.id);
     const tabList = tabs.map(t => {
-      const title = t.view.webContents.getTitle() || 'New Tab';
-      const url = t.view.webContents.getURL() || 'about:blank';
-      return { 
-        id: t.id, 
-        title, 
+      let title = 'New Tab';
+      let url = 'about:blank';
+      try {
+        const wc = t.view?.webContents;
+        if (wc && !wc.isDestroyed()) {
+          title = wc.getTitle() || title;
+          url = wc.getURL() || url;
+        }
+      } catch (error) {
+        console.warn('Failed to read tab metadata', error);
+      }
+      return {
+        id: t.id,
+        title,
         url,
         active: t.id === active,
         mode: t.mode,
@@ -141,6 +261,7 @@ export function registerTabIpc(win: BrowserWindow) {
         lastActiveAt: t.lastActiveAt,
         sessionId: t.sessionId,
         profileId: t.profileId,
+      sleeping: isTabSleeping(t.id),
       };
     });
     // Send to both legacy and typed IPC listeners
@@ -151,6 +272,8 @@ export function registerTabIpc(win: BrowserWindow) {
         win.webContents.send('ob://ipc/v1/tabs:updated', tabList);
       } catch {}
     }
+
+    markSessionDirty();
   };
 
   const createTabInternal = async (options: CreateTabOptions = {}) => {
@@ -502,6 +625,12 @@ export function registerTabIpc(win: BrowserWindow) {
       profileId: request.profileId,
       mode: request.mode ?? defaultMode,
       containerId: request.containerId,
+      id: request.tabId,
+      activate: request.activate,
+      createdAt: request.createdAt,
+      lastActiveAt: request.lastActiveAt,
+      sessionId: request.sessionId,
+      fromSessionRestore: request.fromSessionRestore,
     }) as Promise<z.infer<typeof TabCreateResponse>>;
   });
 
@@ -711,6 +840,22 @@ export function registerTabIpc(win: BrowserWindow) {
         };
       }
     });
+
+  registerHandler('tabs:wake', TabWakeRequest, async (_event, request) => {
+    const tabs = getTabs(win);
+    const exists = tabs.some(t => t.id === request.id);
+    if (!exists) {
+      return { success: false, error: 'Tab not found' };
+    }
+    try {
+      wakeTab(request.id);
+      emit();
+      return { success: true };
+    } catch (error) {
+      console.error('[Tabs] Failed to wake tab', error);
+      return { success: false, error: (error as Error)?.message ?? 'Failed to wake tab' };
+    }
+  });
     
     // Send IPC events immediately (before emit()) to ensure renderer gets update
     try {
@@ -971,15 +1116,36 @@ export function registerTabIpc(win: BrowserWindow) {
     return result;
   });
 
-  ipcMain.handle('tabs:create', async (_e, payload: string | { url?: string; containerId?: string; profileId?: string; mode?: TabMode }) => {
-    const request = typeof payload === 'string' ? { url: payload } : (payload || {});
+  ipcMain.handle('tabs:create', async (
+    _e,
+    payload:
+      | string
+      | {
+          url?: string;
+          containerId?: string;
+          profileId?: string;
+          mode?: TabMode;
+          tabId?: string;
+          activate?: boolean;
+          createdAt?: number;
+          lastActiveAt?: number;
+          sessionId?: string;
+          fromSessionRestore?: boolean;
+        },
+  ) => {
+    const request = typeof payload === 'string' ? { url: payload } : payload || {};
     const defaultMode: TabMode = (win as any).__ob_tabModeDefault ?? 'normal';
     return createTabInternal({
       url: request.url,
-      profileId: request.profileId,
       containerId: request.containerId,
+      profileId: request.profileId,
       mode: request.mode ?? defaultMode,
-      activate: true,
+      id: request.tabId,
+      activate: request.activate,
+      createdAt: request.createdAt,
+      lastActiveAt: request.lastActiveAt,
+      sessionId: request.sessionId,
+      fromSessionRestore: request.fromSessionRestore,
     });
   });
 

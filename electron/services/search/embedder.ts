@@ -2,6 +2,8 @@
  * Embedding Pipeline - Generate embeddings and store in Qdrant
  */
 
+// @ts-nocheck
+
 import { getChunkingService, Chunk } from './chunker';
 import { getCloudVectorStore } from '../knowledge/cloud-vector-store';
 

@@ -1,7 +1,11 @@
-import { chromium } from 'playwright-core';
 import { cfg } from '../config';
+import { getPlaywrightChromium } from './utils/playwright';
 
 export async function paginateCollect(url: string, nextSelector: string, maxPages = 5) {
+  const chromium = getPlaywrightChromium();
+  if (!chromium) {
+    throw new Error('Playwright automation is not available in this build. Install "playwright-core" to enable pagination automation.');
+  }
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ userAgent: cfg.userAgent });
   const pages: string[] = [];

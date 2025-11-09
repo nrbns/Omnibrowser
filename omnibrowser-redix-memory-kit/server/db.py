@@ -1,10 +1,10 @@
 import json
+import logging
 import os
 from typing import Any
 
-from sqlalchemy import JSON, Column, DateTime, Engine, Float, MetaData, String, Table, create_engine
+from sqlalchemy import JSON, Column, DateTime, Engine, Float, MetaData, String, Table, create_engine, text
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
-from sqlalchemy.engine import Connection
 from sqlalchemy.exc import OperationalError
 
 from qdrant_client import QdrantClient
@@ -12,6 +12,8 @@ from qdrant_client.http import models as rest
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://redix:redix@localhost:5432/redix")
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+
+logger = logging.getLogger("redix.db")
 
 engine: Engine = create_engine(DATABASE_URL, future=True)
 metadata = MetaData()
@@ -62,19 +64,27 @@ def init() -> None:
 def insert_memory(**data: Any) -> None:
     payload = data.copy()
     embedding = payload.pop("embedding")
-    with engine.begin() as conn:
-        conn.execute(memories.insert().values(**payload, embedding=embedding))
+    try:
+        with engine.begin() as conn:
+            conn.execute(memories.insert().values(**payload, embedding=embedding))
+    except Exception as exc:
+        logger.exception("Failed to insert memory into Postgres", extra={"id": data.get("id"), "error": str(exc)})
+        raise
 
-    qdrant.upsert(
-        collection_name="memories",
-        points=[
-            rest.PointStruct(
-                id=data["id"],
-                vector=embedding,
-                payload=_serialize_payload(payload),
-            )
-        ],
-    )
+    try:
+        qdrant.upsert(
+            collection_name="memories",
+            points=[
+                rest.PointStruct(
+                    id=data["id"],
+                    vector=embedding,
+                    payload=_serialize_payload(payload),
+                )
+            ],
+        )
+    except Exception as exc:
+        logger.exception("Failed to upsert memory into Qdrant", extra={"id": data.get("id"), "error": str(exc)})
+        raise
 
 
 def vector_search(
@@ -92,13 +102,17 @@ def vector_search(
             rest.FieldCondition(key=key, match=rest.MatchValue(value=value))
         )
 
-    result = qdrant.search(
-        collection_name="memories",
-        query_vector=vector,
-        limit=top_k,
-        with_payload=True,
-        query_filter=rest.Filter(must=must_filters) if must_filters else None,
-    )
+    try:
+        result = qdrant.search(
+            collection_name="memories",
+            query_vector=vector,
+            limit=top_k,
+            with_payload=True,
+            query_filter=rest.Filter(must=must_filters) if must_filters else None,
+        )
+    except Exception as exc:
+        logger.exception("Vector search failed", extra={"error": str(exc)})
+        raise
 
     output: list[dict[str, Any]] = []
     for point in result:
@@ -114,6 +128,26 @@ def vector_search(
             item["payload"] = payload
         output.append(item)
     return output
+
+
+def check_health() -> dict[str, Any]:
+    status = {"database": "ok", "vector": "ok"}
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as exc:
+        status["database"] = "error"
+        status["database_error"] = str(exc)
+        logger.warning("Database health check failed", extra={"error": str(exc)})
+
+    try:
+        qdrant.get_collection("memories")
+    except Exception as exc:
+        status["vector"] = "error"
+        status["vector_error"] = str(exc)
+        logger.warning("Qdrant health check failed", extra={"error": str(exc)})
+
+    return status
 
 
 def _serialize_payload(data: dict[str, Any]) -> dict[str, Any]:

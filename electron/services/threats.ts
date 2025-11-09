@@ -1,6 +1,5 @@
 import { ipcMain } from 'electron';
 import crypto from 'node:crypto';
-import { fetch } from 'undici';
 
 export function registerThreatsIpc() {
   ipcMain.handle('threats:scanUrl', async (_e, url: string) => {

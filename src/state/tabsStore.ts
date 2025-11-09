@@ -13,6 +13,7 @@ export type Tab = {
   lastActiveAt?: number;
   sessionId?: string;
   profileId?: string;
+  sleeping?: boolean;
 };
 
 type TabsState = {

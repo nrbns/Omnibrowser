@@ -26,6 +26,12 @@ export const TabCreateRequest = z.object({
   profileId: z.string().optional(),
   containerId: z.string().optional(),
   mode: z.enum(['normal', 'ghost', 'private']).optional(),
+  tabId: z.string().optional(),
+  activate: z.boolean().optional(),
+  createdAt: z.number().optional(),
+  lastActiveAt: z.number().optional(),
+  sessionId: z.string().optional(),
+  fromSessionRestore: z.boolean().optional(),
 });
 
 export const TabCreateResponse = z.object({
@@ -40,6 +46,10 @@ export const TabCreateWithProfileRequest = z.object({
 export const TabSetContainerRequest = z.object({
   id: z.string(),
   containerId: z.string(),
+});
+
+export const TabWakeRequest = z.object({
+  id: z.string(),
 });
 
 export const OmniSuggestion = z.object({
@@ -105,6 +115,7 @@ export const TabListResponse = z.array(z.object({
   lastActiveAt: z.number().optional(),
   sessionId: z.string().optional(),
   profileId: z.string().optional(),
+  sleeping: z.boolean().optional(),
 }));
 // Container schemas
 export const ContainerSchema = z.object({
@@ -160,6 +171,7 @@ export const TabInfo = z.object({
   lastActiveAt: z.number().optional(),
   sessionId: z.string().optional(),
   profileId: z.string().optional(),
+  sleeping: z.boolean().optional(),
 });
 
 // Proxy schemas
@@ -330,9 +342,14 @@ export const ThreatScanResponse = z.object({
 
 // Research schemas
 export const ResearchExportRequest = z.object({
-  format: z.enum(['markdown', 'csv', 'json']),
-  sources: z.array(z.string().url()),
-  includeNotes: z.boolean().default(true),
+  format: z.enum(['markdown', 'obsidian', 'notion']),
+  sources: z.array(z.string()),
+  includeNotes: z.boolean().optional(),
+});
+
+export const ResearchStartRequest = z.object({
+  question: z.string().min(3),
+  mode: z.enum(['default', 'threat', 'trade']).optional(),
 });
 
 // Download schemas
@@ -371,6 +388,7 @@ export type Profile = z.infer<typeof Profile>;
 export type ThreatScanRequest = z.infer<typeof ThreatScanRequest>;
 export type ThreatScanResponse = z.infer<typeof ThreatScanResponse>;
 export type ResearchExportRequest = z.infer<typeof ResearchExportRequest>;
+export type ResearchStartRequest = z.infer<typeof ResearchStartRequest>;
 export type DownloadConsentRequest = z.infer<typeof DownloadConsentRequest>;
 export type DownloadRecord = z.infer<typeof DownloadRecord>;
 

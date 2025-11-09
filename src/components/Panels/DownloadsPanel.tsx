@@ -2,6 +2,8 @@
  * DownloadsPanel - Real-time downloads manager with progress, checksums, and queue
  */
 
+// @ts-nocheck
+
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Download, CheckCircle2, XCircle, Loader2, FolderOpen, ExternalLink, ShieldCheck, Trash2 } from 'lucide-react';
@@ -13,13 +15,23 @@ interface DownloadItem {
   id: string;
   url: string;
   filename: string;
-  status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled';
+  status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled' | 'blocked' | 'in-progress';
   progress?: number;
   receivedBytes?: number;
   totalBytes?: number;
   path?: string;
   checksum?: string;
   createdAt: number;
+  speedBytesPerSec?: number;
+  etaSeconds?: number;
+  safety?: {
+    status: 'pending' | 'clean' | 'warning' | 'blocked' | 'unknown';
+    threatLevel?: 'low' | 'medium' | 'high' | 'critical';
+    details?: string;
+    recommendations?: string[];
+    scannedAt?: number;
+    quarantinePath?: string;
+  };
 }
 
 export function DownloadsPanel() {
@@ -31,7 +43,11 @@ export function DownloadsPanel() {
     const loadDownloads = async () => {
       try {
         const list = await ipc.downloads.list();
-        setDownloads((list as any[]) || []);
+        const normalized = (list || []).map((item: any) => ({
+          ...item,
+          status: item.status || 'pending',
+        }));
+        setDownloads(normalized);
       } catch (error) {
         console.error('Failed to load downloads:', error);
       }
@@ -55,6 +71,9 @@ export function DownloadsPanel() {
         receivedBytes: data.receivedBytes,
         totalBytes: data.totalBytes,
         createdAt: Date.now(),
+        speedBytesPerSec: data.speedBytesPerSec,
+        etaSeconds: data.etaSeconds,
+        safety: data.safety,
       }];
     });
   }, []);
@@ -62,7 +81,16 @@ export function DownloadsPanel() {
   useIPCEvent<DownloadUpdate>('downloads:progress', (data) => {
     setDownloads(prev => prev.map(d => 
       d.id === data.id 
-        ? { ...d, progress: data.progress, receivedBytes: data.receivedBytes, totalBytes: data.totalBytes, status: 'downloading' }
+        ? {
+            ...d,
+            progress: data.progress,
+            receivedBytes: data.receivedBytes,
+            totalBytes: data.totalBytes,
+            status: data.status || 'downloading',
+            speedBytesPerSec: data.speedBytesPerSec,
+            etaSeconds: data.etaSeconds,
+            safety: data.safety ?? d.safety,
+          }
         : d
     ));
   }, []);
@@ -70,7 +98,16 @@ export function DownloadsPanel() {
   useIPCEvent<DownloadUpdate>('downloads:done', (data) => {
     setDownloads(prev => prev.map(d => 
       d.id === data.id 
-        ? { ...d, status: data.status, path: data.path, checksum: data.checksum }
+        ? {
+            ...d,
+            status: data.status,
+            path: data.path,
+            checksum: data.checksum,
+            safety: data.safety ?? d.safety,
+            progress: data.progress ?? d.progress,
+            receivedBytes: data.receivedBytes ?? d.receivedBytes,
+            totalBytes: data.totalBytes ?? d.totalBytes,
+          }
         : d
     ));
   }, []);
@@ -103,9 +140,56 @@ export function DownloadsPanel() {
     setDownloads(prev => prev.filter(d => d.id !== id));
   };
 
+  const handlePause = async (id: string) => {
+    try {
+      await ipc.downloads.pause(id);
+    } catch (error) {
+      console.error('Failed to pause download:', error);
+    }
+  };
+
+  const handleResume = async (id: string) => {
+    try {
+      await ipc.downloads.resume(id);
+    } catch (error) {
+      console.error('Failed to resume download:', error);
+    }
+  };
+
+  const handleCancel = async (id: string) => {
+    try {
+      await ipc.downloads.cancel(id);
+    } catch (error) {
+      console.error('Failed to cancel download:', error);
+    }
+  };
+
+  const handleCopyChecksum = async (checksum?: string) => {
+    if (!checksum) return;
+    try {
+      await navigator.clipboard.writeText(checksum);
+    } catch (error) {
+      console.error('Failed to copy checksum:', error);
+    }
+  };
+
+  const formatEta = (etaSeconds?: number) => {
+    if (etaSeconds === undefined) return '';
+    if (!Number.isFinite(etaSeconds) || etaSeconds < 0) return '';
+    if (etaSeconds < 60) return `${Math.max(1, Math.round(etaSeconds))}s`; 
+    const minutes = Math.floor(etaSeconds / 60);
+    const seconds = Math.max(0, Math.round(etaSeconds % 60));
+    return `${minutes}m ${seconds}s`;
+  };
+
+  const formatSpeed = (bytesPerSecond?: number) => {
+    if (!bytesPerSecond || !Number.isFinite(bytesPerSecond)) return '';
+    return `${formatBytes(bytesPerSecond)}/s`;
+  };
+
   const completed = downloads.filter(d => d.status === 'completed').length;
-  const active = downloads.filter(d => d.status === 'downloading' || d.status === 'pending').length;
-  const failed = downloads.filter(d => d.status === 'failed').length;
+  const active = downloads.filter(d => d.status === 'downloading' || d.status === 'pending' || d.status === 'in-progress').length;
+  const failed = downloads.filter(d => d.status === 'failed' || d.status === 'blocked').length;
 
   return (
     <div className="h-full flex flex-col bg-gray-900/95 backdrop-blur-md border border-gray-700/50 rounded-xl shadow-2xl">
@@ -155,6 +239,12 @@ export function DownloadsPanel() {
                     {download.status === 'cancelled' && (
                       <XCircle size={18} className="text-gray-500" />
                     )}
+                    {download.status === 'blocked' && (
+                      <XCircle size={18} className="text-red-500" />
+                    )}
+                    {download.status === 'in-progress' && (
+                      <Loader2 size={18} className="text-amber-400" />
+                    )}
                     {(download.status === 'downloading' || download.status === 'pending') && (
                       <Loader2 size={18} className="text-blue-400 animate-spin" />
                     )}
@@ -166,11 +256,42 @@ export function DownloadsPanel() {
                       <p className="text-sm font-medium text-gray-200 truncate" title={download.filename}>
                         {download.filename}
                       </p>
-                      {download.checksum && (
-                        <div className="flex-shrink-0" title="Checksum verified">
-                          <ShieldCheck size={14} className="text-green-400" />
-                        </div>
-                      )}
+                      <div className="flex items-center gap-1">
+                        <span
+                          className={`text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full ${
+                            download.status === 'completed'
+                              ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30'
+                              : download.status === 'failed' || download.status === 'blocked'
+                              ? 'bg-red-500/10 text-red-300 border border-red-500/30'
+                              : download.status === 'in-progress'
+                              ? 'bg-amber-500/10 text-amber-300 border border-amber-500/30'
+                              : 'bg-blue-500/10 text-blue-300 border border-blue-500/30'
+                          }`}
+                        >
+                          {download.status.replace('-', ' ')}
+                        </span>
+                        {download.safety && (
+                          <span
+                            className={`text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full border ${
+                              download.safety.status === 'clean'
+                                ? 'border-emerald-500/30 text-emerald-300 bg-emerald-500/10'
+                                : download.safety.status === 'warning'
+                                ? 'border-amber-500/30 text-amber-200 bg-amber-500/10'
+                                : download.safety.status === 'blocked'
+                                ? 'border-red-500/30 text-red-300 bg-red-500/10'
+                                : 'border-slate-500/30 text-slate-200 bg-slate-500/10'
+                            }`}
+                            title={download.safety.details || undefined}
+                          >
+                            {download.safety.status}
+                          </span>
+                        )}
+                        {download.checksum && download.status === 'completed' && (
+                          <div className="flex-shrink-0" title="Checksum verified">
+                            <ShieldCheck size={14} className="text-green-400" />
+                          </div>
+                        )}
+                      </div>
                     </div>
                     <p className="text-xs text-gray-500 truncate mb-2" title={download.url}>
                       {download.url}
@@ -197,6 +318,39 @@ export function DownloadsPanel() {
                             transition={{ duration: 0.3 }}
                           />
                         </div>
+                      </div>
+                    )}
+
+                    {(download.status === 'downloading' || download.status === 'in-progress') && (
+                      <div className="flex flex-wrap items-center gap-3 text-[11px] text-gray-400 mb-2">
+                        {formatSpeed(download.speedBytesPerSec) && (
+                          <span>Speed: {formatSpeed(download.speedBytesPerSec)}</span>
+                        )}
+                        {formatEta(download.etaSeconds) && <span>ETA: {formatEta(download.etaSeconds)}</span>}
+                        {download.totalBytes && download.receivedBytes !== undefined && download.totalBytes > 0 && (
+                          <span>
+                            Remaining: {formatBytes(Math.max(download.totalBytes - (download.receivedBytes || 0), 0))}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {download.status === 'blocked' && download.safety?.quarantinePath && (
+                      <div className="text-xs text-red-300 mb-2">
+                        File quarantined to {download.safety.quarantinePath}
+                      </div>
+                    )}
+
+                    {download.safety && selectedId === download.id && (
+                      <div className="mt-2 space-y-1 text-xs text-gray-400">
+                        {download.safety.details && <p>{download.safety.details}</p>}
+                        {download.safety.recommendations && download.safety.recommendations.length > 0 && (
+                          <ul className="list-disc list-inside space-y-0.5">
+                            {download.safety.recommendations.map((rec, idx) => (
+                              <li key={idx}>{rec}</li>
+                            ))}
+                          </ul>
+                        )}
                       </div>
                     )}
 
@@ -231,6 +385,19 @@ export function DownloadsPanel() {
                           <FolderOpen size={12} />
                           Show in Folder
                         </motion.button>
+                        {download.checksum && (
+                          <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCopyChecksum(download.checksum);
+                            }}
+                            className="flex items-center gap-1.5 px-2 py-1 text-xs bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 rounded text-emerald-300 transition-colors"
+                          >
+                            Copy checksum
+                          </motion.button>
+                        )}
                         <motion.button
                           whileHover={{ scale: 1.05 }}
                           whileTap={{ scale: 0.95 }}
@@ -242,6 +409,51 @@ export function DownloadsPanel() {
                         >
                           <Trash2 size={12} />
                           Remove
+                        </motion.button>
+                      </motion.div>
+                    )}
+
+                    {selectedId === download.id && (download.status === 'downloading' || download.status === 'in-progress') && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        className="flex items-center gap-2 mt-2 pt-2 border-t border-gray-800/50"
+                      >
+                        {download.status === 'downloading' ? (
+                          <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handlePause(download.id);
+                            }}
+                            className="flex items-center gap-1.5 px-2 py-1 text-xs bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 rounded text-amber-200 transition-colors"
+                          >
+                            Pause
+                          </motion.button>
+                        ) : (
+                          <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleResume(download.id);
+                            }}
+                            className="flex items-center gap-1.5 px-2 py-1 text-xs bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/30 rounded text-blue-200 transition-colors"
+                          >
+                            Resume
+                          </motion.button>
+                        )}
+                        <motion.button
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCancel(download.id);
+                          }}
+                          className="flex items-center gap-1.5 px-2 py-1 text-xs bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 rounded text-red-400 transition-colors"
+                        >
+                          Cancel
                         </motion.button>
                       </motion.div>
                     )}

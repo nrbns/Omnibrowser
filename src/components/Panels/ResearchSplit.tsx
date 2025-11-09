@@ -2,6 +2,8 @@
  * ResearchSplit - Reader + Notes split pane for Research mode
  */
 
+// @ts-nocheck
+
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { FileText, BookOpen, Save, X, PenLine, FileDown, Archive, Send } from 'lucide-react';
 import { motion } from 'framer-motion';

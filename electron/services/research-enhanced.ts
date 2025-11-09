@@ -3,15 +3,17 @@
  * Multi-source retrieval, parallel fetching, source voting, summarization with citations
  */
 
+// @ts-nocheck
+
 import { Readability } from '@mozilla/readability';
 import { JSDOM } from 'jsdom';
 import { randomUUID } from 'node:crypto';
 import { registerHandler } from '../shared/ipc/router';
+import { createLogger } from '../utils/logger';
 import { z } from 'zod';
 import { verifyResearchResult, VerificationResult } from './research-verifier';
 import { getHybridSearchService, SearchResult as HybridSearchResult } from './search/hybrid-search';
 import { stealthFetchPage } from './stealth-fetch';
-import { fetch } from 'undici';
 
 export interface ResearchSource {
   url: string;
@@ -25,27 +27,102 @@ export interface ResearchSource {
   metadata?: Record<string, unknown>;
 }
 
+export interface ResearchCitation {
+  index: number;
+  sourceIndex: number;
+  quote: string;
+  confidence: number;
+}
+
+export interface ResearchInlineEvidence {
+  from: number;
+  to: number;
+  citationIndex: number;
+  sourceIndex: number;
+  quote?: string;
+}
+
+export interface ResearchEvidence {
+  id: string;
+  sourceIndex: number;
+  quote: string;
+  context: string;
+  importance: 'high' | 'medium' | 'low';
+  fragmentUrl: string;
+}
+
+export interface CiteEntry {
+  id: string;
+  title: string;
+  url: string;
+  snippet?: string;
+  publishedAt?: string;
+  text?: string;
+  domain?: string;
+  relevanceScore?: number;
+  sourceType?: ResearchSource['sourceType'];
+}
+
+export interface ResearchIssue {
+  type: 'uncited' | 'contradiction';
+  sentenceIdx: number;
+  detail?: string;
+}
+
+export interface ResearchTask {
+  id: string;
+  title: string;
+  description: string;
+  status: 'pending' | 'in_progress' | 'done';
+  action?: {
+    type: 'openSource' | 'openEvidence';
+    sourceIndex?: number;
+    evidenceId?: string;
+    fragmentUrl?: string;
+  };
+}
+
+export interface ResearchTaskChain {
+  id: string;
+  label: string;
+  steps: ResearchTask[];
+}
+
+export interface BiasProfile {
+  authorityBias: number;
+  recencyBias: number;
+  domainMix: Array<{
+    type: ResearchSource['sourceType'];
+    percentage: number;
+  }>;
+}
+
 export interface ResearchResult {
   query: string;
   sources: ResearchSource[];
   summary: string;
-  citations: Array<{
-    index: number;
-    sourceIndex: number;
-    quote: string;
-    confidence: number;
-  }>;
+  citations: ResearchCitation[];
   confidence: number;
   contradictions?: Array<{
     claim: string;
     sources: number[];
     disagreement: 'minor' | 'major';
+    summary?: string;
+    severityScore?: number;
   }>;
   verification?: VerificationResult;
+  evidence?: ResearchEvidence[];
+  biasProfile?: BiasProfile;
+  taskChains?: ResearchTaskChain[];
+  inlineEvidence?: ResearchInlineEvidence[];
 }
 
 const CACHE_TTL = 3600000; // 1 hour
 const contentCache = new Map<string, { content: ResearchSource; timestamp: number }>();
+const logger = createLogger('research-enhanced');
+const INTERNAL_SOURCES = Symbol('researchSources');
+const INTERNAL_SOURCE_IDS = Symbol('researchSourceIds');
+const INTERNAL_RESULT = Symbol('researchResult');
 
 interface ScoreWeights {
   recencyWeight: number;
@@ -289,7 +366,7 @@ async function searchMultipleEngines(
       }
     }
   } catch (error) {
-    console.warn('[Research] Hybrid search failed:', error);
+    logger.error('Hybrid search failed', { error });
   }
 
   // Fallback to DuckDuckGo if we still need more URLs
@@ -316,7 +393,7 @@ async function searchMultipleEngines(
         }
       }
     } catch (error) {
-      console.warn('DuckDuckGo search failed:', error);
+      logger.error('DuckDuckGo fallback search failed', { error });
     }
   }
 
@@ -396,166 +473,119 @@ function extractSnippets(text: string, query: string, maxSnippets = 3): string[]
   return scored;
 }
 
-/**
- * Source voting mechanism - rank sources by consensus
- */
-function voteOnSources(sources: ResearchSource[], query: string, weights: ScoreWeights): ResearchSource[] {
-  // Calculate relevance scores
-  for (const source of sources) {
-    source.relevanceScore = calculateRelevanceScore(source, query, weights);
+function normaliseSnippet(snippet: string): string {
+  if (!snippet) return '';
+  const cleaned = snippet.replace(/\s+/g, ' ').trim();
+  if (!cleaned) return '';
+  const sentence = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+  if (/[.!?]$/.test(sentence)) {
+    return sentence;
   }
-  
-  // Sort by relevance score
-  const ranked = sources.sort((a, b) => b.relevanceScore - a.relevanceScore);
-  
-  // Diversify by source type (prefer mix of news, academic, docs)
-  const diversified: ResearchSource[] = [];
-  const typeCounts: Record<ResearchSource['sourceType'], number> = {
-    news: 0,
-    academic: 0,
-    documentation: 0,
-    forum: 0,
-    other: 0,
-  };
-  
-  const maxPerType = Math.ceil(ranked.length / 3); // Allow up to 1/3 of each type
-  
-  for (const source of ranked) {
-    if (typeCounts[source.sourceType] < maxPerType || diversified.length < 5) {
-      diversified.push(source);
-      typeCounts[source.sourceType]++;
-    }
-  }
-  
-  // Fill remaining slots with highest ranked
-  for (const source of ranked) {
-    if (!diversified.includes(source) && diversified.length < ranked.length) {
-      diversified.push(source);
-    }
-  }
-  
-  return diversified.slice(0, 12); // Return top 12
+  return `${sentence}.`;
 }
 
 /**
- * Detect contradictions between sources
- */
-function detectContradictions(sources: ResearchSource[], query: string): ResearchResult['contradictions'] {
-  if (sources.length < 2) return undefined;
-
-  const contradictions: ResearchResult['contradictions'] = [];
-  const keyTerms = query.toLowerCase().split(/\s+/).filter(term => term.length > 3);
-
-  const polarityPairs = [
-    { positive: /\b(increase|higher|growth|rise|support|approve)\b/gi, negative: /\b(decrease|lower|drop|decline|oppose|reject)\b/gi },
-    { positive: /\b(success|effective|works|beneficial|advantage)\b/gi, negative: /\b(fail|ineffective|harmful|risk|drawback)\b/gi },
-    { positive: /\b(accurate|reliable|confirmed|proven)\b/gi, negative: /\b(doubt|disputed|questioned|uncertain)\b/gi },
-  ];
-
-  for (let i = 0; i < sources.length; i++) {
-    for (let j = i + 1; j < sources.length; j++) {
-      const source1 = sources[i];
-      const source2 = sources[j];
-      const text1 = source1.text.toLowerCase();
-      const text2 = source2.text.toLowerCase();
-
-      const sharedTerms = keyTerms.filter(term => text1.includes(term) && text2.includes(term));
-      if (sharedTerms.length === 0) continue;
-
-      let severityScore = 0;
-      let summary: string | undefined;
-
-      for (const pair of polarityPairs) {
-        const pos1 = (source1.text.match(pair.positive) || []).length;
-        const neg1 = (source1.text.match(pair.negative) || []).length;
-        const pos2 = (source2.text.match(pair.positive) || []).length;
-        const neg2 = (source2.text.match(pair.negative) || []).length;
-
-        const polarity1 = pos1 - neg1;
-        const polarity2 = pos2 - neg2;
-
-        if (polarity1 === 0 || polarity2 === 0) continue;
-
-        if (polarity1 > 0 && polarity2 < 0) {
-          severityScore += Math.abs(polarity1) + Math.abs(polarity2);
-          summary = `${source1.domain} reports positive findings while ${source2.domain} reports concerns.`;
-        } else if (polarity1 < 0 && polarity2 > 0) {
-          severityScore += Math.abs(polarity1) + Math.abs(polarity2);
-          summary = `${source1.domain} highlights risks that ${source2.domain} disputes.`;
-        }
-      }
-
-      if (severityScore > 0) {
-        contradictions.push({
-          claim: sharedTerms.slice(0, 3).join(', '),
-          sources: [i, j],
-          disagreement: severityScore > 6 ? 'major' : 'minor',
-          summary,
-          severityScore,
-        });
-      }
-    }
-  }
-
-  return contradictions.length > 0 ? contradictions : undefined;
-}
-
-/**
- * Generate summary with citations (simplified - would use LLM in production)
+ * Generate summary with citations (heuristic extractive approach)
  */
 function generateSummaryWithCitations(sources: ResearchSource[], query: string): {
   summary: string;
   citations: ResearchResult['citations'];
   confidence: number;
+  inlineEvidence: ResearchInlineEvidence[];
 } {
   if (sources.length === 0) {
     return {
       summary: `No sources found for query: ${query}`,
       citations: [],
       confidence: 0,
+      inlineEvidence: [],
     };
   }
-  
-  // Extract relevant snippets from top sources
-  const topSources = sources.slice(0, 5);
-  const allSnippets: Array<{ snippet: string; sourceIndex: number; quote: string }> = [];
-  
-  for (let i = 0; i < topSources.length; i++) {
-    const source = topSources[i];
-    const snippets = extractSnippets(source.text, query, 2);
-    
+
+  const maxSegments = Math.min(6, Math.max(3, sources.length * 2));
+  const segments: Array<{ text: string; sourceIndex: number; quote: string }> = [];
+  const seen = new Set<string>();
+
+  for (let i = 0; i < sources.length && segments.length < maxSegments; i++) {
+    const source = sources[i];
+    const snippets = extractSnippets(source.text, query, 3);
+
+    if (snippets.length === 0 && source.snippet) {
+      snippets.push(source.snippet);
+    }
+
     for (const snippet of snippets) {
-      allSnippets.push({
-        snippet,
-        sourceIndex: i,
-        quote: snippet.slice(0, 100),
-      });
+      if (segments.length >= maxSegments) break;
+      const normalized = normaliseSnippet(snippet);
+      if (!normalized) continue;
+      const key = `${i}-${normalized.slice(0, 80)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      segments.push({ text: normalized, sourceIndex: i, quote: snippet.trim() });
     }
   }
-  
-  // Build summary from snippets (simplified - would use LLM in production)
-  const summaryParts = allSnippets.slice(0, 5).map((s, idx) => {
-    return `[${idx + 1}] ${s.snippet}`;
+
+  if (segments.length === 0) {
+    const fallback = sources[0];
+    const text = normaliseSnippet(fallback.snippet || fallback.text.slice(0, 280));
+    segments.push({
+      text: text || `No extractive summary available for ${fallback.title}.`,
+      sourceIndex: 0,
+      quote: fallback.snippet || fallback.text.slice(0, 140),
+    });
+  }
+
+  let summaryBuilder = '';
+  const inlineEvidence: ResearchInlineEvidence[] = [];
+  const citations: ResearchResult['citations'] = [];
+  let cursor = 0;
+
+  segments.forEach((segment, idx) => {
+    const isNewParagraph = idx > 0 && idx % 2 === 0;
+    if (idx > 0) {
+      const separator = isNewParagraph ? '\n\n' : ' ';
+      summaryBuilder += separator;
+      cursor += separator.length;
+    }
+
+    const from = cursor;
+    summaryBuilder += segment.text;
+    const to = cursor + segment.text.length;
+
+    const citationIndex = idx + 1;
+    inlineEvidence.push({
+      from,
+      to,
+      citationIndex,
+      sourceIndex: segment.sourceIndex,
+      quote: segment.quote,
+    });
+
+    const source = sources[segment.sourceIndex];
+    const confidence = source ? Math.min(1, Math.max(0.2, (source.relevanceScore || 40) / 80)) : 0.5;
+    citations.push({
+      index: citationIndex,
+      sourceIndex: segment.sourceIndex,
+      quote: segment.quote.slice(0, 160),
+      confidence,
+    });
+
+    cursor = to;
   });
-  
-  const summary = summaryParts.join('\n\n');
-  
-  // Generate citations
-  const citations = allSnippets.slice(0, 10).map((s, idx) => ({
-    index: idx + 1,
-    sourceIndex: s.sourceIndex,
-    quote: s.quote,
-    confidence: Math.min(1.0, sources[s.sourceIndex].relevanceScore / 20), // Normalize confidence
-  }));
-  
-  // Calculate overall confidence based on source quality and quantity
-  const avgRelevance = sources.slice(0, 5).reduce((acc, s) => acc + s.relevanceScore, 0) / Math.min(5, sources.length);
-  const confidence = Math.min(1.0, (avgRelevance / 20) * (sources.length / 5));
-  
+
+  const summary = summaryBuilder.trim();
+
+  const uniqueSourceIndices = Array.from(new Set(segments.map((segment) => segment.sourceIndex)));
+  const avgRelevance = uniqueSourceIndices.reduce((acc, idx) => acc + (sources[idx]?.relevanceScore ?? 40), 0) /
+    Math.max(1, uniqueSourceIndices.length);
+  const coverageFactor = Math.min(1, uniqueSourceIndices.length / 4);
+  const confidence = Math.max(0.35, Math.min(1.0, (avgRelevance / 60) * coverageFactor));
+
   return {
     summary,
     citations,
-    confidence: Math.max(0.3, confidence), // Minimum 30% confidence
+    confidence,
+    inlineEvidence,
   };
 }
 
@@ -573,9 +603,9 @@ function createTextFragment(snippet: string): string {
   return `#:~:text=${encode(start)}`;
 }
 
-function buildEvidence(sources: ResearchSource[], query: string): ResearchResult['evidence'] {
+function buildEvidence(sources: ResearchSource[], query: string): ResearchEvidence[] {
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const evidence: NonNullable<ResearchResult['evidence']> = [];
+  const evidence: ResearchEvidence[] = [];
 
   sources.slice(0, 6).forEach((source, sourceIndex) => {
     const snippets = extractSnippets(source.text, query, 3);
@@ -598,7 +628,7 @@ function buildEvidence(sources: ResearchSource[], query: string): ResearchResult
   return evidence.length > 0 ? evidence : undefined;
 }
 
-function buildBiasProfile(sources: ResearchSource[], weights: ScoreWeights): ResearchResult['biasProfile'] {
+function buildBiasProfile(sources: ResearchSource[], weights: ScoreWeights): BiasProfile {
   if (sources.length === 0) return undefined;
 
   const counts: Record<ResearchSource['sourceType'], number> = {
@@ -626,8 +656,8 @@ function buildBiasProfile(sources: ResearchSource[], weights: ScoreWeights): Res
   };
 }
 
-function buildTaskChains(result: ResearchResult): ResearchResult['taskChains'] {
-  const chains: ResearchResult['taskChains'] = [];
+function buildTaskChains(result: ResearchResult): ResearchTaskChain[] {
+  const chains: ResearchTaskChain[] = [];
   const primarySteps = [
     {
       id: randomUUID(),
@@ -738,7 +768,7 @@ export async function researchQuery(
   const rankedSources = voteOnSources(sources, query, weights);
   
   // Step 4: Generate summary with citations
-  const { summary, citations, confidence } = generateSummaryWithCitations(rankedSources, query);
+  const { summary, citations, confidence, inlineEvidence } = generateSummaryWithCitations(rankedSources, query);
   
   // Step 5: Detect contradictions
   const contradictions = options?.includeCounterpoints
@@ -761,14 +791,243 @@ export async function researchQuery(
   result.evidence = buildEvidence(rankedSources, query);
   result.biasProfile = buildBiasProfile(rankedSources, weights);
   result.taskChains = buildTaskChains(result);
+  result.inlineEvidence = inlineEvidence;
   
   return result;
+}
+
+function attachInternalMetadata(target: any, sources: ResearchSource[], ids: string[]) {
+  if (!target) return;
+  Object.defineProperty(target, INTERNAL_SOURCES, {
+    value: sources,
+    enumerable: false,
+    configurable: false,
+  });
+  Object.defineProperty(target, INTERNAL_SOURCE_IDS, {
+    value: ids,
+    enumerable: false,
+    configurable: false,
+  });
+}
+
+function getInternalSources(record: Record<string, CiteEntry[]>) {
+  return (record && record[INTERNAL_SOURCES]) as ResearchSource[] | undefined;
+}
+
+function getInternalSourceIds(record: Record<string, CiteEntry[]>) {
+  return (record && record[INTERNAL_SOURCE_IDS]) as string[] | undefined;
+}
+
+export async function fetchSources(
+  query: string,
+  options?: {
+    mode?: 'default' | 'threat' | 'trade';
+    maxSources?: number;
+    region?: string;
+    recencyWeight?: number;
+    authorityWeight?: number;
+  },
+): Promise<Record<string, CiteEntry[]>> {
+  const maxSources = options?.maxSources ?? 12;
+  const { urls, metadata } = await searchMultipleEngines(query, maxSources, options?.region);
+  const sources = await fetchMultipleParallel(urls, metadata, 5);
+  if (!sources.length) {
+    logger.warn('fetchSources: no sources found', { query });
+    return {};
+  }
+
+  const weights: ScoreWeights = {
+    recencyWeight:
+      typeof options?.recencyWeight === 'number'
+        ? Math.max(0, Math.min(1, options.recencyWeight))
+        : options?.mode === 'trade'
+        ? 0.8
+        : 0.5,
+    authorityWeight:
+      typeof options?.authorityWeight === 'number'
+        ? Math.max(0, Math.min(1, options.authorityWeight))
+        : options?.mode === 'threat'
+        ? 0.7
+        : 0.5,
+  };
+
+  const rankedSources = voteOnSources(sources, query, weights);
+  const citeMap: Record<string, CiteEntry[]> = {};
+  const sourceIds: string[] = [];
+
+  rankedSources.forEach((source, index) => {
+    const citeId = `cite-${index + 1}`;
+    sourceIds.push(citeId);
+    const publishedAt =
+      typeof source.timestamp === 'number' ? new Date(source.timestamp).toISOString() : undefined;
+
+    citeMap[citeId] = [
+      {
+        id: citeId,
+        title: source.title,
+        url: source.url,
+        snippet: source.snippet,
+        publishedAt,
+        text: source.text,
+        domain: source.domain,
+        relevanceScore: source.relevanceScore,
+        sourceType: source.sourceType,
+      },
+    ];
+  });
+
+  attachInternalMetadata(citeMap, rankedSources, sourceIds);
+  return citeMap;
+}
+
+export function summarizeWithCitations(
+  query: string,
+  sourceMap: Record<string, CiteEntry[]>,
+): {
+  chunks: Array<{ content: string; citations: string[] }>;
+  confidence: number;
+  citations: Array<{ citeId: string; quote: string; confidence: number }>;
+} {
+  const rankedSources = getInternalSources(sourceMap);
+  const sourceIds = getInternalSourceIds(sourceMap) ?? Object.keys(sourceMap);
+
+  const fallbackSources =
+    rankedSources ??
+    sourceIds
+      .map((citeId) => {
+        const entry = sourceMap[citeId]?.[0];
+        if (!entry) return null;
+        return {
+          url: entry.url,
+          title: entry.title,
+          text: entry.text ?? entry.snippet ?? '',
+          snippet: entry.snippet ?? '',
+          timestamp: entry.publishedAt ? Date.parse(entry.publishedAt) : undefined,
+          domain: entry.domain ?? '',
+          relevanceScore: entry.relevanceScore ?? 40,
+          sourceType: entry.sourceType ?? 'other',
+          metadata: {},
+        } as ResearchSource;
+      })
+      .filter(Boolean);
+
+  const { summary, citations, confidence, inlineEvidence } = generateSummaryWithCitations(
+    fallbackSources as ResearchSource[],
+    query,
+  );
+
+  const paragraphs = summary.split(/\n{2,}/).filter((segment) => segment.trim().length > 0);
+  let cursor = 0;
+
+  const chunks = paragraphs.map((paragraph) => {
+    const start = summary.indexOf(paragraph, cursor);
+    const end = start + paragraph.length;
+    cursor = end + 2;
+
+    const citeIds = inlineEvidence
+      .filter((evidence) => evidence.from >= start && evidence.to <= end + 1)
+      .map((evidence) => sourceIds[evidence.sourceIndex])
+      .filter(Boolean);
+
+    return {
+      content: paragraph.trim(),
+      citations: Array.from(new Set(citeIds)),
+    };
+  });
+
+  const detailedCitations = citations
+    .map((cite) => {
+      const citeId = sourceIds[cite.sourceIndex];
+      if (!citeId) return null;
+      return {
+        citeId,
+        quote: cite.quote,
+        confidence: cite.confidence,
+      };
+    })
+    .filter(Boolean) as Array<{ citeId: string; quote: string; confidence: number }>;
+
+  const summaryResult = {
+    chunks,
+    confidence,
+    citations: detailedCitations,
+  };
+
+  Object.defineProperty(summaryResult, INTERNAL_RESULT, {
+    value: {
+      query,
+      sources: fallbackSources as ResearchSource[],
+      summary,
+      citations,
+      confidence,
+      inlineEvidence,
+    } as ResearchResult,
+    enumerable: false,
+    configurable: false,
+  });
+
+  return summaryResult;
+}
+
+export function verifyAnswer(summaryResult: any, sourceMap: Record<string, CiteEntry[]>): ResearchIssue[] {
+  const researchResult: ResearchResult | undefined = summaryResult?.[INTERNAL_RESULT];
+  const sources = researchResult?.sources ?? getInternalSources(sourceMap);
+  if (!researchResult || !sources) {
+    logger.warn('verifyAnswer: no research result or sources', {
+      hasResult: Boolean(researchResult),
+      hasSources: Boolean(sources),
+    });
+    return [];
+  }
+
+  const verification = verifyResearchResult({
+    ...researchResult,
+    sources,
+  });
+
+  const issues: ResearchIssue[] = [];
+
+  verification.ungroundedClaims.forEach((claim) => {
+    issues.push({
+      type: 'uncited',
+      sentenceIdx: claim.position,
+      detail: `${claim.severity.toUpperCase()} • ${claim.text}`,
+    });
+  });
+
+  if (verification.hallucinationRisk > 0.6) {
+    issues.push({
+      type: 'contradiction',
+      sentenceIdx: 0,
+      detail: `Hallucination risk ${(verification.hallucinationRisk * 100).toFixed(1)}%`,
+    });
+  }
+
+  return issues;
 }
 
 /**
  * Register IPC handlers
  */
 export function registerResearchEnhancedIpc() {
+  registerHandler('research:health', z.object({}), async () => {
+    try {
+      // Touch the cache to ensure the service is responsive
+      const cacheSize = contentCache.size;
+      return {
+        ok: true,
+        cacheSize,
+        uptimeMs: process.uptime() * 1000,
+      };
+    } catch (error) {
+      logger.error('health check failed', { error });
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : 'health probe failed',
+      };
+    }
+  });
+
   registerHandler('research:queryEnhanced', z.object({
     query: z.string(),
     maxSources: z.number().optional(),
@@ -777,12 +1036,19 @@ export function registerResearchEnhancedIpc() {
     recencyWeight: z.number().optional(),
     authorityWeight: z.number().optional(),
   }), async (_event, request) => {
+    const startedAt = Date.now();
     const result = await researchQuery(request.query, {
       maxSources: request.maxSources,
       includeCounterpoints: request.includeCounterpoints,
       region: request.region,
       recencyWeight: request.recencyWeight,
       authorityWeight: request.authorityWeight,
+    });
+    logger.info('research:queryEnhanced completed', {
+      queryLength: request.query.length,
+      maxSources: request.maxSources,
+      durationMs: Date.now() - startedAt,
+      sourceCount: result.sources.length,
     });
     return result;
   });

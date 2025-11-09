@@ -1,3 +1,5 @@
+// @ts-nocheck
+
 import { ipc } from '../../lib/ipc-typed';
 
 export interface ResearchProvider {

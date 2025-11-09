@@ -4,7 +4,6 @@ import { JSDOM } from 'jsdom';
 import { registerHandler } from '../shared/ipc/router';
 import { z } from 'zod';
 import { stealthFetchPage } from './stealth-fetch';
-import { fetch } from 'undici';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
@@ -498,4 +497,7 @@ export function registerResearchIpc() {
 
     return { success: true, format: 'notion' as const, notionPages };
   });
+
+  // registerResearchPipelineIpc(); // Temporarily disabled
+  registerConsentIpc();
 }

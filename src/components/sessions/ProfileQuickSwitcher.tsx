@@ -191,26 +191,39 @@ export function ProfileQuickSwitcher() {
     }
   };
 
+  const isDefaultProfile =
+    !activeProfile ||
+    activeProfile.id === 'default' ||
+    activeProfile.name.toLowerCase() === 'default';
+
+  const showLabel = !isDefaultProfile;
+
+  const buttonSpacing = showLabel ? 'gap-2 px-3' : 'gap-1.5 px-2.5';
+
   return (
     <div className="relative">
       <motion.button
         onClick={() => setOpen((v) => !v)}
         whileHover={{ scale: 1.03 }}
         whileTap={{ scale: 0.97 }}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-300 hover:text-gray-100 transition-all"
+        className={`flex items-center ${buttonSpacing} py-1.5 rounded-lg bg-gray-800/60 hover:bg-gray-800/80 border border-gray-700/50 text-gray-300 hover:text-gray-100 transition-all`}
         title={activeProfile ? `${activeProfile.name} profile` : 'Profiles'}
       >
         {(() => {
           const Icon = activeProfile ? getProfileIcon(activeProfile) : UserCircle;
           return <Icon size={16} />;
         })()}
-        <span className="text-sm font-medium">
-          {activeProfile ? activeProfile.name : 'Profiles'}
-        </span>
-        <span
-          className="inline-flex h-2.5 w-2.5 rounded-full border border-gray-900/40"
-          style={{ backgroundColor: activeProfile ? profileAccent(activeProfile) : '#3b82f6' }}
-        />
+        {showLabel && (
+          <span className="text-sm font-medium">
+            {activeProfile ? activeProfile.name : 'Profiles'}
+          </span>
+        )}
+        {!isDefaultProfile && activeProfile && (
+          <span
+            className="inline-flex h-2.5 w-2.5 rounded-full border border-gray-900/40"
+            style={{ backgroundColor: profileAccent(activeProfile) }}
+          />
+        )}
         {loading && <Loader2 size={14} className="animate-spin text-gray-400" />}
       </motion.button>
 

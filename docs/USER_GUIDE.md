@@ -1,127 +1,108 @@
----
-title: OmniBrowser User Guide
-description: How to work with Research Mode, Document Review, and Container Profiles.
----
+# OmniBrowser User Guide (Privacy & Consent Edition)
 
-# OmniBrowser User Guide
+_Updated: 2025-11-08_
 
-Welcome! This guide walks you through the three core workflows that make OmniBrowser unique:
-
-1. **Research Mode** – aggregate evidence, produce answers with citations, and monitor contradictions.
-2. **Document Review Mode** – ingest reports/contracts and surface highlights, assumptions, and audit trails.
-3. **Container Profiles (“Containers++”)** – isolate workspaces, permissions, and storage between contexts.
-
-Each section covers common tasks, real-time features, and tips for getting the most out of the UI.
+This guide complements the Consent Ledger Tour and focuses on privacy settings users can configure after installation. It will expand to cover research, document review, and agent workflows as Phase A tasks land.
 
 ---
 
-## 1. Research Mode
+## 1. Quick Start
 
-### Launching a session
-1. Open the mode switcher in the top navigation bar and choose **Research**.
-2. Use the large query box to enter any question or comparison prompt  
-   e.g. `Compare claims about Mediterranean diet heart benefits`.
-3. Optional controls:
-   - **Recency vs Authority** slider balances fresh sources against high-trust domains.
-   - **Include counterpoints** surfaces deliberate disagreements.
-   - **Region** scopes results to a geography (Global by default).
-4. Click **Run research** or press <kbd>Enter</kbd>.
+After installation:
 
-### Reading the answer
-- The answer card highlights key paragraphs with inline citations and confidence scores.
-- Click a citation badge (`[1]`, `[2]`, etc.) to preview the source in the sidebar or open it in your active tab.
-- Hover states show container-color badges (e.g., Work, Personal) so you know which partition will open the link.
-
-### Evidence and contradictions
-- **Live-page evidence** lists text snippets with “View on page” buttons that jump to anchored fragments.
-- **Contradictions radar** groups conflicting claims and lets you open the sources that disagree.
-- The right sidebar mirrors confidence, top evidence, bias snapshot, and follow-up tasks.
-
-### Tips & shortcuts
-- Press <kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>K</kbd> and type “Open … in Work” to send any query directly into a container.
-- Use the **Task chains** section to keep track of manually verified steps (mark tasks done as you complete them).
+1. Run through the [Consent Ledger Tour](consent-ledger-tour.md).
+2. Open **Settings → Privacy & Consent** to pick a preset (Strict, Balanced, Relaxed).
+3. Verify your profile (Work, Personal, Custom) in the top navigation bar.
 
 ---
 
-## 2. Document Review Mode
+## 2. Privacy Controls
 
-### Ingesting documents
-1. Switch to **Docs** via the mode selector.
-2. Choose **Upload / Paste URL** on the left sidebar:
-   - Upload PDF/DOCX files.
-   - Paste a public URL (OmniBrowser fetches via stealth container to avoid contaminating your main session).
-3. Provide an optional title/tag for quick retrieval, then click **Ingest**.
+### 2.1 Privacy Presets
 
-### Reviewing insights
-- The middle pane shows the structured document with inline highlights:
-  - **Fact highlights** (color-coded) for claims worth attention.
-  - **Assumptions** list implicit statements the system detected.
-  - **Entity graph** visualizes actors, organizations, relationships.
-  - **Timeline** gives chronological markers with quick jump links.
-- Hover over highlights to reveal AI annotations; click to anchor the original location.
+| Preset | Description | Default Behaviors |
+|--------|-------------|-------------------|
+| **Strict** | Maximum privacy, minimal automation. | Blocks all cloud AI calls, disallows downloads without prompt, disables screenshots, wipes storage on exit. |
+| **Balanced** | Recommended for research workflows. | Allows local AI, prompts for cloud fallback, enables downloads with ledger entries, retains history for 7 days. |
+| **Relaxed** | Convenience-oriented. | Allows cloud AI, enables auto-downloads, keeps history indefinitely, telemetry opt-in prompt on first run. |
 
-### Audit trail & actions
-- The right panel records sources pulled, checks performed, and suggestions (e.g., “Confirm balance sheet totals against appendix”).
-- Use **Export** menu (top right) to generate Markdown, JSON, or send structured summaries to Notion/Obsidian.
-- If you need to re-run a check under a different container, choose **Move to container** from the tab context menu before opening external links.
+Presets are starting points—you can override individual toggles.
 
-### Best practices
-- Keep sensitive contracts in a dedicated **Container** (e.g., “Legal”) to isolate cookies and storage.
-- Track review progress by marking checklist items directly in the audit trail.
+### 2.2 Consent Ledger Settings
 
----
+- **Auto-expire consents:** Choose expiry windows (24h, 7d, 30d).  
+- **Risk thresholds:** Set minimum risk that requires manual confirmation.  
+- **Export/Delete:** Export ledger as JSON for audits; delete to reset tour and prompts.
 
-## 3. Container Profiles (Containers++)
+### 2.3 Container Permissions
 
-### Understanding containers
-- Containers isolate cookies, local storage, permissions, and fingerprinting signals.
-- Built-in profiles: **Default**, **Work**, **Personal**, **Stealth** (ephemeral).
-- Custom containers can be created via the **Container switcher**.
+Open **Tools → Containers** to manage per-container permissions:
 
-### Managing containers
-1. Open the switcher in the top nav and pick a container or create a new one.
-2. Configure per-container permissions (camera, screen capture, notifications, fullscreen).
-3. Review granted origins—remove or revoke site-specific permissions as needed.
-
-### Assigning tabs to containers
-- Right-click any tab to open the context menu and choose **Move to container** → target profile.
-- Tabs adopt the new partition and storage immediately; the UI highlights the active container badge.
-- Duplicate tabs, open in ghost/private, or burn tabs from the same menu (actions obey profile policies).
-
-### Privacy tips
-- Run AI research in **Stealth** or a bespoke “AI Research” container to avoid polluting main sessions.
-- Use different containers for vendor portals vs. personal accounts to prevent cookie leakage.
-- Policies at the profile level can disable downloads, screenshots, ghost/private tabs, or clipping where required.
+- Toggle `media`, `display-capture`, `notifications`, `fullscreen`.  
+- View per-site overrides and revoke origins individually.
 
 ---
 
-## 4. Frequently Asked Questions
+## 3. Profiles & Policy Locks
 
-### How do I trust the citations?
-- Every sentence in Research Mode links to its supporting source. Click the badge to jump to the exact evidence (using text fragments when available).
-- The **Verification summary** lists ungrounded claims and hallucination risk so you can escalate manual checks if needed.
+Profiles (Work, Personal, Custom) govern:
 
-### Can I export my findings?
-- **Research Mode**: use the sidebar’s **Copy answer** button or export markdown via the command palette (`Export research` command).
-- **Document Review**: exports include Markdown, JSON, and Notion/Obsidian integrations.
+- **Policy Locks:** Whether private windows / ghost tabs / screenshots are allowed.  
+- **Default Containers:** The container assigned to new tabs in that profile.  
+- **Proxy Settings:** Each profile can have distinct proxy/VPN configs.
 
-### How do I recover a session after a crash?
-- OmniBrowser autosaves every 2 seconds and stores full window/tab state. Choose **Session bundles** or the session switcher to restore a snapshot.
+Profile switches live next to the session switcher in the top navigation bar. If a policy blocks an action, a toast appears with a “Learn more” link to the ledger.
 
 ---
 
-## 5. Quick Reference
+## 4. Telemetry & Diagnostics
 
-| Action | Shortcut / Location |
-| --- | --- |
-| Open Command Palette | <kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>K</kbd> |
-| Move tab to container | Tab context menu → “Move to container” |
-| Toggle Research counterpoints | Research controls (top of answer pane) |
-| Ingest new document | Docs mode sidebar → “Upload / Paste URL” |
-| Export research summary | Command palette (`Export research`) or copy button |
+- **Telemetry Toggle:** Located under **Settings → Diagnostics**. Opt-in only; sends aggregated, anonymized metrics.  
+- **Open Logs Folder:** Available from error boundaries, the diagnostics panel, and the quick actions menu.  
+- **Copy Diagnostics:** Captures recent log snippets and system info for support requests.
 
 ---
 
-Need deeper workflow help or want to contribute improvements? Reach out via the project README or open an issue in the OmniBrowser repo. Happy researching! 👋
+## 5. Managing Downloads
 
+Visit the Downloads panel (Top Nav → Tools → Downloads):
+
+- Real-time status, safety badges (`Clean`, `Warning`, `Blocked`).  
+- Pausing/resuming downloads updates the ledger with reasons.  
+- Blocked downloads remain quarantined until you dismiss or restore.
+
+Downloads obey profile policies—if a profile disallows downloads, a consent-block toast appears.
+
+---
+
+## 6. Research Mode & Containers (Preview)
+
+Research mode now displays container badges and allows container-aware summary exports. Future updates will document:
+
+- Tab split view / peek preview (Phase A).  
+- Hibernation indicators for sleeping tabs (Phase A).  
+- Accessibility improvements and dark/light theme toggles (Phase A).
+
+---
+
+## 7. Resetting OmniBrowser
+
+If you need to reset the environment:
+
+1. Use **Tools → Consent Ledger → Reset ledger**.  
+2. Clear profiles under **Settings → Profiles**.  
+3. Delete local app data directories (see platform-specific paths in the installation guide).  
+4. Relaunch the app; the first-launch tour will reappear.
+
+---
+
+## 8. Feedback
+
+While the docs are evolving, please report gaps or confusing flows via:
+
+- GitHub Discussions (Beta Feedback)  
+- Discord (link to be announced)  
+- Email support (once Phase A onboarding tasks finish)
+
+We’ll expand this guide to cover Research Mode, Document Review, Containers++, and diagnostics workflows as those features stabilize.
 

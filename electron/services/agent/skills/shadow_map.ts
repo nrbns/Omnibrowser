@@ -1,12 +1,16 @@
 import { registry } from './registry';
-import { chromium } from 'playwright-core';
 import { cfg } from '../../../config';
+import { getPlaywrightChromium } from '../../utils/playwright';
 
 function getSelectorJS(){
   return `function getSel(el){if(el.id)return '#'+el.id;const p=el.parentElement; if(!p) return el.tagName.toLowerCase(); const idx=[...p.children].indexOf(el)+1; return getSel(p)+'>'+el.tagName.toLowerCase()+':nth-child('+idx+')';}`;
 }
 
 registry.register('shadow_map', async (_ctx, { url }: { url: string }) => {
+  const chromium = getPlaywrightChromium();
+  if (!chromium) {
+    throw new Error('Playwright automation is not available in this build. Install "playwright-core" to enable shadow_map.');
+  }
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ userAgent: cfg.userAgent });
   try {

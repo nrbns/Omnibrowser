@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from typing import Any
@@ -9,6 +10,7 @@ import redis
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 STREAM_KEY = os.getenv("EMBED_STREAM", "memory:queue")
 
+logger = logging.getLogger("redix.queue")
 _redis_client = redis.Redis.from_url(REDIS_URL)
 
 
@@ -40,5 +42,24 @@ def enqueue_memory(data: dict[str, Any]) -> None:
         "created_at": payload["created_at"],
     }
 
-    _redis_client.xadd(STREAM_KEY, fields)
+    try:
+        _redis_client.xadd(STREAM_KEY, fields)
+        logger.info(
+            "Enqueued memory",
+            extra={
+                "id": payload["id"],
+                "project": payload["project"],
+                "tenant_id": payload["tenant_id"],
+            },
+        )
+    except redis.RedisError as exc:
+        logger.exception(
+            "Failed to enqueue memory",
+            extra={
+                "id": payload.get("id"),
+                "project": payload.get("project"),
+                "error": str(exc),
+            },
+        )
+        raise
 

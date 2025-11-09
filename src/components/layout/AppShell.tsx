@@ -2,14 +2,16 @@
  * AppShell - Main layout container with all components wired
  */
 
-import React, { useState, useEffect, Suspense } from 'react';
-import { AlertTriangle } from 'lucide-react';
+import React, { useState, useEffect, Suspense, useMemo } from 'react';
+import { AlertTriangle, RotateCcw, Loader2 } from 'lucide-react';
 import { Outlet } from 'react-router-dom';
 import { PermissionRequest, ConsentRequest, ipcEvents } from '../../lib/ipc-events';
 import { useIPCEvent } from '../../lib/use-ipc-event';
 import { useTabsStore } from '../../state/tabsStore';
 import { ipc } from '../../lib/ipc-typed';
 import { ResearchHighlight } from '../../types/research';
+import { Portal } from '../common/Portal';
+import { formatDistanceToNow } from 'date-fns';
 
 type ErrorBoundaryState = {
   hasError: boolean;
@@ -39,7 +41,7 @@ class ErrorBoundary extends React.Component<
       error,
       errorInfo,
     );
-    this.setState({ error, errorInfo: errorInfo.componentStack });
+    this.setState({ error, errorInfo: errorInfo.componentStack ?? undefined });
   }
 
   private handleReload = () => {
@@ -195,6 +197,56 @@ export function AppShell() {
   const [readerActive, setReaderActive] = useState(false);
   const tabsState = useTabsStore();
   const activeTab = tabsState.tabs.find(tab => tab.id === tabsState.activeId);
+  const overlayActive =
+    commandPaletteOpen ||
+    Boolean(permissionRequest) ||
+    Boolean(consentRequest) ||
+    clipperActive ||
+    readerActive;
+  const [restoreSummary, setRestoreSummary] = useState<{ updatedAt: number; windowCount: number; tabCount: number } | null>(null);
+  const [restoreDismissed, setRestoreDismissed] = useState(false);
+  const [restoreStatus, setRestoreStatus] = useState<'idle' | 'restoring'>('idle');
+  const [restoreToast, setRestoreToast] = useState<{ message: string; variant: 'success' | 'error' } | null>(null);
+  const restoreRelativeTime = useMemo(() => {
+    if (!restoreSummary) return null;
+    try {
+      return formatDistanceToNow(new Date(restoreSummary.updatedAt), { addSuffix: true });
+    } catch {
+      return null;
+    }
+  }, [restoreSummary]);
+
+  useEffect(() => {
+    if (restoreDismissed) return;
+    let cancelled = false;
+    ipc.sessionState
+      .summary()
+      .then((res) => {
+        if (cancelled) return;
+        const summary = res?.summary;
+        if (summary && summary.tabCount > 0) {
+          setRestoreSummary(summary);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRestoreSummary(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [restoreDismissed]);
+
+  useEffect(() => {
+    if (!restoreToast) return;
+    const timeoutId = window.setTimeout(() => {
+      setRestoreToast(null);
+    }, 6000);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [restoreToast]);
 
   // Listen for permission requests
   useIPCEvent<PermissionRequest>('permissions:request', (request) => {
@@ -369,34 +421,119 @@ export function AppShell() {
     }
   };
 
+  const handleRestoreSession = async () => {
+    if (!restoreSummary || restoreStatus === 'restoring') return;
+    setRestoreStatus('restoring');
+    try {
+      const result = await ipc.sessionState.restore();
+      if (result?.restored) {
+        const restoredCount = result.tabCount ?? restoreSummary.tabCount ?? 0;
+        setRestoreToast({
+          message: `Restored ${restoredCount} tab${restoredCount === 1 ? '' : 's'} from last session.`,
+          variant: 'success',
+        });
+        setRestoreSummary(null);
+        setRestoreDismissed(true);
+      } else if (result?.error) {
+        setRestoreToast({
+          message: `Restore failed: ${result.error}`,
+          variant: 'error',
+        });
+      } else {
+        setRestoreToast({
+          message: 'No saved session snapshot available to restore.',
+          variant: 'error',
+        });
+      }
+    } catch (error) {
+      console.error('Failed to restore session snapshot:', error);
+      setRestoreToast({
+        message: 'Failed to restore session snapshot.',
+        variant: 'error',
+      });
+    } finally {
+      setRestoreStatus('idle');
+    }
+  };
+
+  const handleDismissRestore = () => {
+    setRestoreDismissed(true);
+    setRestoreSummary(null);
+  };
+
   return (
-    <div className="flex flex-col h-screen bg-[#1A1D28] text-gray-100 overflow-hidden relative">
+    <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-[#1A1D28] text-gray-100">
       {/* Top Navigation - Hidden in fullscreen */}
       {!isFullscreen && (
-        <Suspense fallback={<div style={{ height: '40px', backgroundColor: '#0f172a' }} />}>
-          <ErrorBoundary componentName="TopNav" fallback={<div style={{ height: '40px', backgroundColor: '#0f172a', padding: '8px', color: '#94a3b8' }}>Navigation Error</div>}>
-            <TopNav 
-              onAgentToggle={() => setRightPanelOpen(!rightPanelOpen)}
-              onCommandPalette={() => setCommandPaletteOpen(true)}
-              onClipperToggle={() => {
-                if (tabsState.activeId) {
-                  setClipperActive(true);
-                }
-              }}
-              onReaderToggle={() => {
-                if (tabsState.activeId) {
-                  setReaderActive(true);
-                }
-              }}
-            />
-          </ErrorBoundary>
-        </Suspense>
+        <div className="flex-none">
+          <Suspense fallback={<div style={{ height: '40px', backgroundColor: '#0f172a' }} />}>
+            <ErrorBoundary
+              componentName="TopNav"
+              fallback={
+                <div style={{ height: '40px', backgroundColor: '#0f172a', padding: '8px', color: '#94a3b8' }}>
+                  Navigation Error
+                </div>
+              }
+            >
+              <TopNav
+                onAgentToggle={() => setRightPanelOpen(!rightPanelOpen)}
+                onCommandPalette={() => setCommandPaletteOpen(true)}
+                onClipperToggle={() => {
+                  if (tabsState.activeId) {
+                    setClipperActive(true);
+                  }
+                }}
+                onReaderToggle={() => {
+                  if (tabsState.activeId) {
+                    setReaderActive(true);
+                  }
+                }}
+              />
+            </ErrorBoundary>
+          </Suspense>
+        </div>
       )}
 
       {/* Main Layout - Full Width (No Sidebar) */}
-      <div className="flex flex-1 overflow-hidden w-full">
+      <div className="flex flex-1 min-h-0 w-full overflow-hidden">
         {/* Center Content - Full Width */}
-        <div className="flex flex-col flex-1 overflow-hidden w-full">
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          {!isFullscreen && restoreSummary && !restoreDismissed && (
+            <div className="px-4 pt-3">
+              <div className="flex flex-col gap-3 rounded-xl border border-blue-500/40 bg-blue-500/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-blue-100">Restore your last browsing session?</p>
+                  <p className="text-xs text-blue-200">
+                    Last saved {restoreRelativeTime ?? 'recently'} • {restoreSummary.windowCount} window
+                    {restoreSummary.windowCount === 1 ? '' : 's'}, {restoreSummary.tabCount} tab
+                    {restoreSummary.tabCount === 1 ? '' : 's'}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleRestoreSession}
+                    disabled={restoreStatus === 'restoring'}
+                    className="inline-flex items-center rounded-lg border border-blue-500/60 bg-blue-600/20 px-3 py-1.5 text-sm font-medium text-blue-100 transition-colors hover:bg-blue-600/30 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {restoreStatus === 'restoring' ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RotateCcw className="mr-2 h-4 w-4" />
+                    )}
+                    Restore
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDismissRestore}
+                    className="rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-sm text-slate-300 transition-colors hover:bg-slate-700/80"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           {/* Tab Strip - Hidden in fullscreen */}
           {!isFullscreen && (
         <Suspense fallback={null}>
@@ -407,8 +544,10 @@ export function AppShell() {
           )}
 
           {/* Route Content - Full Width */}
-          <div className={`flex-1 overflow-hidden relative w-full ${isFullscreen ? 'absolute inset-0' : ''}`}>
-            <Outlet />
+          <div className={`relative flex-1 min-h-0 min-w-0 overflow-hidden ${isFullscreen ? 'absolute inset-0' : ''}`}>
+            <div className={`h-full min-h-0 overflow-auto ${overlayActive ? 'webview--masked' : ''}`}>
+              <Outlet />
+            </div>
           </div>
         </div>
 
@@ -416,10 +555,12 @@ export function AppShell() {
         {!isFullscreen && (
         <Suspense fallback={null}>
           <ErrorBoundary componentName="RightPanel">
-            <RightPanel 
-              open={rightPanelOpen}
-              onClose={() => setRightPanelOpen(false)}
-            />
+            <div className="h-full min-h-0 w-[340px] max-w-[380px] overflow-y-auto border-l border-slate-800/60">
+              <RightPanel 
+                open={rightPanelOpen}
+                onClose={() => setRightPanelOpen(false)}
+              />
+            </div>
           </ErrorBoundary>
         </Suspense>
         )}
@@ -427,70 +568,99 @@ export function AppShell() {
 
       {/* Bottom Status Bar - Hidden in fullscreen */}
       {!isFullscreen && (
-      <Suspense fallback={null}>
-        <ErrorBoundary componentName="BottomStatus">
-          <BottomStatus />
-        </ErrorBoundary>
-      </Suspense>
+        <div className="flex-none">
+          <Suspense fallback={null}>
+            <ErrorBoundary componentName="BottomStatus">
+              <BottomStatus />
+            </ErrorBoundary>
+          </Suspense>
+        </div>
       )}
 
       {/* Agent Overlay */}
       <Suspense fallback={null}>
-        <ErrorBoundary componentName="AgentOverlay">
-          <AgentOverlay />
-        </ErrorBoundary>
+        <Portal>
+          <ErrorBoundary componentName="AgentOverlay">
+            <AgentOverlay />
+          </ErrorBoundary>
+        </Portal>
       </Suspense>
 
       <Suspense fallback={null}>
-        <ErrorBoundary componentName="ClipperOverlay">
-          <ClipperOverlay
-            active={clipperActive}
-            onCancel={() => setClipperActive(false)}
-            onCreateHighlight={handleCreateHighlight}
-          />
-        </ErrorBoundary>
+        <Portal>
+          <ErrorBoundary componentName="ClipperOverlay">
+            <ClipperOverlay
+              active={clipperActive}
+              onCancel={() => setClipperActive(false)}
+              onCreateHighlight={handleCreateHighlight}
+            />
+          </ErrorBoundary>
+        </Portal>
       </Suspense>
 
       <Suspense fallback={null}>
-        <ErrorBoundary componentName="ReaderOverlay">
-          <ReaderOverlay
-            active={readerActive}
-            onClose={() => setReaderActive(false)}
-            tabId={tabsState.activeId}
-            url={activeTab?.url}
-          />
-        </ErrorBoundary>
+        <Portal>
+          <ErrorBoundary componentName="ReaderOverlay">
+            <ReaderOverlay
+              active={readerActive}
+              onClose={() => setReaderActive(false)}
+              tabId={tabsState.activeId}
+              url={activeTab?.url}
+            />
+          </ErrorBoundary>
+        </Portal>
       </Suspense>
 
       {/* Overlays */}
       {commandPaletteOpen && (
         <Suspense fallback={null}>
-          <ErrorBoundary componentName="CommandPalette">
-            <CommandPalette onClose={() => setCommandPaletteOpen(false)} />
-          </ErrorBoundary>
+          <Portal>
+            <ErrorBoundary componentName="CommandPalette">
+              <CommandPalette onClose={() => setCommandPaletteOpen(false)} />
+            </ErrorBoundary>
+          </Portal>
         </Suspense>
       )}
 
       {permissionRequest && (
         <Suspense fallback={null}>
-          <ErrorBoundary componentName="PermissionPrompt">
-            <PermissionPrompt 
-              request={permissionRequest}
-              onClose={() => setPermissionRequest(null)}
-            />
-          </ErrorBoundary>
+          <Portal>
+            <ErrorBoundary componentName="PermissionPrompt">
+              <PermissionPrompt 
+                request={permissionRequest}
+                onClose={() => setPermissionRequest(null)}
+              />
+            </ErrorBoundary>
+          </Portal>
         </Suspense>
       )}
 
       {consentRequest && (
         <Suspense fallback={null}>
-          <ErrorBoundary componentName="ConsentPrompt">
-            <ConsentPrompt 
-              request={consentRequest}
-              onClose={() => setConsentRequest(null)}
-            />
-          </ErrorBoundary>
+          <Portal>
+            <ErrorBoundary componentName="ConsentPrompt">
+              <ConsentPrompt 
+                request={consentRequest}
+                onClose={() => setConsentRequest(null)}
+              />
+            </ErrorBoundary>
+          </Portal>
         </Suspense>
+      )}
+      {restoreToast && (
+        <Portal>
+          <div className="fixed bottom-6 right-6 z-50">
+            <div
+              className={`rounded-xl border px-4 py-3 text-sm shadow-xl shadow-black/40 ${
+                restoreToast.variant === 'success'
+                  ? 'border-emerald-400/40 bg-emerald-500/15 text-emerald-100'
+                  : 'border-amber-400/40 bg-amber-500/15 text-amber-100'
+              }`}
+            >
+              {restoreToast.message}
+            </div>
+          </div>
+        </Portal>
       )}
     </div>
   );

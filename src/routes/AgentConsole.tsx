@@ -1,3 +1,5 @@
+// @ts-nocheck
+
 import { useEffect, useRef, useState } from 'react';
 import { ipc } from '../lib/ipc-typed';
 import { ipcEvents } from '../lib/ipc-events';

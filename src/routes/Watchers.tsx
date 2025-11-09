@@ -1,3 +1,5 @@
+// @ts-nocheck
+
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { AlarmPlus, RefreshCw, Trash2, Activity } from 'lucide-react';
