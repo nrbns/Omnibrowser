@@ -18,5 +18,14 @@ export const isDevEnv = (): boolean => {
 };
 
 export const isElectronRuntime = (): boolean => {
-  return typeof window !== 'undefined' && Boolean((window as any).electron);
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  const maybeIpc = (window as any).ipc;
+  if (maybeIpc && typeof maybeIpc.invoke === 'function') {
+    return true;
+  }
+
+  return Boolean((window as any).electron);
 };

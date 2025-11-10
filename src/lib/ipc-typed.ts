@@ -8,12 +8,84 @@
 import { z } from 'zod';
 import { ResearchResult } from '../types/research';
 import type { PrivacyAuditSummary } from './ipc-events';
-import { getEnvVar, isDevEnv } from './env';
+import { getEnvVar, isDevEnv, isElectronRuntime } from './env';
 import type { EcoImpactForecast } from '../types/ecoImpact';
 import type { TrustSummary } from '../types/trustWeaver';
 import type { NexusListResponse, NexusPluginEntry } from '../types/extensionNexus';
 
 const IS_DEV = isDevEnv();
+
+const DEFAULT_PROFILE_POLICY = Object.freeze({
+  allowDownloads: true,
+  allowPrivateWindows: true,
+  allowGhostTabs: true,
+  allowScreenshots: true,
+  allowClipping: true,
+});
+
+const createDefaultProfile = () => ({
+  id: 'default',
+  name: 'Default',
+  createdAt: Date.now(),
+  proxy: undefined,
+  kind: 'default' as const,
+  color: '#3b82f6',
+  system: true,
+  policy: { ...DEFAULT_PROFILE_POLICY },
+  description: 'Fallback profile (IPC unavailable)',
+});
+
+const FALLBACK_CHANNELS: Record<string, () => unknown> = {
+  'profiles:list': () => [createDefaultProfile()],
+  'profiles:get': () => createDefaultProfile(),
+  'profiles:getActive': () => createDefaultProfile(),
+  'profiles:getPolicy': () => ({ ...DEFAULT_PROFILE_POLICY }),
+  'profiles:updateProxy': () => ({ success: false }),
+  'profiles:delete': () => ({ success: false }),
+  'sessions:list': () => [],
+  'sessions:getActive': () => null,
+  'workspace-v2:list': () => ({ workspaces: [] }),
+  'privacy:sentinel:audit': () => ({
+    score: 0,
+    grade: 'low',
+    trackers: [],
+    thirdPartyHosts: [],
+    message: 'Privacy Sentinel unavailable outside Electron runtime.',
+    suggestions: ['Launch the desktop build to enable Privacy Sentinel audits.'],
+    timestamp: Date.now(),
+    ai: null,
+  }),
+  'tor:status': () => ({
+    running: false,
+    bootstrapped: false,
+    progress: 0,
+    circuitEstablished: false,
+    stub: true,
+    error: 'Tor runtime not available in this environment.',
+  }),
+  'tor:start': () => ({ success: false, stub: true, warning: 'Tor runtime not available in this environment.' }),
+  'tor:stop': () => ({ success: true, stub: true }),
+  'tor:newIdentity': () => ({ success: false, stub: true }),
+  'vpn:status': () => ({ connected: false, stub: true }),
+  'vpn:check': () => ({ connected: false, stub: true }),
+  'dns:status': () => ({ enabled: false, provider: 'system', stub: true }),
+  'tabs:predictiveGroups': () => ({ groups: [], prefetch: [], summary: undefined }),
+};
+
+const reportedMissingChannels = new Set<string>();
+
+function getFallback<T>(channel: string): T | undefined {
+  const factory = FALLBACK_CHANNELS[channel];
+  if (!factory) return undefined;
+  return factory() as T;
+}
+
+function noteFallback(channel: string, reason: string) {
+  if (!IS_DEV) return;
+  if (reportedMissingChannels.has(channel)) return;
+  reportedMissingChannels.add(channel);
+  console.warn(`[IPC] Channel ${channel} unavailable (${reason}); using renderer fallback.`);
+}
 
 type IPCResponse<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -124,23 +196,36 @@ export async function ipcCall<TRequest, TResponse = unknown>(
   schema?: z.ZodSchema<TResponse>
 ): Promise<TResponse> {
   const fullChannel = `ob://ipc/v1/${channel}`;
-  
-  // Wait for IPC to be ready (with longer timeout for initial load)
-  const isReady = await waitForIPC(10000);
-  
-  if (!isReady || !window.ipc || typeof window.ipc.invoke !== 'function') {
+ 
+  if (!isElectronRuntime() || !window.ipc || typeof window.ipc.invoke !== 'function') {
+    const fallback = getFallback<TResponse>(channel);
+    if (fallback !== undefined) {
+      noteFallback(channel, 'non-Electron runtime');
+      return fallback;
+    }
     if (IS_DEV) {
-      console.warn(`[IPC] Channel ${channel} unavailable (renderer not attached to Electron)`);
+      console.warn(`[IPC] Channel ${channel} unavailable (no Electron bridge detected)`);
     }
     throw new Error('IPC unavailable');
   }
-  
+
+  const isReady = await waitForIPC(10000);
+
+  if (!isReady || !window.ipc || typeof window.ipc.invoke !== 'function') {
+    const fallback = getFallback<TResponse>(channel);
+    if (fallback !== undefined) {
+      noteFallback(channel, 'IPC bridge not ready');
+      return fallback;
+    }
+    if (IS_DEV) {
+      console.warn(`[IPC] Channel ${channel} unavailable (IPC bridge not ready)`);
+    }
+    throw new Error('IPC unavailable');
+  }
+
   try {
-    // typedApi.invoke already unwraps {ok, data} responses and returns just the data
-    // If there's an error, it throws, so if we get here, the response is valid
     const response = await window.ipc.invoke(fullChannel, request);
-    
-    // Validate with schema if provided
+
     if (schema && response !== undefined && response !== null) {
       const parsed = schema.safeParse(response);
       if (!parsed.success) {
@@ -148,13 +233,27 @@ export async function ipcCall<TRequest, TResponse = unknown>(
       }
       return parsed.data;
     }
-    
+
     return response as TResponse;
   } catch (error) {
-    if (IS_DEV) {
-      console.warn(`IPC call failed for ${channel}:`, error);
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('No handler registered')) {
+      const fallback = getFallback<TResponse>(channel);
+      if (fallback !== undefined) {
+        noteFallback(channel, 'handler not registered');
+        return fallback;
+      }
     }
-    throw error;
+
+    if (IS_DEV && !reportedMissingChannels.has(channel)) {
+      reportedMissingChannels.add(channel);
+      console.warn(`IPC call failed for ${channel}:`, message);
+    }
+
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error(message);
   }
 }
 
