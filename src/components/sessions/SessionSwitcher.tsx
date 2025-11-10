@@ -12,7 +12,7 @@ import { useTabsStore } from '../../state/tabsStore';
 import { useAppStore } from '../../state/appStore';
 import type { BrowserSession } from '../../types/session';
 import { Avatar } from '../sessions/Avatar';
-import { ChevronDown, Check, X, LogOut, Trash2, Lock, Zap, Copy, PenSquare } from 'lucide-react';
+import { ChevronDown, LogOut, Trash2, Lock, Zap, Copy, PenSquare } from 'lucide-react';
 import { Tooltip } from '../common/Tooltip';
 import { useOnboardingStore } from '../../state/onboardingStore';
 import { isDevEnv } from '../../lib/env';
