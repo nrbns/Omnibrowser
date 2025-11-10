@@ -39,108 +39,6 @@ interface Tab {
   sleeping?: boolean;
 }
 
-interface PredictiveClusterChipProps {
-  clusters: Array<{ id: string; label: string; tabIds: string[]; confidence?: number }>;
-  onApply: (clusterId: string) => void;
-  summary?: string | null;
-}
-
-const PredictiveClusterChip = ({ clusters, onApply, summary }: PredictiveClusterChipProps) => {
-  const [open, setOpen] = useState(false);
-  const [index, setIndex] = useState(0);
-
-  useEffect(() => {
-    if (clusters.length === 0) {
-      setOpen(false);
-      setIndex(0);
-    } else {
-      setOpen(true);
-      setIndex(0);
-    }
-  }, [clusters]);
-
-  if (!open || clusters.length === 0) return null;
-
-  const cluster = clusters[Math.min(index, clusters.length - 1)];
-  if (!cluster) return null;
-
-  const rotate = () => {
-    setIndex((current) => (current + 1) % clusters.length);
-  };
-
-  const confidence = typeof cluster.confidence === 'number' ? Math.round(cluster.confidence * 100) : null;
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, x: -10 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -10 }}
-      className="no-drag flex items-center gap-2 mr-3"
-    >
-      <button
-        type="button"
-        onClick={() => onApply(cluster.id)}
-        className="px-3 py-1.5 rounded-full border border-blue-500/40 bg-blue-500/15 text-xs text-blue-100 hover:bg-blue-500/25 transition-colors"
-        title={summary ?? 'Redix suggests regrouping these tabs'}
-      >
-        Regroup <span className="font-semibold">{cluster.label}</span>
-        {confidence !== null && (
-          <span className="ml-1 text-[11px] text-blue-200/80">{confidence}%</span>
-        )}
-      </button>
-      {clusters.length > 1 && (
-        <button
-          type="button"
-          onClick={rotate}
-          className="p-1.5 rounded-full border border-slate-700/60 text-slate-300 text-[10px] hover:text-slate-100"
-          aria-label="Next suggestion"
-        >
-          ●
-        </button>
-      )}
-    </motion.div>
-  );
-};
-
-const PredictivePrefetchHint = ({
-  entry,
-  onOpen,
-}: {
-  entry: { tabId: string; url: string; reason: string; confidence?: number } | null;
-  onOpen: (entry: { tabId: string; url: string; reason: string; confidence?: number }) => void;
-}) => {
-  if (!entry) return null;
-
-  let host = entry.url;
-  try {
-    host = new URL(entry.url).hostname.replace(/^www\./, '');
-  } catch {
-    // keep raw
-  }
-  const confidence = typeof entry.confidence === 'number' ? Math.round(entry.confidence * 100) : null;
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, x: -10 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -10 }}
-      className="no-drag flex items-center gap-2 mr-3"
-    >
-      <button
-        type="button"
-        onClick={() => onOpen(entry)}
-        className="px-3 py-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/15 text-xs text-emerald-100 hover:bg-emerald-500/25 transition-colors"
-        title={entry.reason}
-      >
-        Prep <span className="font-semibold">{host}</span>
-        {confidence !== null && (
-          <span className="ml-1 text-[11px] text-emerald-200/80">{confidence}%</span>
-        )}
-      </button>
-    </motion.div>
-  );
-};
-
 export function TabStrip() {
   const { tabs: storeTabs, setAll: setAllTabs, setActive: setActiveTab, activeId } = useTabsStore();
   const [tabs, setTabs] = useState<Tab[]>([]);
@@ -180,11 +78,6 @@ export function TabStrip() {
   useEffect(() => {
     currentActiveIdRef.current = activeId;
   }, [activeId]);
-
-  useEffect(() => {
-    if (!hasInitialized) return;
-    void fetchPredictiveSuggestions({ force: true });
-  }, [hasInitialized, fetchPredictiveSuggestions]);
 
   const fetchPredictiveSuggestions = useCallback(
     async (options?: { force?: boolean }) => {
@@ -236,6 +129,11 @@ export function TabStrip() {
     },
     [predictedClusters.length]
   );
+
+  useEffect(() => {
+    if (!hasInitialized) return;
+    void fetchPredictiveSuggestions({ force: true });
+  }, [hasInitialized, fetchPredictiveSuggestions]);
 
   const refreshTabsFromMain = useCallback(async () => {
     try {

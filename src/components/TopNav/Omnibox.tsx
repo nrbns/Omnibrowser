@@ -588,7 +588,6 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
       return;
     }
     const searchTerm = trimmed.replace(/^@live\s*/i, '').trim();
-    const searchTerm = trimmed.replace(/^@live\s*/i, '').trim();
     const base: Suggestion[] = [
       {
         type: 'command',

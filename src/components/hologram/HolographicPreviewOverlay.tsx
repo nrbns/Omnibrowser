@@ -9,7 +9,37 @@ interface HologramOverlayProps {
   onClose: () => void;
 }
 
+declare global {
+  interface Window {
+    AFRAME?: unknown;
+  }
+}
+
 const WEBXR_SUPPORTED = typeof navigator !== 'undefined' && 'xr' in navigator;
+const AFRAME_CDN = 'https://unpkg.com/aframe@1.5.0/dist/aframe.min.js';
+
+async function ensureAFrameRuntime(): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  if (window.AFRAME) return true;
+
+  return new Promise<boolean>((resolve) => {
+    const existing = document.querySelector<HTMLScriptElement>(`script[data-hologram="aframe"]`);
+    if (existing) {
+      existing.addEventListener('load', () => resolve(true), { once: true });
+      existing.addEventListener('error', () => resolve(false), { once: true });
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = AFRAME_CDN;
+    script.async = true;
+    script.crossOrigin = 'anonymous';
+    script.dataset.hologram = 'aframe';
+    script.addEventListener('load', () => resolve(true), { once: true });
+    script.addEventListener('error', () => resolve(false), { once: true });
+    document.head.appendChild(script);
+  });
+}
 
 export function HolographicPreviewOverlay({ visible, tabId, url, title, onClose }: HologramOverlayProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -25,13 +55,12 @@ export function HolographicPreviewOverlay({ visible, tabId, url, title, onClose 
     }
 
     (async () => {
-      try {
-        // Lazy load A-Frame only when needed
-        await import('aframe');
-        if (cancelled) return;
+      const ok = await ensureAFrameRuntime();
+      if (cancelled) return;
+      if (ok) {
         setXrSupported(true);
-      } catch (error) {
-        console.warn('[Hologram] Failed to load WebXR runtime', error);
+      } else {
+        console.warn('[Hologram] Failed to load A-Frame runtime from CDN');
         setXrSupported(false);
       }
     })();
