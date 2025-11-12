@@ -356,6 +356,10 @@ app.whenReady().then(async () => {
       performance.registerPerformanceIpc();
     } else {
       console.log('[Main] Heavy IPC services disabled');
+      // Still register performance IPC as it's lightweight and needed for battery updates
+      const performance = await import('./services/performance/performance-ipc');
+      performance.registerPerformanceIpc();
+      console.log('[Main] Performance IPC registered (lightweight)');
     }
     registerStorageIpc();
     console.log('[Main] Storage IPC registered');
