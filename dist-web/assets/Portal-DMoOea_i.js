@@ -1,2 +1,0 @@
-import{r as n,e as u}from"./index-DMKJqC5Z.js";function m({children:l,containerId:t="portal-root"}){const[r,a]=n.useState(null);return n.useEffect(()=>{if(typeof document>"u")return;let e=document.getElementById(t),o=!1;return e||(e=document.createElement("div"),e.id=t,document.body.appendChild(e),o=!0),a(e),()=>{o&&e?.parentNode&&e.parentNode.removeChild(e)}},[t]),r?u.createPortal(l,r):null}export{m as P};
-//# sourceMappingURL=Portal-DMoOea_i.js.map

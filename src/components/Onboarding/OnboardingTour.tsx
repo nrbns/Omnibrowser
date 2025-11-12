@@ -950,8 +950,14 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
                   <motion.button
                     key={persona.id}
                     type="button"
+                    data-persona-id={persona.id}
                     ref={index === 0 ? personaFirstButtonRef : undefined}
-                    onClick={() => handlePersonaSelect(persona.id)}
+                    onClick={(e) => {
+                      console.log('[Onboarding] Persona clicked:', persona.id);
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handlePersonaSelect(persona.id);
+                    }}
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     aria-pressed={isActive}
@@ -960,6 +966,7 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
                         ? 'border-emerald-400/60 bg-emerald-500/10 text-emerald-100 shadow-[0_0_25px_rgba(34,197,94,0.25)]'
                         : 'border-slate-700/60 bg-slate-900/70 text-gray-200 hover:border-slate-500/80 hover:bg-slate-900/90'
                     }`}
+                    style={{ pointerEvents: 'auto', cursor: 'pointer' }}
                   >
                     <div className="flex items-center gap-2">
                       <Icon size={20} />
