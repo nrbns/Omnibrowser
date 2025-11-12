@@ -35,10 +35,21 @@ export const onboardingStorage = {
 
 export const useOnboardingStore = create<OnboardingState>((set) => ({
   visible: false,
-  start: () => set({ visible: true }),
+  start: () => {
+    if (process.env.NODE_ENV === 'development') {
+      console.debug('[OnboardingStore] start() called');
+    }
+    set({ visible: true });
+  },
   finish: () => {
+    if (process.env.NODE_ENV === 'development') {
+      console.debug('[OnboardingStore] finish() called');
+    }
     onboardingStorage.setCompleted();
     set({ visible: false });
+    if (process.env.NODE_ENV === 'development') {
+      console.debug('[OnboardingStore] visible set to false');
+    }
   },
   reset: () => {
     onboardingStorage.clear();
