@@ -423,11 +423,13 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
       console.debug('[Onboarding] goNext called, current stepIndex:', stepIndex);
     }
 
-    // Save telemetry opt-in preference asynchronously before state update
-    // This prevents any IPC errors from blocking the state update
+    // Get current step
     const currentStep = STEPS[stepIndex];
     const isTelemetryStep = currentStep?.id === 'telemetry';
+    const isLastStep = stepIndex >= TOTAL_STEPS - 1;
     
+    // Save telemetry opt-in preference asynchronously before state update
+    // This prevents any IPC errors from blocking the state update
     if (isTelemetryStep) {
       // Save telemetry opt-in preference asynchronously (don't wait for it)
       // Use void to explicitly ignore the promise
@@ -438,55 +440,42 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
       });
     }
 
-    // Use functional update to ensure we get the latest state
-    setStepIndex((current) => {
-      const step = STEPS[current];
-
+    // If we're on the last step (telemetry), finish and close
+    if (isTelemetryStep || isLastStep) {
       if (process.env.NODE_ENV === 'development') {
-        console.debug('[Onboarding] setStepIndex called with current:', current, 'step:', step?.id);
+        console.debug('[Onboarding] Finishing tour from step', stepIndex);
       }
-
-      if (step?.type === 'persona') {
-        if (!selectedPersona) {
-          if (process.env.NODE_ENV === 'development') {
-            console.warn('[Onboarding] Cannot advance: no persona selected');
-          }
-          return current;
-        }
-        if (mode !== selectedPersona) {
-          setMode(selectedPersona);
-        }
-      }
-
-      // Check if we're on the last step (telemetry)
-      const isLastStep = current >= TOTAL_STEPS - 1;
-      const isTelemetry = step?.id === 'telemetry';
       
-      // If we're finishing (on telemetry step), close the tour
-      if (isTelemetry || isLastStep) {
+      // Finish and close - use setTimeout to ensure state updates complete
+      setTimeout(() => {
+        finishOnboarding();
+        onClose();
+      }, 100);
+      
+      return;
+    }
+
+    // Handle persona step validation
+    if (currentStep?.type === 'persona') {
+      if (!selectedPersona) {
         if (process.env.NODE_ENV === 'development') {
-          console.debug('[Onboarding] Finishing tour from step', current);
+          console.warn('[Onboarding] Cannot advance: no persona selected');
         }
-        
-        // Finish and close - use setTimeout to ensure state updates complete
-        setTimeout(() => {
-          finishOnboarding();
-          onClose();
-        }, 0);
-        
-        // Return current index since we're closing
-        return current;
+        return;
       }
-
-      // Advance to next step
-      const nextIndex = Math.min(current + 1, TOTAL_STEPS - 1);
-      
-      if (process.env.NODE_ENV === 'development') {
-        console.debug('[Onboarding] Next from step', current, '->', nextIndex);
+      if (mode !== selectedPersona) {
+        setMode(selectedPersona);
       }
+    }
 
-      return nextIndex;
-    });
+    // Advance to next step
+    const nextIndex = Math.min(stepIndex + 1, TOTAL_STEPS - 1);
+    
+    if (process.env.NODE_ENV === 'development') {
+      console.debug('[Onboarding] Next from step', stepIndex, '->', nextIndex);
+    }
+
+    setStepIndex(nextIndex);
   }, [stepIndex, selectedPersona, mode, setMode, finishOnboarding, onClose, telemetryOptIn]);
 
   const goBack = useCallback(() => {
