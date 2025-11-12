@@ -523,23 +523,21 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
     }
   }, [finishOnboarding, onClose, stepIndex]);
 
+  if (!onboardingVisible) {
+    return null;
+  }
+
   return (
     <AnimatePresence mode="wait">
-      {onboardingVisible && (
-        <motion.div
-          key="onboarding-overlay"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.2 }}
-          className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70 backdrop-blur-sm"
-          onClick={(e) => {
-            // Prevent clicks on backdrop from closing (only buttons should close)
-            if (e.target === e.currentTarget) {
-              e.stopPropagation();
-            }
-          }}
-        >
+      <motion.div
+        key="onboarding-overlay"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.2 }}
+        className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70 backdrop-blur-sm"
+        style={{ pointerEvents: 'auto' }}
+      >
           {spotlight && (
             <div
               className="pointer-events-none absolute rounded-2xl border-2 border-emerald-400/80 shadow-[0_0_20px_rgba(16,185,129,0.35)]"
@@ -560,7 +558,7 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
             exit={{ opacity: 0, y: 20 }}
             transition={{ duration: 0.2 }}
             className="relative w-[min(520px,90vw)] rounded-3xl border border-slate-700/70 bg-slate-950/95 p-6 text-gray-100 shadow-2xl z-[1001]"
-            style={{ pointerEvents: 'auto' }}
+            style={{ pointerEvents: 'auto', position: 'relative' }}
             onClick={(e) => {
               // Prevent clicks on modal from bubbling to backdrop
               e.stopPropagation();
@@ -568,31 +566,14 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
           >
           <button
             type="button"
-            className="absolute right-5 top-5 z-[1003] rounded-full border border-slate-700/60 bg-slate-900/70 p-1.5 text-gray-400 hover:text-gray-200 cursor-pointer"
-            style={{ pointerEvents: 'auto', position: 'relative' }}
-            onMouseDown={(e) => {
-              console.log('[Onboarding] X button mousedown', e);
-            }}
-            onMouseUp={(e) => {
-              console.log('[Onboarding] X button mouseup', e);
-            }}
+            className="absolute right-5 top-5 rounded-full border border-slate-700/60 bg-slate-900/70 p-1.5 text-gray-400 hover:text-gray-200 cursor-pointer"
+            style={{ pointerEvents: 'auto', position: 'absolute', zIndex: 1003 }}
             onClick={(e) => {
-              console.log('[Onboarding] X button clicked - START', e);
+              console.log('[Onboarding] X button clicked');
               e.preventDefault();
               e.stopPropagation();
-              e.nativeEvent.stopImmediatePropagation();
-              try {
-                console.log('[Onboarding] X button - calling finishOnboarding()');
-                // Finish onboarding (this updates the store and marks as completed)
-                finishOnboarding();
-                
-                console.log('[Onboarding] X button - finishOnboarding() called, calling onClose()');
-                
-                onClose();
-                console.log('[Onboarding] X button - onClose() called - END');
-              } catch (error) {
-                console.error('[Onboarding] Error in X button handler:', error);
-              }
+              finishOnboarding();
+              onClose();
             }}
             aria-label="Close onboarding"
           >
@@ -714,62 +695,44 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
           <div className="mt-6 flex items-center justify-between text-sm" style={{ pointerEvents: 'auto', zIndex: 1002, position: 'relative' }}>
             <button
               type="button"
-              onMouseDown={(e) => {
-                console.log('[Onboarding] Back button mousedown', e);
-                alert('Back button mousedown detected!');
-              }}
               onClick={(e) => {
-                alert('Back button clicked!');
-                console.log('[Onboarding] Back button clicked', e);
+                console.log('[Onboarding] Back button clicked');
                 e.preventDefault();
                 e.stopPropagation();
-                e.nativeEvent.stopImmediatePropagation();
                 goBack();
               }}
               disabled={!canGoBack}
-              className="rounded-lg border border-slate-700/60 px-3 py-2 text-gray-300 transition hover:border-slate-500/80 hover:text-gray-100 disabled:cursor-not-allowed disabled:opacity-40 z-[1003] relative cursor-pointer"
-              style={{ pointerEvents: 'auto' }}
+              className="rounded-lg border border-slate-700/60 px-3 py-2 text-gray-300 transition hover:border-slate-500/80 hover:text-gray-100 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+              style={{ pointerEvents: 'auto', position: 'relative', zIndex: 1003 }}
             >
               Back
             </button>
-            <div className="flex items-center gap-2" style={{ pointerEvents: 'auto' }}>
+            <div className="flex items-center gap-2" style={{ pointerEvents: 'auto', position: 'relative', zIndex: 1003 }}>
               <button
                 type="button"
-                onMouseDown={(e) => {
-                  console.log('[Onboarding] Skip button mousedown', e);
-                  alert('Skip button mousedown detected!');
-                }}
                 onClick={(e) => {
-                  alert('Skip button clicked!');
-                  console.log('[Onboarding] Skip button clicked', e);
+                  console.log('[Onboarding] Skip button clicked');
                   e.preventDefault();
                   e.stopPropagation();
-                  e.nativeEvent.stopImmediatePropagation();
                   handleSkip(e);
                 }}
-                className="rounded-lg border border-slate-700/60 px-3 py-2 text-gray-400 transition hover:border-slate-500/80 hover:text-gray-200 z-[1003] relative cursor-pointer"
-                style={{ pointerEvents: 'auto' }}
+                className="rounded-lg border border-slate-700/60 px-3 py-2 text-gray-400 transition hover:border-slate-500/80 hover:text-gray-200 cursor-pointer"
+                style={{ pointerEvents: 'auto', position: 'relative', zIndex: 1003 }}
               >
                 Skip
               </button>
               <button
                 type="button"
                 ref={primaryButtonRef}
-                onMouseDown={(e) => {
-                  console.log('[Onboarding] Next/Finish button mousedown', e);
-                  alert('Next button mousedown detected!');
-                }}
                 onClick={(e) => {
-                  alert('Next button clicked!');
-                  console.log('[Onboarding] Next/Finish button clicked', e);
+                  console.log('[Onboarding] Next/Finish button clicked');
                   e.preventDefault();
                   e.stopPropagation();
-                  e.nativeEvent.stopImmediatePropagation();
                   goNext(e);
                 }}
                 disabled={isNextDisabled}
-                className="rounded-lg border border-emerald-500/60 bg-emerald-500/10 px-4 py-2 font-medium text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40 z-[1003] relative cursor-pointer"
-                style={{ pointerEvents: 'auto' }}
+                className="rounded-lg border border-emerald-500/60 bg-emerald-500/10 px-4 py-2 font-medium text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+                style={{ pointerEvents: 'auto', position: 'relative', zIndex: 1003 }}
               >
                 {isLastStep ? 'Finish' : 'Next'}
               </button>
@@ -777,7 +740,6 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
           </div>
           </motion.div>
         </motion.div>
-      )}
     </AnimatePresence>
   );
 }
