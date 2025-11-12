@@ -481,6 +481,25 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
     }
   }, [stepIndex, selectedPersona, mode, setMode, finishOnboarding, onClose, telemetryOptIn]);
 
+  // Add native event listeners as fallback to test if clicks are reaching buttons
+  useEffect(() => {
+    if (!onboardingVisible) return;
+
+    const nextButton = primaryButtonRef.current;
+    if (nextButton) {
+      const handleNativeClick = (e: Event) => {
+        console.log('[Onboarding] Native click detected on Next button!', e);
+        e.preventDefault();
+        e.stopPropagation();
+        goNext();
+      };
+      nextButton.addEventListener('click', handleNativeClick, true);
+      return () => {
+        nextButton.removeEventListener('click', handleNativeClick, true);
+      };
+    }
+  }, [onboardingVisible, goNext]);
+
   const goBack = useCallback(() => {
     setStepIndex((current) => {
       if (current === 0) {
