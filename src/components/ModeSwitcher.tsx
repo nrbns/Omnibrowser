@@ -7,7 +7,7 @@ export default function ModeSwitcher() {
     <select
       className="bg-neutral-800 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400/50"
       value={mode}
-      onChange={(e) => setMode(e.value as any)}
+      onChange={(e) => setMode(e.target.value as any)}
       aria-label="Select browser mode"
       title="Select browser mode"
     >
