@@ -308,26 +308,18 @@ export async function ipcCall<TRequest, TResponse = unknown>(
 
   // Check if IPC bridge is actually available
   if (!isReady || !window.ipc || typeof window.ipc.invoke !== 'function') {
-    // If we're definitely not in Electron (no user agent, no IPC), use fallback immediately
-    if (!isElectron && !hasWindowIpc) {
-      const fallback = getFallback<TResponse>(channel);
-      if (fallback !== undefined) {
-        noteFallback(channel, 'non-Electron runtime');
-        return fallback;
-      }
-    }
-    
-    // If we're in Electron but IPC isn't ready, try fallback if available
+    // Always try fallback first if available, regardless of Electron detection
     const fallback = getFallback<TResponse>(channel);
     if (fallback !== undefined) {
-      noteFallback(channel, 'IPC bridge not ready');
+      const reason = !isElectron && !hasWindowIpc ? 'non-Electron runtime' : 'IPC bridge not ready';
+      noteFallback(channel, reason);
       return fallback;
     }
     
     // If no fallback and we're in Electron, this is an error
     if (IS_DEV) {
-      console.warn(`[IPC] Channel ${channel} unavailable (IPC bridge not ready after 8s)`);
-      console.warn(`[IPC] Debug: isElectron=${isElectron}, hasWindowIpc=${hasWindowIpc}, userAgentHasElectron=${userAgentHasElectron}`);
+      console.warn(`[IPC] Channel ${channel} unavailable (IPC bridge not ready after 8s, no fallback available)`);
+      console.warn(`[IPC] Debug: isElectron=${isElectron}, hasWindowIpc=${hasWindowIpc}, userAgentHasElectron=${userAgentHasElectron}, isReady=${isReady}`);
     }
     throw new Error('IPC unavailable');
   }
