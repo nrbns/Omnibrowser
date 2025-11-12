@@ -44,7 +44,7 @@ export function TabContentSurface({ tab, overlayActive }: TabContentSurfaceProps
 
     const webviewElement = webviewRef.current as Electron.WebviewTag;
     const LOADING_TIMEOUT_MS = 30000; // 30 seconds
-    const MAX_RETRIES = 2;
+    // const MAX_RETRIES = 2; // Reserved for future use
 
     const handleDidStartLoading = () => {
       setLoading(true);

@@ -9,9 +9,7 @@
  * - Feature usage (anonymized)
  */
 
-import { app, BrowserWindow } from 'electron';
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
+import { app } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { registerHandler } from '../shared/ipc/router';
 import { z } from 'zod';

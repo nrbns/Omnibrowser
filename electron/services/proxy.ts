@@ -20,7 +20,7 @@ export function registerProxyIpc() {
   async function applyProxyToTab(tabId: string, proxyConfig: { type: string; host: string; port: number } | null): Promise<void> {
     try {
       // Import tabs service dynamically to avoid circular dependency
-      const tabsModule = await import('./tabs');
+      await import('./tabs');
       // Get tab by ID (this requires access to internal tab registry)
       // For now, we'll rely on proxy being applied at tab creation
       // Future: Add IPC endpoint to get tab session and apply proxy

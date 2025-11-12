@@ -35,7 +35,7 @@ import { ipcEvents } from '../lib/ipc-events';
 import { useEfficiencyStore } from '../state/efficiencyStore';
 import { useWorkspaceEventsStore } from '../state/workspaceEventsStore';
 import { useAgentStreamStore, type StreamStatus } from '../state/agentStreamStore';
-import { CardSkeleton, ListSkeleton } from './common/Skeleton';
+// import { CardSkeleton, ListSkeleton } from './common/Skeleton'; // Reserved for future use
 
 type OmniDeskVariant = 'overlay' | 'split';
 

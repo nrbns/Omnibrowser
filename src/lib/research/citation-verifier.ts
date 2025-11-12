@@ -113,7 +113,7 @@ function findCitationTokens(text: string): Array<{ index: number; match: string;
 function sentenceHasCitation(
   sentence: { text: string; start: number; end: number },
   citations: Array<{ index: number; match: string; citationIndices: number[] }>,
-  text: string
+  _text: string
 ): { hasCitation: boolean; citationIndices: number[] } {
   const sentenceStart = sentence.start;
   const sentenceEnd = sentence.end;
@@ -157,7 +157,7 @@ function sentenceHasCitation(
  */
 export function verifyCitationCoverage(
   summary: string,
-  citations: Array<{ index: number; sourceIndex: number }>
+  _citations: Array<{ index: number; sourceIndex: number }>
 ): VerificationResult {
   if (!summary || summary.trim().length === 0) {
     return {
@@ -224,7 +224,7 @@ export function verifyCitationsWithSources(
   const base = verifyCitationCoverage(summary, citations);
   
   // Check for citations that reference non-existent sources
-  const validSourceIndices = new Set(citations.map((c) => c.sourceIndex));
+  // const validSourceIndices = new Set(citations.map((c) => c.sourceIndex)); // Reserved for future use
   const invalidCount = citations.filter((c) => c.sourceIndex < 0 || c.sourceIndex >= totalSources).length;
 
   return {

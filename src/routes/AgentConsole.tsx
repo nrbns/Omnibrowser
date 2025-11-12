@@ -9,7 +9,7 @@ import { useAgentStreamStore } from '../state/agentStreamStore';
 
 export default function AgentConsole() {
   const [runId, setRunId] = useState<string | null>(null);
-  const [logs, setLogs] = useState<any[]>([]);
+  const [_logs, setLogs] = useState<any[]>([]);
   const [streamingText, setStreamingText] = useState<string>('');
   const [streamId, setStreamId] = useState<string | null>(null);
   const [query, setQuery] = useState('');

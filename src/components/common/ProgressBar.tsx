@@ -30,12 +30,12 @@ export function ProgressBar({
     }
   }, [value, indeterminate]);
 
-  const colorClasses = {
-    blue: 'bg-blue-500',
-    green: 'bg-emerald-500',
-    purple: 'bg-purple-500',
-    amber: 'bg-amber-500',
-  };
+  // const colorClasses = { // Reserved for future use
+  //   blue: 'bg-blue-500',
+  //   green: 'bg-emerald-500',
+  //   purple: 'bg-purple-500',
+  //   amber: 'bg-amber-500',
+  // };
 
   const gradientClasses = {
     blue: 'from-blue-500 via-cyan-500 to-blue-500',

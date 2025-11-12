@@ -707,7 +707,6 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
         finalUrl = `https://${finalUrl}`;
       } else {
         // Build search URL - ensure it's properly encoded
-        const searchQuery = encodeURIComponent(finalUrl.trim());
         finalUrl = buildSearchUrl('google', finalUrl.trim());
       }
     }

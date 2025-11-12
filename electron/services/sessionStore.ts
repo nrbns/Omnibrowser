@@ -6,7 +6,7 @@
  * Restores windows, tabs, activeTabId, and window bounds on startup
  */
 
-import { app, BrowserWindow } from 'electron';
+import { app } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import { promisify } from 'util';
@@ -15,7 +15,7 @@ const writeFile = promisify(fs.writeFile);
 const readFile = promisify(fs.readFile);
 const rename = promisify(fs.rename);
 const mkdir = promisify(fs.mkdir);
-const stat = promisify(fs.stat);
+// const stat = promisify(fs.stat); // Reserved for future use
 
 interface TabState {
   id: string;

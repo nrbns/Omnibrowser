@@ -230,7 +230,7 @@ export function Research() {
     if (chunks.length === 0) return null;
     
     const fullText = chunks.map(c => c.content).join(' ');
-    const allCitations = chunks.flatMap((chunk, chunkIdx) => 
+    const allCitations = chunks.flatMap((chunk, _chunkIdx) => 
       (chunk.citations || []).map(citeId => {
         // Find citation index from sources
         const citeNumber = citationOrder.get(citeId) || 0;

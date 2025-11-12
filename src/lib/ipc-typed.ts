@@ -371,7 +371,7 @@ export async function ipcCall<TRequest, TResponse = unknown>(
             removeListener: () => {},
           };
         }
-      } catch (e) {
+      } catch {
         // context isolation prevents direct access, that's expected
       }
     }

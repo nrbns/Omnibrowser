@@ -366,7 +366,7 @@ export function ResearchGraphView({
                 }
               }}
               onBlur={() => setHover(null)}
-              onMouseEnter={(event) => {
+              onMouseEnter={(_event) => {
                 const rect = containerRef.current?.getBoundingClientRect();
                 if (!rect) return;
                 const scaleX = rect.width / WIDTH;
