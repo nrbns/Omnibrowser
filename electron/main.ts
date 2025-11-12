@@ -303,10 +303,15 @@ app.whenReady().then(async () => {
     networkControls.disableIPv6();
   }
   
-  // Register stub handlers FIRST, before window creation, to ensure they're ready
+  // Register essential IPC handlers FIRST, before window creation, to ensure they're ready
   // This prevents "No handler registered" errors when renderer makes early IPC calls
-  console.log('[Main] Registering stub handlers for disabled services (early)');
+  console.log('[Main] Registering essential IPC handlers (early)');
   try {
+    // Register telemetry IPC early (needed for onboarding)
+    const { registerTelemetryIpc } = await import('./services/telemetry');
+    registerTelemetryIpc();
+    console.log('[Main] Telemetry IPC registered (early)');
+    
     // Register shields stub handler if shields service is disabled
     if (disableHeavyServices) {
       const shieldsSchema = z.object({});
@@ -339,7 +344,7 @@ app.whenReady().then(async () => {
       console.log('[Main] Privacy Sentinel stub handler registered (early)');
     }
   } catch (error) {
-    console.error('[Main] Failed to register stub handlers:', error);
+    console.error('[Main] Failed to register early IPC handlers:', error);
   }
   
   // Start session persistence (auto-save every 2s)
@@ -486,13 +491,8 @@ app.whenReady().then(async () => {
       console.log('[Main] Privacy Sentinel disabled (stub handler already registered)');
     }
     registerTrustWeaverIpc();
-    try {
-      const { registerTelemetryIpc } = await import('./services/telemetry');
-      registerTelemetryIpc();
-      console.log('[Main] Telemetry IPC registered');
-    } catch (error) {
-      console.warn('[Main] Telemetry IPC not available:', error instanceof Error ? error.message : String(error));
-    }
+    // Telemetry IPC already registered early, just log
+    console.log('[Main] Telemetry IPC already registered');
     
     // Signal renderer that IPC is ready
     mainWindow.webContents.once('did-finish-load', () => {
