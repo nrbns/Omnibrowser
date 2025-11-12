@@ -1,132 +1,369 @@
 // @ts-nocheck
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Bot, Send, StopCircle, Copy, CheckCircle2, Loader2, Sparkles } from 'lucide-react';
 import { ipc } from '../lib/ipc-typed';
 import { ipcEvents } from '../lib/ipc-events';
+import { useAgentStreamStore } from '../state/agentStreamStore';
 
 export default function AgentConsole() {
   const [runId, setRunId] = useState<string | null>(null);
   const [logs, setLogs] = useState<any[]>([]);
   const [streamingText, setStreamingText] = useState<string>('');
   const [streamId, setStreamId] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied'>('idle');
+  const responsePaneRef = useRef<HTMLDivElement | null>(null);
   const dslRef = useRef<string>(JSON.stringify({ goal: "Open example.com", steps: [{ skill: 'navigate', args: { url: 'https://example.com' } }], output: { type: 'json', schema: {} } }, null, 2));
+  
+  const { status, transcript, events, setRun, setStatus, appendTranscript, reset } = useAgentStreamStore();
 
-  useEffect(()=>{
+  // Auto-scroll response pane to bottom when new content arrives
+  useEffect(() => {
+    if (responsePaneRef.current && (streamingText || transcript)) {
+      responsePaneRef.current.scrollTop = responsePaneRef.current.scrollHeight;
+    }
+  }, [streamingText, transcript]);
+
+  // Listen for agent tokens and steps
+  useEffect(() => {
     if (!window.agent) return;
     
-    const tokenHandler = (t: any) => setLogs((l: any[])=> [...l, t]);
-    const stepHandler = (s: any) => setLogs((l: any[])=> [...l, s]);
+    const tokenHandler = (t: any) => {
+      setLogs((l: any[]) => [...l, t]);
+      if (t.type === 'token' && t.text) {
+        appendTranscript(t.text);
+      }
+    };
+    const stepHandler = (s: any) => {
+      setLogs((l: any[]) => [...l, s]);
+      useAgentStreamStore.getState().appendEvent({
+        id: `event_${Date.now()}_${Math.random()}`,
+        type: 'step',
+        step: s.idx,
+        status: s.skill,
+        content: s.res ? JSON.stringify(s.res) : undefined,
+        timestamp: Date.now(),
+      });
+    };
     
     window.agent.onToken(tokenHandler);
     window.agent.onStep(stepHandler);
     
-    // Listen for streaming AI chunks
+    return () => {
+      // Cleanup handled by component unmount
+    };
+  }, [appendTranscript]);
+
+  // Listen for streaming AI chunks
+  useEffect(() => {
+    if (!streamId) return;
+
     const streamChunkHandler = (data: { streamId: string; chunk: { text?: string; finished?: boolean } }) => {
       if (data.streamId === streamId) {
         if (data.chunk.text) {
           setStreamingText(prev => prev + (data.chunk.text || ''));
+          appendTranscript(data.chunk.text || '');
         }
         if (data.chunk.finished) {
+          setIsStreaming(false);
           setStreamId(null);
+          setStatus('complete');
         }
+      }
+    };
+
+    const streamErrorHandler = (data: { streamId: string; error: string }) => {
+      if (data.streamId === streamId) {
+        setIsStreaming(false);
+        setStreamId(null);
+        setStatus('error');
+        useAgentStreamStore.getState().setError(data.error);
       }
     };
 
     const unsubscribeChunk = ipcEvents.on<{ streamId: string; chunk: { text?: string; finished?: boolean } }>('agent:stream:chunk', streamChunkHandler);
     const unsubscribeDone = ipcEvents.on<{ streamId: string }>('agent:stream:done', (data) => {
       if (data.streamId === streamId) {
+        setIsStreaming(false);
         setStreamId(null);
+        setStatus('complete');
       }
     });
+    const unsubscribeError = ipcEvents.on<{ streamId: string; error: string }>('agent:stream:error', streamErrorHandler);
     
-    // Cleanup function - properly removes listeners
     return () => {
       unsubscribeChunk();
       unsubscribeDone();
-      // Note: In Electron, IPC listeners are automatically cleaned up when the renderer process terminates
-      // If window.agent had removeListener methods, we would call them here
-      // For now, React's cleanup is sufficient as listeners are scoped to this component
+      unsubscribeError();
     };
-  },[streamId]);
+  }, [streamId, appendTranscript, setStatus]);
+
+  const handleStartStream = useCallback(async () => {
+    if (!query.trim() || isStreaming) return;
+    
+    try {
+      setStreamingText('');
+      reset();
+      setIsStreaming(true);
+      setStatus('connecting');
+      
+      const result = await ipc.agent.stream.start(query.trim(), {
+        model: 'llama3.2',
+        temperature: 0.7,
+      });
+      
+      if (result?.streamId) {
+        setStreamId(result.streamId);
+        setRun(result.streamId, query.trim());
+        setStatus('live');
+      }
+    } catch (error) {
+      console.error('Failed to start stream:', error);
+      setIsStreaming(false);
+      setStatus('error');
+      useAgentStreamStore.getState().setError(error instanceof Error ? error.message : String(error));
+    }
+  }, [query, isStreaming, reset, setStatus, setRun]);
+
+  const handleStopStream = useCallback(async () => {
+    if (!streamId) return;
+    try {
+      await ipc.agent.stream.stop(streamId);
+      setIsStreaming(false);
+      setStreamId(null);
+      setStatus('complete');
+    } catch (error) {
+      console.error('Failed to stop stream:', error);
+    }
+  }, [streamId, setStatus]);
+
+  const handleCopyResponse = useCallback(async () => {
+    const textToCopy = streamingText || transcript;
+    if (!textToCopy) return;
+    
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      setCopyStatus('copied');
+      setTimeout(() => setCopyStatus('idle'), 2000);
+    } catch (error) {
+      console.error('Failed to copy:', error);
+    }
+  }, [streamingText, transcript]);
 
   return (
-    <div className="p-3 grid grid-cols-2 gap-3 h-full">
-      <div className="flex flex-col gap-2">
-        <h3 className="font-medium">Agent DSL</h3>
-        <textarea className="flex-1 bg-neutral-800 rounded p-2 text-xs" defaultValue={dslRef.current} onChange={(e)=> (dslRef.current = e.target.value)} />
-        <div className="flex gap-2">
-          <button className="bg-indigo-600 text-white px-3 py-1 rounded" onClick={async ()=>{
-            const parsed = JSON.parse(dslRef.current);
-            const res = await window.agent?.start?.(parsed) as any;
-            if (res?.runId) setRunId(res.runId);
-          }}>Start</button>
-          <button className="bg-neutral-700 text-white px-3 py-1 rounded" onClick={async ()=>{ if (runId) await window.agent?.stop?.(runId); }}>Stop</button>
-          <button className="bg-neutral-700 text-white px-3 py-1 rounded" onClick={async ()=>{ await window.recorder?.start?.(); }}>Record</button>
-          <button className="bg-neutral-700 text-white px-3 py-1 rounded" onClick={async ()=>{ await window.recorder?.stop?.(); const d = await window.recorder?.getDsl?.(); dslRef.current = JSON.stringify(d, null, 2); (document.activeElement as HTMLElement)?.blur(); }}>Stop & Load</button>
-          <button className="bg-emerald-600 text-white px-3 py-1 rounded" onClick={()=>{
-            const demo = {
-              goal: 'Paginate, extract first table, export CSV',
-              steps: [
-                { skill: 'paginate_and_extract', args: { url: 'https://example.com', nextSelector: 'a.next', maxPages: 2 } },
-                { skill: 'export_csv', args: { from: 'last', filename: 'demo.csv' } }
-              ],
-              output: { type: 'json', schema: {} }
-            };
-            dslRef.current = JSON.stringify(demo, null, 2);
-          }}>Load Demo: Paginate→Extract→CSV</button>
+    <div className="flex h-full flex-col gap-4 p-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="rounded-xl border border-blue-500/40 bg-blue-500/10 p-2">
+            <Bot size={20} className="text-blue-300" />
+          </div>
+          <div>
+            <h1 className="text-xl font-semibold text-gray-100">Agent Console</h1>
+            <p className="text-xs text-gray-400">Stream AI responses and manage agent runs</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {status === 'live' && (
+            <motion.span
+              className="inline-flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-xs text-emerald-100"
+              animate={{ opacity: [1, 0.7, 1] }}
+              transition={{ duration: 1.5, repeat: Infinity }}
+            >
+              <span className="h-2 w-2 rounded-full bg-emerald-400" />
+              Streaming
+            </motion.span>
+          )}
         </div>
       </div>
-      <div className="flex flex-col gap-2">
-        <h3 className="font-medium">Live Logs</h3>
-        <pre className="flex-1 bg-neutral-900 rounded p-2 text-xs overflow-auto">{JSON.stringify(logs, null, 2)}</pre>
-        
-        {/* Streaming AI Response */}
-        {streamingText && (
-          <div className="mt-4 p-4 bg-neutral-800 rounded border border-blue-500/30">
-            <h4 className="font-medium mb-2 text-blue-400">Streaming Response:</h4>
-            <div className="text-sm text-gray-300 whitespace-pre-wrap max-h-60 overflow-y-auto">
-              {streamingText}
+
+      <div className="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-2">
+        {/* Left: Input & Controls */}
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-medium text-gray-300">Ask Redix</label>
+            <div className="flex gap-2">
+              <div className="flex-1 relative">
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey && !isStreaming) {
+                      e.preventDefault();
+                      void handleStartStream();
+                    }
+                  }}
+                  placeholder="Ask anything... (e.g., 'summarize quantum computing trends')"
+                  disabled={isStreaming}
+                  className="w-full rounded-xl border border-slate-700/60 bg-slate-800/70 px-4 py-3 text-sm text-gray-100 placeholder:text-gray-500 focus:border-blue-500/60 focus:outline-none focus:ring-1 focus:ring-blue-500/40 disabled:opacity-50"
+                />
+                {isStreaming && (
+                  <motion.div
+                    className="absolute right-3 top-1/2 -translate-y-1/2"
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                  >
+                    <Loader2 size={16} className="text-blue-400" />
+                  </motion.div>
+                )}
+              </div>
+              {isStreaming ? (
+                <motion.button
+                  onClick={handleStopStream}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  className="inline-flex items-center gap-2 rounded-xl border border-red-500/60 bg-red-500/20 px-4 py-3 text-sm font-medium text-red-100 transition hover:bg-red-500/30"
+                >
+                  <StopCircle size={16} />
+                  Stop
+                </motion.button>
+              ) : (
+                <motion.button
+                  onClick={handleStartStream}
+                  disabled={!query.trim()}
+                  whileHover={{ scale: query.trim() ? 1.05 : 1 }}
+                  whileTap={{ scale: query.trim() ? 0.95 : 1 }}
+                  className="inline-flex items-center gap-2 rounded-xl border border-blue-500/60 bg-blue-500/20 px-4 py-3 text-sm font-medium text-blue-100 transition hover:bg-blue-500/30 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Send size={16} />
+                  Send
+                </motion.button>
+              )}
             </div>
-            <button
-              onClick={async () => {
-                if (streamId) {
-                  await ipc.agent.stream.stop(streamId);
-                  setStreamId(null);
-                  setStreamingText('');
-                }
-              }}
-              className="mt-2 px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-xs"
-            >
-              Stop Stream
-            </button>
           </div>
-        )}
-        
-        {/* Start Streaming Button */}
-        <button
-          onClick={async () => {
-            try {
-              const query = prompt('Enter your query for streaming AI:');
-              if (!query) return;
-              
-              setStreamingText('');
-              const result = await ipc.agent.stream.start(query, {
-                model: 'llama3.2',
-                temperature: 0.7,
-              });
-              
-              if (result?.streamId) {
-                setStreamId(result.streamId);
-              }
-            } catch (error) {
-              console.error('Failed to start stream:', error);
-              alert('Failed to start streaming. Check console for details.');
-            }
-          }}
-          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded text-sm font-medium"
-        >
-          Start Streaming AI
-        </button>
+
+          {/* Agent DSL Editor (Collapsible) */}
+          <details className="rounded-xl border border-slate-700/60 bg-slate-900/40">
+            <summary className="cursor-pointer px-4 py-2 text-sm font-medium text-gray-300 hover:text-gray-100">
+              Advanced: Agent DSL
+            </summary>
+            <div className="border-t border-slate-700/60 p-4">
+              <textarea
+                className="h-48 w-full rounded-lg border border-slate-700/60 bg-slate-800/70 p-3 text-xs font-mono text-gray-200 focus:border-blue-500/60 focus:outline-none"
+                defaultValue={dslRef.current}
+                onChange={(e) => (dslRef.current = e.target.value)}
+              />
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  className="rounded-lg border border-indigo-500/60 bg-indigo-500/20 px-3 py-1.5 text-xs font-medium text-indigo-100 transition hover:bg-indigo-500/30"
+                  onClick={async () => {
+                    const parsed = JSON.parse(dslRef.current);
+                    const res = await window.agent?.start?.(parsed) as any;
+                    if (res?.runId) setRunId(res.runId);
+                  }}
+                >
+                  Start Run
+                </button>
+                <button
+                  className="rounded-lg border border-slate-700/60 bg-slate-800/60 px-3 py-1.5 text-xs font-medium text-gray-300 transition hover:bg-slate-800/80"
+                  onClick={async () => {
+                    if (runId) await window.agent?.stop?.(runId);
+                  }}
+                >
+                  Stop Run
+                </button>
+              </div>
+            </div>
+          </details>
+
+          {/* Live Events Timeline */}
+          {events.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <h3 className="text-sm font-medium text-gray-300">Recent Events</h3>
+              <div className="max-h-48 space-y-2 overflow-y-auto rounded-lg border border-slate-700/60 bg-slate-900/40 p-3">
+                <AnimatePresence>
+                  {events.slice(-5).reverse().map((event) => (
+                    <motion.div
+                      key={event.id}
+                      initial={{ opacity: 0, x: -8 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0 }}
+                      className="rounded-lg border border-slate-700/40 bg-slate-800/50 p-2 text-xs"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-gray-200">{event.type}</span>
+                        {event.step !== undefined && (
+                          <span className="text-gray-400">Step {event.step}</span>
+                        )}
+                      </div>
+                      {event.content && (
+                        <p className="mt-1 truncate text-gray-400">{event.content}</p>
+                      )}
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Right: Streaming Response Pane */}
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium text-gray-300">Response</h3>
+            {(streamingText || transcript) && (
+              <button
+                onClick={handleCopyResponse}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700/60 bg-slate-800/60 px-2 py-1 text-xs text-gray-300 transition hover:bg-slate-800/80"
+              >
+                {copyStatus === 'copied' ? (
+                  <>
+                    <CheckCircle2 size={14} className="text-emerald-400" />
+                    Copied
+                  </>
+                ) : (
+                  <>
+                    <Copy size={14} />
+                    Copy
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+          <div
+            ref={responsePaneRef}
+            className="flex-1 overflow-y-auto rounded-xl border border-slate-700/60 bg-slate-900/60 p-4"
+          >
+            <AnimatePresence mode="wait">
+              {streamingText || transcript ? (
+                <motion.div
+                  key="response"
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="prose prose-invert prose-sm max-w-none"
+                >
+                  <div className="whitespace-pre-wrap text-sm leading-relaxed text-gray-200">
+                    {streamingText || transcript}
+                    {isStreaming && (
+                      <motion.span
+                        className="ml-1 inline-block h-4 w-0.5 bg-blue-400"
+                        animate={{ opacity: [1, 0, 1] }}
+                        transition={{ duration: 0.8, repeat: Infinity }}
+                      />
+                    )}
+                  </div>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="empty"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="flex h-full flex-col items-center justify-center text-center"
+                >
+                  <div className="rounded-full border border-slate-700/60 bg-slate-800/60 p-4">
+                    <Sparkles size={24} className="text-slate-500" />
+                  </div>
+                  <p className="mt-4 text-sm text-gray-400">Ask a question to see streaming AI responses</p>
+                  <p className="mt-1 text-xs text-gray-500">Responses stream in real-time as they're generated</p>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
       </div>
     </div>
   );
