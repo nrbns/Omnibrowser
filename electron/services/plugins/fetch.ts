@@ -55,7 +55,7 @@ async function isUrlAllowed(url: string, userAgent: string = 'OmniBrowser/1.0'):
     const domain = parsed.hostname;
     const robots = await getRobotsTxt(domain);
     return robots.isAllowed(url, userAgent);
-  } catch (error) {
+  } catch {
     // If parsing fails, allow by default
     return true;
   }
@@ -71,7 +71,7 @@ async function getCrawlDelayForDomain(url: string): Promise<number> {
     const robots = await getRobotsTxt(domain);
     const delay = robots.getCrawlDelay('OmniBrowser/1.0');
     return delay || DEFAULT_CRAWL_DELAY;
-  } catch (error) {
+  } catch {
     return DEFAULT_CRAWL_DELAY;
   }
 }

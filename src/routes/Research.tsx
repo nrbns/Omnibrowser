@@ -13,14 +13,12 @@ const ISSUE_DESCRIPTIONS: Record<string, string> = {
 };
 
 function CitationChip({
-  citeId,
   index,
   onHover,
   onLeave,
   onClick,
   active,
 }: {
-  citeId: string;
   index: number;
   onHover?: () => void;
   onLeave?: () => void;
@@ -127,7 +125,6 @@ export function Research() {
   const { activeId, tabs } = useTabsStore();
   const activeTab = useMemo(() => tabs.find((tab) => tab.id === activeId), [tabs, activeId]);
   const [jobChannel, setJobChannel] = useState<string | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
   const [lastCompletedAt, setLastCompletedAt] = useState<number | null>(null);
   const researcherListenerRef = useRef<((event: any, payload: any) => void) | null>(null);
 
@@ -171,9 +168,8 @@ export function Research() {
     setError(undefined);
 
     try {
-      const { jobId: freshJobId, channel } = await ipc.researchStream.start(question.trim(), mode);
+      const { channel } = await ipc.researchStream.start(question.trim(), mode);
       setJobChannel(channel);
-      setJobId(freshJobId);
 
       if (window.ipc?.on) {
         const listener = (_event: any, payload: any) => {
@@ -340,7 +336,6 @@ export function Research() {
                           {sentence.citations.map((citeId, idx) => (
                             <CitationChip
                               key={`${chunkIndex}-${sentenceIdx}-cite-${citeId}-${idx}`}
-                              citeId={citeId}
                               index={idx}
                               active={previewCiteId === citeId}
                               onClick={() => setPreviewCite(previewCiteId === citeId ? null : citeId)}

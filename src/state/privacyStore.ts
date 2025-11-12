@@ -96,7 +96,7 @@ export const usePrivacyStore = create<PrivacyState>((set, get) => ({
           lastChecked: Date.now(),
         },
       });
-    } catch (error) {
+    } catch {
       set({
         vpn: {
           ...get().vpn,
@@ -178,7 +178,7 @@ export const usePrivacyStore = create<PrivacyState>((set, get) => ({
           lastChecked: Date.now(),
         },
       });
-    } catch (error) {
+    } catch {
       set({
         vpn: {
           ...get().vpn,

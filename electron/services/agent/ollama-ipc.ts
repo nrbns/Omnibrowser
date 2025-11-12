@@ -4,7 +4,7 @@
 
 import { z } from 'zod';
 import { registerHandler } from '../../shared/ipc/router';
-import { OllamaCheckRequest, OllamaCheckResponse, OllamaListModelsRequest, OllamaListModelsResponse, AgentAskRequest, AgentAskResponse, DeepResearchRequest, DeepResearchResponse } from '../../shared/ipc/schema';
+import { OllamaCheckRequest, OllamaCheckResponse, OllamaListModelsRequest, AgentAskRequest, AgentAskResponse, DeepResearchRequest } from '../../shared/ipc/schema';
 import { getOllamaAdapter } from './ollama-adapter';
 import { runDeepResearch } from './chains/deep-research';
 

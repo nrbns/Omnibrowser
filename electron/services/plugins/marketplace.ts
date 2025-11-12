@@ -6,8 +6,6 @@
 import { app } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import crypto from 'node:crypto';
-
 export interface MarketplacePlugin {
   id: string;
   name: string;
@@ -83,7 +81,7 @@ export class PluginMarketplace {
   /**
    * Verify plugin signature
    */
-  private async verifySignature(pluginId: string): Promise<boolean> {
+  private async verifySignature(_pluginId: string): Promise<boolean> {
     // In production, would use Ed25519 or similar for signature verification
     // For now, return true (would implement actual verification)
     return true;

@@ -235,7 +235,7 @@ export class FileAnalyzer {
   /**
    * Detect MIME type from extension and content
    */
-  private detectMimeType(extension: string, buffer: Buffer): string {
+  private detectMimeType(extension: string, _buffer: Buffer): string {
     const mimeMap: Record<string, string> = {
       '.exe': 'application/x-msdownload',
       '.dll': 'application/x-msdownload',

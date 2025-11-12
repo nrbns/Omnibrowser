@@ -5,14 +5,12 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTabsStore } from '../../state/tabsStore';
-import { useAppStore } from '../../state/appStore';
 import { ipcEvents } from '../../lib/ipc-events';
 import { ipc } from '../../lib/ipc-typed';
 import { isDevEnv } from '../../lib/env';
 
 export function MainView() {
   const { activeId, tabs } = useTabsStore();
-  const { mode } = useAppStore();
   const containerRef = useRef<HTMLDivElement>(null);
   // Initialize browserReady - if tabs exist, assume ready immediately
   const [browserReady, setBrowserReady] = useState(() => tabs.length > 0);
@@ -133,7 +131,7 @@ export function MainView() {
           setBrowserReady(true);
           setIsLoading(false);
         }
-      } catch (error) {
+      } catch {
         // Silently handle - will retry on next update
         // On error, if tabs exist in store, mark as ready to avoid stuck loading
         if (tabs.length > 0 && activeId) {
@@ -170,7 +168,7 @@ export function MainView() {
             setActiveTabUrl(activeTab.url || '');
           }
         }
-      } catch (error) {
+      } catch {
         // Silent fail
       }
     }, 500); // Poll every 500ms for updates

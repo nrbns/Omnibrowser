@@ -120,7 +120,11 @@ function profileAccent(profile: ProfileInfo) {
   }
 }
 
-export function ProfileQuickSwitcher() {
+interface ProfileQuickSwitcherProps {
+  compact?: boolean;
+}
+
+export function ProfileQuickSwitcher({ compact = false }: ProfileQuickSwitcherProps) {
   const {
     profiles,
     activeProfileId,
@@ -158,8 +162,6 @@ export function ProfileQuickSwitcher() {
     return profiles.find((profile) => profile.id === activeProfileId) ?? profiles[0];
   }, [profiles, activeProfileId]);
 
-  const policy = activeProfile ? policies[activeProfile.id] : undefined;
-
   const sortedProfiles = useMemo(() => sortProfiles(profiles), [profiles]);
 
   const handleSelect = async (profileId: string) => {
@@ -196,9 +198,9 @@ export function ProfileQuickSwitcher() {
     activeProfile.id === 'default' ||
     activeProfile.name.toLowerCase() === 'default';
 
-  const showLabel = !isDefaultProfile;
+  const showLabel = !compact && !isDefaultProfile;
 
-  const buttonSpacing = showLabel ? 'gap-2 px-3' : 'gap-1.5 px-2.5';
+  const buttonSpacing = showLabel ? 'gap-2 px-3' : 'gap-1.5 px-2';
 
   return (
     <div className="relative">

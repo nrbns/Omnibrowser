@@ -4,7 +4,6 @@
  */
 
 import { BrowserView } from 'electron';
-import { SettingsSchema } from '../shared/settings/schema';
 
 interface TabSleepState {
   tabId: string;
@@ -27,7 +26,7 @@ export function updateSleepTimeout(sleepMins: number): void {
   // Restart timers for all tabs
   for (const [tabId, state] of sleepingTabs.entries()) {
     if (!state.isSleeping) {
-      scheduleSleep(tabId, state);
+      scheduleSleep(tabId);
     }
   }
 }
@@ -44,7 +43,7 @@ export function registerTab(tabId: string, view: BrowserView): void {
   };
   
   sleepingTabs.set(tabId, state);
-  scheduleSleep(tabId, state);
+  scheduleSleep(tabId);
   
   // Track activity
   view.webContents.on('did-navigate', () => {
@@ -82,13 +81,13 @@ export function wakeTab(tabId: string): void {
   }
   
   state.isSleeping = false;
-  scheduleSleep(tabId, state);
+  scheduleSleep(tabId);
 }
 
 /**
  * Schedule sleep for a tab
  */
-function scheduleSleep(tabId: string, state: TabSleepState): void {
+function scheduleSleep(tabId: string): void {
   const timer = tabTimers.get(tabId);
   if (timer) {
     clearTimeout(timer);

@@ -5,7 +5,6 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Lock, Eye, Network, MoonStar } from 'lucide-react';
-import { ipc } from '../lib/ipc-typed';
 import { useProfileStore } from '../state/profileStore';
 import { useShadowStore } from '../state/shadowStore';
 

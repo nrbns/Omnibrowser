@@ -1,22 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../state/appStore';
 import { ipcEvents } from '../lib/ipc-events';
-import ResearchPanel from '../modes/research';
 import TradePanel from '../modes/trade';
 import GamesPanel from '../modes/games';
 import DocsPanel from '../modes/docs';
 import ImagesPanel from '../modes/images';
 import ThreatsPanel from '../modes/threats';
 import GraphMindPanel from '../modes/graphmind';
-import { useNavigate } from 'react-router-dom';
 import { MainView } from '../components/layout/MainView';
 import { ResearchSplit } from '../components/Panels/ResearchSplit';
 import { OmniDesk } from '../components/OmniDesk';
 
 export default function Home() {
   const mode = useAppStore(s=>s.mode);
-  const setMode = useAppStore(s=>s.setMode);
-  const navigate = useNavigate();
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Listen for fullscreen changes

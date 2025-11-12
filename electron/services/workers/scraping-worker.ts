@@ -3,10 +3,6 @@
  * Note: Worker threads require separate file, this is a simplified version
  */
 
-import { Worker } from 'node:worker_threads';
-import path from 'node:path';
-import { fileURLToPath } from 'url';
-
 export interface ScrapingTask {
   id: string;
   urls: string[];

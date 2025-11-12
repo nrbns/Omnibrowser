@@ -18,8 +18,6 @@ export class QueryRouter {
    * Classify a query to determine the best handling strategy
    */
   async classify(query: string): Promise<QueryClassification> {
-    const queryLower = query.toLowerCase().trim();
-
     // Direct answer patterns (factual questions, calculations)
     const directAnswerPatterns = [
       /^(what|when|where|who|why|how)\s+is/i,

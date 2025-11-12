@@ -160,7 +160,6 @@ export class AgentHost {
     }
 
     const results: AgentStepResult[] = [];
-    const stepStartTime = Date.now();
 
     for (const step of active.plan.steps) {
       // Check budget

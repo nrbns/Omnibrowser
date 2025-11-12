@@ -152,7 +152,7 @@ const typedApi = {
       ipcRenderer.on('tabs:updated', wrappedCallback);
     }
   },
-  removeListener: (channel: string, callback: (event: any, ...args: any[]) => void) => {
+  removeListener: (channel: string, _callback: (event: any, ...args: any[]) => void) => {
     ipcRenderer.removeAllListeners(channel);
     if (channel === 'tabs:updated' || channel === 'ob://ipc/v1/tabs:updated') {
       ipcRenderer.removeAllListeners('tabs:updated');

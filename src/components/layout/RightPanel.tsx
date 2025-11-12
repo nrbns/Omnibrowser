@@ -5,7 +5,6 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Brain, Zap, FileText, Shield, ListChecks, Activity, Sparkles, Share2, Leaf, ShieldCheck, KeyRound } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
-import { ipc } from '../../lib/ipc-typed';
 import { AgentPlan, AgentStep, ConsentRequest } from '../../lib/ipc-events';
 import { useIPCEvent } from '../../lib/use-ipc-event';
 import { AgentPlanner } from '../AgentPlanner';

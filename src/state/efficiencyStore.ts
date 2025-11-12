@@ -30,6 +30,15 @@ type Snapshot = {
   carbonRegion?: string | null;
 };
 
+export type EfficiencySample = {
+  timestamp: number;
+  mode: EfficiencyMode;
+  batteryPct: number | null;
+  carbonIntensity: number | null | undefined;
+  cpuLoad: number;
+  activeTabs: number;
+};
+
 type EfficiencyState = {
   mode: EfficiencyMode;
   label: string;
@@ -37,6 +46,7 @@ type EfficiencyState = {
   colorClass: string;
   lastUpdated: number | null;
   snapshot: Snapshot;
+  history: EfficiencySample[];
   setEvent: (event: {
     mode: EfficiencyMode;
     label?: string | null;
@@ -56,14 +66,65 @@ const defaultSnapshot: Snapshot = {
   carbonRegion: null,
 };
 
-export const useEfficiencyStore = create<EfficiencyState>((set) => ({
+const HISTORY_KEY = 'ob:ecoHistory:v1';
+
+function loadHistory(): EfficiencySample[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(HISTORY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item) => ({
+        timestamp: typeof item.timestamp === 'number' ? item.timestamp : Date.now(),
+        mode: (item.mode as EfficiencyMode) ?? 'normal',
+        batteryPct: typeof item.batteryPct === 'number' ? item.batteryPct : null,
+        carbonIntensity:
+          typeof item.carbonIntensity === 'number' || item.carbonIntensity === null
+            ? item.carbonIntensity
+            : undefined,
+        cpuLoad: typeof item.cpuLoad === 'number' ? item.cpuLoad : 0,
+        activeTabs: typeof item.activeTabs === 'number' ? item.activeTabs : 0,
+      }))
+      .slice(-120);
+  } catch (error) {
+    console.warn('[efficiencyStore] Failed to load history', error);
+    return [];
+  }
+}
+
+function saveHistory(history: EfficiencySample[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  } catch (error) {
+    console.warn('[efficiencyStore] Failed to persist history', error);
+  }
+}
+
+const initialHistory = loadHistory();
+
+export const useEfficiencyStore = create<EfficiencyState>((set, get) => ({
   mode: 'normal',
   label: MODE_LABELS.normal,
   badge: MODE_BADGES.normal,
   colorClass: MODE_COLORS.normal,
   lastUpdated: null,
   snapshot: defaultSnapshot,
+  history: initialHistory,
   setEvent: (event) => {
+    const sample: EfficiencySample = {
+      timestamp: event.timestamp,
+      mode: event.mode,
+      batteryPct: event.snapshot.batteryPct,
+      carbonIntensity: event.snapshot.carbonIntensity,
+      cpuLoad: event.snapshot.cpuLoad1,
+      activeTabs: event.snapshot.activeTabs,
+    };
+    let nextHistory = get().history;
+    nextHistory = [...nextHistory, sample].slice(-120);
+    saveHistory(nextHistory);
     const nextMode = event.mode;
     set({
       mode: nextMode,
@@ -72,6 +133,7 @@ export const useEfficiencyStore = create<EfficiencyState>((set) => ({
       colorClass: MODE_COLORS[nextMode],
       lastUpdated: event.timestamp,
       snapshot: event.snapshot,
+      history: nextHistory,
     });
   },
 }));

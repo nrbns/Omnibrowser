@@ -18,11 +18,11 @@ import { Portal } from '../common/Portal';
 import { useTabGraphStore } from '../../state/tabGraphStore';
 import { PredictiveClusterChip, PredictivePrefetchHint } from './PredictiveClusterChip';
 import { HolographicPreviewOverlay } from '../hologram';
-import { useCrossRealityStore } from '../../state/crossRealityStore';
-import { isDevEnv } from '../../lib/env';
+import { isDevEnv, isElectronRuntime } from '../../lib/env';
 
 const TAB_GRAPH_DRAG_MIME = 'application/x-omnibrowser-tab-id';
 const IS_DEV = isDevEnv();
+const IS_ELECTRON = isElectronRuntime();
 
 interface Tab {
   id: string;
@@ -41,18 +41,33 @@ interface Tab {
   sleeping?: boolean;
 }
 
+const mapTabsForStore = (list: Tab[]) =>
+  list.map((t) => ({
+    id: t.id,
+    title: t.title,
+    active: t.active,
+    url: t.url,
+    mode: t.mode,
+    containerId: t.containerId,
+    containerColor: t.containerColor,
+    containerName: t.containerName,
+    createdAt: t.createdAt,
+    lastActiveAt: t.lastActiveAt,
+    sessionId: t.sessionId,
+    profileId: t.profileId,
+    sleeping: t.sleeping,
+  }));
+
 export function TabStrip() {
-  const { tabs: storeTabs, setAll: setAllTabs, setActive: setActiveTab, activeId } = useTabsStore();
+  const { setAll: setAllTabs, setActive: setActiveTab, activeId } = useTabsStore();
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [predictedClusters, setPredictedClusters] = useState<Array<{ id: string; label: string; tabIds: string[]; confidence?: number }>>([]);
   const [prefetchEntries, setPrefetchEntries] = useState<Array<{ tabId: string; url: string; reason: string; confidence?: number }>>([]);
   const [predictionSummary, setPredictionSummary] = useState<string | null>(null);
   const [holographicPreviewTabId, setHolographicPreviewTabId] = useState<string | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
   const [previewMetadata, setPreviewMetadata] = useState<{ url?: string; title?: string } | null>(null);
   const [hologramSupported, setHologramSupported] = useState<boolean | null>(null);
   const [handoffStatus, setHandoffStatus] = useState<{ platform: string; lastSentAt: number | null }>({ platform: 'desktop', lastSentAt: null });
-  const registerHandoff = useCrossRealityStore((state) => state.registerHandoff);
   const [contextMenu, setContextMenu] = useState<{
     tabId: string;
     url: string;
@@ -84,6 +99,15 @@ export function TabStrip() {
 
   const runPredictiveSuggestions = useCallback(
     async (options?: { force?: boolean }) => {
+      if (!IS_ELECTRON) {
+        // Predictive suggestions require IPC/Electron – clear any stale hints
+        if (options?.force) {
+          setPredictedClusters([]);
+          setPrefetchEntries([]);
+          setPredictionSummary(null);
+        }
+        return;
+      }
       if (predictiveRequestRef.current && !options?.force) {
         return predictiveRequestRef.current;
       }
@@ -143,6 +167,9 @@ export function TabStrip() {
   }, [hasInitialized]);
 
   const refreshTabsFromMain = useCallback(async () => {
+    if (!IS_ELECTRON) {
+      return;
+    }
     try {
       const tabList = await ipc.tabs.list();
       if (!Array.isArray(tabList)) return;
@@ -167,20 +194,7 @@ export function TabStrip() {
 
       setTabs(mappedTabs);
       tabsRef.current = mappedTabs;
-      setAllTabs(mappedTabs.map(t => ({
-        id: t.id,
-        title: t.title,
-        active: t.active,
-        url: t.url,
-        mode: t.mode,
-        containerId: t.containerId,
-        containerColor: t.containerColor,
-        containerName: t.containerName,
-        createdAt: t.createdAt,
-        lastActiveAt: t.lastActiveAt,
-        sessionId: t.sessionId,
-        profileId: t.profileId,
-      })));
+      setAllTabs(mapTabsForStore(mappedTabs));
 
       const activeTab = mappedTabs.find(t => t.active);
       if (activeTab) {
@@ -217,6 +231,64 @@ export function TabStrip() {
 
   // Wait for IPC to be ready before making calls
   useEffect(() => {
+    if (!IS_ELECTRON) {
+      let isMounted = true;
+
+      const applyTabs = (list: Tab[]) => {
+        if (!isMounted) return;
+        const mapped = list.length
+          ? list
+          : [
+              {
+                id: 'local-initial',
+                title: 'Welcome',
+                url: 'about:blank',
+                active: true,
+                mode: 'normal',
+              },
+            ];
+        setTabs(mapped);
+        tabsRef.current = mapped;
+        previousTabIdsRef.current = mapped.map((t) => t.id).sort().join(',');
+        setAllTabs(mapTabsForStore(mapped));
+        const activeTab = mapped.find((t) => t.active) ?? mapped[0];
+        setActiveTab(activeTab ? activeTab.id : null);
+        currentActiveIdRef.current = activeTab ? activeTab.id : null;
+        setHasInitialized(true);
+      };
+
+      applyTabs(tabsRef.current.length > 0 ? tabsRef.current : tabs);
+
+      const unsubscribe = ipcEvents.on<TabUpdate[]>('tabs:updated', (tabList) => {
+        if (!isMounted) return;
+        if (!Array.isArray(tabList) || tabList.length === 0) {
+          applyTabs([]);
+          return;
+        }
+        const mappedTabs: Tab[] = tabList.map((t) => ({
+          id: t.id,
+          title: t.title || 'New Tab',
+          url: t.url || 'about:blank',
+          active: Boolean(t.active),
+          mode: (t as any).mode || 'normal',
+          containerId: t.containerId,
+          containerName: t.containerName,
+          containerColor: t.containerColor,
+          createdAt: t.createdAt,
+          lastActiveAt: t.lastActiveAt,
+          sessionId: t.sessionId,
+          profileId: t.profileId,
+          sleeping: (t as any).sleeping,
+        }));
+        applyTabs(mappedTabs);
+      });
+
+      return () => {
+        isMounted = false;
+        unsubscribe();
+      };
+    }
+
     let isMounted = true;
     let ipcReady = false;
     
@@ -298,20 +370,7 @@ export function TabStrip() {
           if (previousTabIdsRef.current !== tabIds) {
             previousTabIdsRef.current = tabIds;
             setTabs(mappedTabs);
-            setAllTabs(mappedTabs.map(t => ({
-              id: t.id,
-              title: t.title,
-              active: t.active,
-              url: t.url,
-              mode: t.mode,
-              containerId: t.containerId,
-              containerColor: t.containerColor,
-              containerName: t.containerName,
-              createdAt: t.createdAt,
-              lastActiveAt: t.lastActiveAt,
-              sessionId: t.sessionId,
-              profileId: t.profileId,
-            })));
+            setAllTabs(mapTabsForStore(mappedTabs));
           }
           
           // Set active tab in store (only if changed - use ref to avoid dependency)
@@ -350,7 +409,7 @@ export function TabStrip() {
                   setHasInitialized(true);
                   return;
                 }
-              } catch (e) {
+              } catch {
                 // Ignore errors, proceed to create tab
               }
               
@@ -392,7 +451,7 @@ export function TabStrip() {
             }
           }
         }
-      } catch (error) {
+      } catch {
         // Silently handle errors - don't auto-create tab on error
         if (isInitialLoad && isMounted && !hasInitialized) {
           setHasInitialized(true);
@@ -499,20 +558,7 @@ export function TabStrip() {
       // This ensures UI stays in sync even if optimistic updates were wrong
       setTabs(mappedTabs);
       tabsRef.current = mappedTabs;
-      setAllTabs(mappedTabs.map(t => ({
-        id: t.id,
-        title: t.title,
-        active: t.active,
-        url: t.url,
-        mode: t.mode,
-        containerId: t.containerId,
-        containerColor: t.containerColor,
-      containerName: t.containerName,
-      createdAt: t.createdAt,
-      lastActiveAt: t.lastActiveAt,
-      sessionId: t.sessionId,
-      profileId: t.profileId,
-      })));
+      setAllTabs(mapTabsForStore(mappedTabs));
       
       // Update previousTabIdsRef to track changes
       if (currentTabIds !== newTabIds) {
@@ -571,6 +617,29 @@ export function TabStrip() {
   }, []); // Empty deps - only run on mount, IPC events handle all updates
 
   const addTab = async () => {
+    if (!IS_ELECTRON) {
+      const baseTabs = (tabsRef.current.length > 0 ? tabsRef.current : tabs).map((t) => ({
+        ...t,
+        active: false,
+      }));
+      const newTab: Tab = {
+        id: `local-${Date.now()}`,
+        title: 'New Tab',
+        url: 'about:blank',
+        active: true,
+        mode: 'normal',
+      };
+      const updated = [...baseTabs, newTab];
+      setTabs(updated);
+      tabsRef.current = updated;
+      previousTabIdsRef.current = updated.map((t) => t.id).sort().join(',');
+      setAllTabs(mapTabsForStore(updated));
+      setActiveTab(newTab.id);
+      currentActiveIdRef.current = newTab.id;
+      ipcEvents.emit('tabs:updated', mapTabsForStore(updated));
+      return;
+    }
+
     // Prevent multiple simultaneous tab creations (debounce)
     if (isCreatingTabRef.current) {
       if (IS_DEV) {
@@ -611,6 +680,45 @@ export function TabStrip() {
   };
 
   const closeTab = async (tabId: string) => {
+    if (!IS_ELECTRON) {
+      const currentTabs = tabsRef.current.length > 0 ? tabsRef.current : tabs;
+      const idx = currentTabs.findIndex((t) => t.id === tabId);
+      if (idx === -1) {
+        return;
+      }
+      const wasActive = currentTabs[idx]?.active;
+      const remaining = currentTabs.filter((t) => t.id !== tabId);
+      let updated = remaining;
+
+      if (remaining.length === 0) {
+        const fallbackTab: Tab = {
+          id: `local-${Date.now()}`,
+          title: 'New Tab',
+          url: 'about:blank',
+          active: true,
+          mode: 'normal',
+        };
+        updated = [fallbackTab];
+      } else if (wasActive) {
+        const nextIndex = Math.min(idx, remaining.length - 1);
+        updated = remaining.map((t, index) => ({
+          ...t,
+          active: index === nextIndex,
+        }));
+      }
+
+      const activeTab = updated.find((t) => t.active) ?? updated[0];
+
+      setTabs(updated);
+      tabsRef.current = updated;
+      previousTabIdsRef.current = updated.map((t) => t.id).sort().join(',');
+      setAllTabs(mapTabsForStore(updated));
+      setActiveTab(activeTab ? activeTab.id : null);
+      currentActiveIdRef.current = activeTab ? activeTab.id : null;
+      ipcEvents.emit('tabs:updated', mapTabsForStore(updated));
+      return;
+    }
+
     // Prevent closing if already creating a tab
     if (isCreatingTabRef.current) {
       return;
@@ -633,7 +741,7 @@ export function TabStrip() {
     setTabs(remainingTabs);
     tabsRef.current = remainingTabs;
     previousTabIdsRef.current = remainingTabs.map(t => t.id).sort().join(',');
-    setAllTabs(remainingTabs.map(t => ({ id: t.id, title: t.title, active: t.active, url: t.url, mode: t.mode })));
+    setAllTabs(mapTabsForStore(remainingTabs));
 
     // If closing active tab, activate the next one
     if (wasActive && remainingTabs.length > 0) {
@@ -672,7 +780,7 @@ export function TabStrip() {
         setTabs(snapshotTabs);
         tabsRef.current = snapshotTabs;
         previousTabIdsRef.current = snapshotTabs.map(t => t.id).sort().join(',');
-        setAllTabs(snapshotTabs.map(t => ({ id: t.id, title: t.title, active: t.active, url: t.url, mode: t.mode })));
+        setAllTabs(mapTabsForStore(snapshotTabs));
 
         if (previousActiveId) {
           setActiveTab(previousActiveId);
@@ -689,7 +797,7 @@ export function TabStrip() {
       setTabs(snapshotTabs);
       tabsRef.current = snapshotTabs;
       previousTabIdsRef.current = snapshotTabs.map(t => t.id).sort().join(',');
-      setAllTabs(snapshotTabs.map(t => ({ id: t.id, title: t.title, active: t.active, url: t.url, mode: t.mode })));
+      setAllTabs(mapTabsForStore(snapshotTabs));
 
       if (previousActiveId) {
         setActiveTab(previousActiveId);
@@ -701,6 +809,26 @@ export function TabStrip() {
   };
 
   const activateTab = async (tabId: string) => {
+    if (!IS_ELECTRON) {
+      const currentTabs = tabsRef.current.length > 0 ? tabsRef.current : tabs;
+      const tabToActivate = currentTabs.find((t) => t.id === tabId);
+      if (!tabToActivate) {
+        return;
+      }
+      const updated = currentTabs.map((t) => ({
+        ...t,
+        active: t.id === tabId,
+      }));
+      setTabs(updated);
+      tabsRef.current = updated;
+      previousTabIdsRef.current = updated.map((t) => t.id).sort().join(',');
+      setAllTabs(mapTabsForStore(updated));
+      setActiveTab(tabId);
+      currentActiveIdRef.current = tabId;
+      ipcEvents.emit('tabs:updated', mapTabsForStore(updated));
+      return;
+    }
+
     // Prevent activating if already the active tab
     if (activeId === tabId || activationInFlightRef.current === tabId) {
       return;
@@ -734,7 +862,7 @@ export function TabStrip() {
     }));
     setTabs(updatedTabs);
     tabsRef.current = updatedTabs;
-    setAllTabs(updatedTabs.map(t => ({ id: t.id, title: t.title, active: t.active, url: t.url, mode: t.mode })));
+    setAllTabs(mapTabsForStore(updatedTabs));
 
     if (IS_DEV) {
       console.log('[TabStrip] Activating tab (optimistic):', tabId, 'previous:', previousActiveId);
@@ -761,7 +889,7 @@ export function TabStrip() {
         setTabs(snapshotTabs);
         tabsRef.current = snapshotTabs;
         previousTabIdsRef.current = snapshotTabs.map(t => t.id).sort().join(',');
-        setAllTabs(snapshotTabs.map(t => ({ id: t.id, title: t.title, active: t.active, url: t.url, mode: t.mode })));
+        setAllTabs(mapTabsForStore(snapshotTabs));
 
         if (previousActiveId) {
           setActiveTab(previousActiveId);
@@ -780,7 +908,7 @@ export function TabStrip() {
       setTabs(snapshotTabs);
       tabsRef.current = snapshotTabs;
       previousTabIdsRef.current = snapshotTabs.map(t => t.id).sort().join(',');
-      setAllTabs(snapshotTabs.map(t => ({ id: t.id, title: t.title, active: t.active, url: t.url, mode: t.mode })));
+      setAllTabs(mapTabsForStore(snapshotTabs));
 
       if (previousActiveId) {
         setActiveTab(previousActiveId);

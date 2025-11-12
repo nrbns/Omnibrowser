@@ -3,12 +3,11 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Shield, ChevronDown, Check, X } from 'lucide-react';
+import { Shield, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTabsStore } from '../../state/tabsStore';
 import { ShieldsCounters } from '../../lib/ipc-events';
 import { useIPCEvent } from '../../lib/use-ipc-event';
-import { ipc } from '../../lib/ipc-typed';
 
 interface ShieldsConfig {
   ads: boolean;

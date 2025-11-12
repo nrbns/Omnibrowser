@@ -2,14 +2,15 @@
 Workspace Routes - CRUD operations for workspaces and tabs
 """
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends, status
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
 from sqlalchemy.orm import Session
 
 from apps.api.database import get_db
-from apps.api.models import Workspace, Tab
+from apps.api.models import Workspace, Tab, User
+from apps.api.security import get_current_user
 
 router = APIRouter()
 
@@ -45,9 +46,12 @@ class TabResponse(BaseModel):
     created_at: str
 
 @router.get("", response_model=List[WorkspaceResponse])
-async def list_workspaces(user_id: str, db: Session = Depends(get_db)):
+async def list_workspaces(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """List all workspaces for a user"""
-    workspaces = db.query(Workspace).filter(Workspace.user_id == user_id).all()
+    workspaces = db.query(Workspace).filter(Workspace.user_id == current_user.id).all()
     return [
         WorkspaceResponse(
             id=w.id,
@@ -62,10 +66,14 @@ async def list_workspaces(user_id: str, db: Session = Depends(get_db)):
     ]
 
 @router.post("", response_model=WorkspaceResponse)
-async def create_workspace(request: WorkspaceCreate, user_id: str, db: Session = Depends(get_db)):
+async def create_workspace(
+    request: WorkspaceCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Create a new workspace"""
     workspace = Workspace(
-        user_id=user_id,
+        user_id=current_user.id,
         name=request.name,
         mode=request.mode,
         vpn_profile_id=request.vpn_profile_id,
@@ -86,11 +94,17 @@ async def create_workspace(request: WorkspaceCreate, user_id: str, db: Session =
     )
 
 @router.get("/{workspace_id}", response_model=WorkspaceResponse)
-async def get_workspace(workspace_id: str, db: Session = Depends(get_db)):
+async def get_workspace(
+    workspace_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Get workspace by ID"""
     workspace = db.query(Workspace).filter(Workspace.id == workspace_id).first()
     if not workspace:
         raise HTTPException(status_code=404, detail="Workspace not found")
+    if workspace.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Workspace access denied")
     
     return WorkspaceResponse(
         id=workspace.id,
@@ -103,11 +117,18 @@ async def get_workspace(workspace_id: str, db: Session = Depends(get_db)):
     )
 
 @router.post("/{workspace_id}/tabs", response_model=TabResponse)
-async def create_tab(workspace_id: str, request: TabCreate, db: Session = Depends(get_db)):
+async def create_tab(
+    workspace_id: str,
+    request: TabCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Create a new tab in workspace"""
     workspace = db.query(Workspace).filter(Workspace.id == workspace_id).first()
     if not workspace:
         raise HTTPException(status_code=404, detail="Workspace not found")
+    if workspace.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Workspace access denied")
     
     tab = Tab(
         workspace_id=workspace_id,
@@ -129,11 +150,17 @@ async def create_tab(workspace_id: str, request: TabCreate, db: Session = Depend
     )
 
 @router.get("/{workspace_id}/tabs", response_model=List[TabResponse])
-async def list_tabs(workspace_id: str, db: Session = Depends(get_db)):
+async def list_tabs(
+    workspace_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """List all tabs in workspace"""
     workspace = db.query(Workspace).filter(Workspace.id == workspace_id).first()
     if not workspace:
         raise HTTPException(status_code=404, detail="Workspace not found")
+    if workspace.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Workspace access denied")
     
     tabs = db.query(Tab).filter(Tab.workspace_id == workspace_id).all()
     return [

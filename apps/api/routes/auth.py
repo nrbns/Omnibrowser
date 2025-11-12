@@ -2,17 +2,25 @@
 Auth Routes - Signup, Login, OIDC, Token Refresh
 """
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel, EmailStr
 from typing import Optional
-import jwt
-from datetime import datetime, timedelta
+from sqlalchemy.orm import Session
+
+from apps.api.database import get_db
+from apps.api.models import User
+from apps.api.security import (
+    authenticate_user,
+    create_access_token,
+    create_refresh_token,
+    get_current_user,
+    get_password_hash,
+    decode_token,
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+)
 
 router = APIRouter()
 
-# Mock user store (replace with database)
-users_db: dict[str, dict] = {}
-SECRET_KEY = "your-secret-key-change-in-production"  # Use env var
 
 class SignupRequest(BaseModel):
     email: EmailStr
@@ -29,37 +37,43 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     expires_in: int
 
-@router.post("/signup")
-async def signup(request: SignupRequest):
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+@router.post("/signup", status_code=status.HTTP_201_CREATED)
+async def signup(request: SignupRequest, db: Session = Depends(get_db)):
     """User registration"""
-    if request.email in users_db:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    
-    # TODO: Hash password, store in database
-    users_db[request.email] = {
-        "email": request.email,
-        "handle": request.handle or request.email.split("@")[0],
-        "password_hash": request.password,  # Hash this!
-        "created_at": datetime.utcnow().isoformat(),
-    }
-    
-    return {"message": "User created", "email": request.email}
+    existing = db.query(User).filter(User.email == request.email.lower()).first()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+
+    user = User(
+        email=request.email.lower(),
+        handle=request.handle or request.email.split("@")[0],
+        password_hash=get_password_hash(request.password),
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    return {"message": "User created", "email": user.email, "id": user.id}
+
 
 @router.post("/login", response_model=TokenResponse)
-async def login(request: LoginRequest):
+async def login(request: LoginRequest, db: Session = Depends(get_db)):
     """Email/password login"""
-    user = users_db.get(request.email)
-    if not user or user["password_hash"] != request.password:  # Compare hashed
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    
-    # Generate JWT tokens
-    access_token = create_access_token({"sub": request.email})
-    refresh_token = create_refresh_token({"sub": request.email})
-    
+    user = authenticate_user(db, request.email, request.password)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    access_token = create_access_token(user.id, claims={"email": user.email})
+    refresh_token = create_refresh_token(user.id, claims={"email": user.email})
+
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
-        expires_in=3600,
+        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
 
 @router.post("/login/oidc")
@@ -75,33 +89,29 @@ async def login_otp(phone: str):
     raise HTTPException(status_code=501, detail="OTP not implemented yet")
 
 @router.post("/token/refresh")
-async def refresh_token(refresh_token: str):
+async def refresh_token(request: RefreshRequest, db: Session = Depends(get_db)):
     """Refresh access token"""
-    try:
-        payload = jwt.decode(refresh_token, SECRET_KEY, algorithms=["HS256"])
-        email = payload.get("sub")
-        
-        new_access_token = create_access_token({"sub": email})
-        return TokenResponse(
-            access_token=new_access_token,
-            refresh_token=refresh_token,
-            expires_in=3600,
-        )
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    token_payload = decode_token(request.refresh_token)
+    user = db.query(User).filter(User.id == token_payload.sub).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(hours=1)
-    to_encode.update({"exp": expire, "iat": datetime.utcnow()})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm="HS256")
+    access_token = create_access_token(user.id, claims={"email": user.email})
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=request.refresh_token,
+        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
 
-def create_refresh_token(data: dict):
-    expire = datetime.utcnow() + timedelta(days=30)
-    to_encode = data.copy()
-    to_encode.update({"exp": expire, "iat": datetime.utcnow()})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm="HS256")
+
+@router.get("/me")
+async def get_me(current_user: User = Depends(get_current_user)):
+    """Return the authenticated user profile."""
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "handle": current_user.handle,
+        "plan": current_user.plan,
+        "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
+    }
 

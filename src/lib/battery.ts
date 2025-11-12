@@ -13,19 +13,31 @@ const carbonEndpoints: Record<string, string> = {
   global: 'https://api.co2signal.com/v1/latest?country=',
 };
 
+let carbonTokenWarningLogged = false;
+
 async function fetchCarbonIntensity(regionCode?: string | null): Promise<{ intensity: number | null; region: string | null }> {
   const defaultRegion = getEnvVar('CARBON_DEFAULT_REGION') || 'global';
   const region = regionCode ?? defaultRegion;
 
   const apiBase = getEnvVar('CARBON_API_URL') ?? carbonEndpoints.global;
+  const apiToken = getEnvVar('CARBON_API_TOKEN');
+
   if (!apiBase) {
+    return { intensity: null, region };
+  }
+
+  if (apiBase === carbonEndpoints.global && !apiToken) {
+    if (isDevEnv() && !carbonTokenWarningLogged) {
+      carbonTokenWarningLogged = true;
+      console.info('[battery] Skipping carbon intensity fetch: CARBON_API_TOKEN not configured.');
+    }
     return { intensity: null, region };
   }
 
   try {
     const response = await fetch(`${apiBase}${encodeURIComponent(region)}`, {
-      headers: getEnvVar('CARBON_API_TOKEN')
-        ? { Authorization: `Bearer ${getEnvVar('CARBON_API_TOKEN')}` }
+      headers: apiToken
+        ? { Authorization: `Bearer ${apiToken}` }
         : undefined,
     });
 

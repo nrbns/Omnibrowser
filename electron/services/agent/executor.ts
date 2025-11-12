@@ -104,7 +104,7 @@ export class PlanExecutor {
         results,
         finalOutput,
       };
-    } catch (error) {
+    } catch {
       return {
         success: false,
         completedSteps,

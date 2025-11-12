@@ -195,7 +195,7 @@ export class HybridSearchService {
   /**
    * Custom crawler-based search (uses knowledge graph + local cache)
    */
-  private async searchCustom(query: string): Promise<SearchResult[]> {
+  private async searchCustom(_query: string): Promise<SearchResult[]> {
     // This would integrate with the local knowledge graph and citation graph
     // For now, return empty array (to be implemented with local search)
     try {

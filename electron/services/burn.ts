@@ -3,11 +3,9 @@
  * Instantly clear all data from a tab or entire browser
  */
 
-import { BrowserWindow, BrowserView, session } from 'electron';
+import { BrowserWindow, session } from 'electron';
 import { getTabs } from './tabs';
 // @ts-nocheck
-
-import { getMainWindow } from './windows';
 
 /**
  * Burn a specific tab - clear all data immediately

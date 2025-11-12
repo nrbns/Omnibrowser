@@ -5,7 +5,7 @@
 
 import { useState, useEffect } from 'react';
 import { ipc } from '../lib/ipc-typed';
-import { User, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
 
 interface Profile {
   id: string;

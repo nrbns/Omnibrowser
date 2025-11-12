@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { X, RefreshCw, Share2, Wand2 } from 'lucide-react';
 import { useTabGraphStore, TabGraphNode } from '../../state/tabGraphStore';
 import { useWorkflowWeaverStore } from '../../state/workflowWeaverStore';
@@ -48,7 +48,6 @@ export function TabGraphOverlay() {
     error: state.error,
     fetch: state.fetch,
   }));
-  const clusters = data?.clusters ?? [];
   const [hovered, setHovered] = useState<TabGraphNode | null>(null);
 
   useEffect(() => {
@@ -200,7 +199,6 @@ export function TabGraphOverlay() {
                 })}
 
                 {graph?.positions.map(({ node, x, y }) => {
-                  const isHovered = hovered?.id === node.id;
                   const isFocused = focusedTabId === node.id;
                   return (
                     <g key={node.id} transform={`translate(${x}, ${y})`}>

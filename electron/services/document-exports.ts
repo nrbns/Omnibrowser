@@ -3,9 +3,8 @@
  * Export documents with citations in various formats
  */
 
-import { DocumentReview, DocumentClaim } from './document-review';
 import { promises as fs } from 'node:fs';
-import path from 'node:path';
+import { DocumentReview } from './document-review';
 
 export type CitationStyle = 'apa' | 'mla' | 'chicago' | 'ieee' | 'harvard';
 

@@ -2,7 +2,6 @@
  * OmniScript IPC Handlers
  */
 
-import { z } from 'zod';
 import { registerHandler } from '../shared/ipc/router';
 import { OmniScriptParseRequest, OmniScriptExecuteRequest } from '../shared/ipc/schema';
 import { getOmniScriptParser } from './omniscript/parser';

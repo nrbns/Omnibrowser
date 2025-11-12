@@ -4,7 +4,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Shield, ShieldCheck, ShieldOff, Lock, Cookie, FileCode, Webcam } from 'lucide-react';
+import { Shield, ShieldCheck, Lock, Cookie, FileCode, Webcam } from 'lucide-react';
 import { ipc } from '../../lib/ipc-typed';
 import { useTabsStore } from '../../state/tabsStore';
 

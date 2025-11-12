@@ -2,7 +2,6 @@
  * ModeSwitch - Browser mode selector
  */
 
-import { useState, useEffect } from 'react';
 import { Brain, TrendingUp, Gamepad2, Zap } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAppStore } from '../../state/appStore';

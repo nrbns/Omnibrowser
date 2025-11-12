@@ -5,12 +5,9 @@
 
 import { Readability } from '@mozilla/readability';
 import { JSDOM } from 'jsdom';
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
 import { registerHandler } from '../shared/ipc/router';
 import { z } from 'zod';
 import { researchQuery } from './research-enhanced';
-import { verifyResearchResult } from './research-verifier';
 import { exportDocument, exportToMarkdown, exportToHTML, CitationStyle } from './document-exports';
 import { stealthFetchPage } from './stealth-fetch';
 
@@ -56,6 +53,32 @@ export interface DocumentClaim {
   };
 }
 
+export interface FactHighlight {
+  claimId: string;
+  text: string;
+  importance: 'verified' | 'disputed' | 'unverified';
+  section?: string;
+  position: number;
+  fragment?: string;
+}
+
+export interface AssumptionHighlight {
+  claimId: string;
+  text: string;
+  rationale: string;
+  severity: 'low' | 'medium' | 'high';
+  section?: string;
+}
+
+export interface AuditTrailEntry {
+  claimId: string;
+  section?: string;
+  page?: number;
+  line?: number;
+  status: 'verified' | 'disputed' | 'unverified';
+  link?: string;
+}
+
 export interface DocumentReview {
   id: string;
   title: string;
@@ -65,6 +88,15 @@ export interface DocumentReview {
   entities: DocumentEntity[];
   timeline: TimelineEvent[];
   claims: DocumentClaim[];
+  factHighlights?: FactHighlight[];
+  assumptions?: AssumptionHighlight[];
+  auditTrail?: AuditTrailEntry[];
+  entityGraph?: Array<{
+    name: string;
+    count: number;
+    type: DocumentEntity['type'];
+    connections: string[];
+  }>;
   createdAt: number;
   updatedAt: number;
 }
@@ -141,7 +173,6 @@ function extractSections(text: string): DocumentSection[] {
  * Extract entities from text (simplified NER)
  */
 function extractEntities(text: string): DocumentEntity[] {
-  const entities: DocumentEntity[] = [];
   const entityMap = new Map<string, DocumentEntity>();
   
   // Simple patterns for entity extraction
@@ -302,34 +333,21 @@ function createTextFragment(snippet: string): string {
   return end ? `#:~:text=${encode(start)},${encode(end)}` : `#:~:text=${encode(start)}`;
 }
 
-function buildFactHighlights(claims: DocumentClaim[]): Array<{
-  claimId: string;
-  text: string;
-  importance: string;
-  section?: string;
-  position: number;
-  fragment: string;
-}> | undefined {
+function buildFactHighlights(claims: DocumentClaim[]): FactHighlight[] | undefined {
   if (claims.length === 0) return undefined;
   return claims.slice(0, 20).map((claim) => ({
     claimId: claim.id,
     text: claim.text,
-    importance: claim.verification.status,
+    importance: claim.verification.status as FactHighlight['importance'],
     section: claim.section,
     position: claim.position,
-    fragment: createTextFragment(claim.text),
+    fragment: createTextFragment(claim.text) || undefined,
   }));
 }
 
 function buildAssumptions(
   claims: DocumentClaim[]
-): Array<{
-  claimId: string;
-  text: string;
-  rationale: string;
-  severity: 'low' | 'medium' | 'high';
-  section?: string;
-}> | undefined {
+): AssumptionHighlight[] | undefined {
   const assumptions = claims
     .filter(
       (claim) =>
@@ -363,21 +381,14 @@ function buildAssumptions(
   return assumptions.length > 0 ? assumptions : undefined;
 }
 
-function buildAuditTrail(claims: DocumentClaim[]): Array<{
-  claimId: string;
-  section?: string;
-  page?: number;
-  line?: number;
-  status: string;
-  link?: string;
- }> | undefined {
+function buildAuditTrail(claims: DocumentClaim[]): AuditTrailEntry[] | undefined {
   if (claims.length === 0) return undefined;
   return claims.map((claim) => ({
     claimId: claim.id,
     section: claim.section,
     page: claim.page,
     line: claim.line,
-    status: claim.verification.status,
+    status: claim.verification.status as AuditTrailEntry['status'],
     link: claim.verification.sources[0]?.url,
   }));
 }
@@ -385,12 +396,7 @@ function buildAuditTrail(claims: DocumentClaim[]): Array<{
 function buildEntityGraph(
   entities: DocumentEntity[],
   claims: DocumentClaim[]
-): Array<{
-  name: string;
-  count: number;
-  type: string;
-  connections: string[];
-}> | undefined {
+): DocumentReview['entityGraph'] | undefined {
   if (entities.length === 0) return undefined;
 
   return entities.slice(0, 25).map((entity) => {
@@ -545,7 +551,8 @@ export async function ingestDocument(
     entities,
     timeline,
     claims,
-    // @ts-expect-error: auditTrail is not yet typed on DocumentReview
+    factHighlights: buildFactHighlights(claims),
+    assumptions: buildAssumptions(claims),
     auditTrail: buildAuditTrail(claims),
     entityGraph: buildEntityGraph(entities, claims),
     createdAt: Date.now(),

@@ -36,7 +36,7 @@ async function fetchReadable(target: string) {
     const text = (article.textContent || '').replace(/[\t\r]+/g,' ').trim();
     const title = article.title || stealthResult.title || dom.window.document.title || finalUrl;
     return { url: finalUrl, title, text };
-  } catch (error) {
+  } catch {
     const res = await fetch(target, { headers: { 'User-Agent': 'OmniBrowserBot/1.0' } }).catch(()=> null as any);
     if (!res || !res.ok) return null;
     const html = await res.text();
@@ -279,7 +279,7 @@ export function registerResearchIpc() {
   // Extract readable content from active tab
   registerHandler('research:extractContent', z.object({
     tabId: z.string().optional(),
-  }), async (event, request) => {
+  }), async (event, _request) => {
     const win = BrowserWindow.fromWebContents(event.sender) || BrowserWindow.getAllWindows()[0];
     if (!win) {
       return { content: '', title: '', html: '' };

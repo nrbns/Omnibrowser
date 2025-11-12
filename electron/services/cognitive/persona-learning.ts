@@ -314,7 +314,6 @@ export class PersonaLearningService {
    * Add or update edge
    */
   private addOrUpdateEdge(source: string, target: string, type: CognitiveEdge['type'], weight: number): void {
-    const edgeId = `${source}->${target}:${type}`;
     const existing = this.graph.edges.find(e => 
       e.source === source && e.target === target && e.type === type
     );

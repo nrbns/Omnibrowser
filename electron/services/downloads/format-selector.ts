@@ -2,7 +2,7 @@
  * Format Selector - Choose video/audio quality and format
  */
 
-import { getYtDlpWrapper, DownloadInfo } from './ytdlp-wrapper';
+import type { DownloadInfo } from './ytdlp-wrapper';
 
 export interface FormatSelection {
   formatId?: string;

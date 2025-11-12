@@ -3,7 +3,7 @@
  * Track and enforce memory limits per tab
  */
 
-import { app, BrowserView } from 'electron';
+import { BrowserView } from 'electron';
 
 interface TabMemoryState {
   tabId: string;

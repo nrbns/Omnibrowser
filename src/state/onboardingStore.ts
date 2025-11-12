@@ -45,3 +45,10 @@ export const useOnboardingStore = create<OnboardingState>((set) => ({
     set({ visible: true });
   },
 }));
+
+if (typeof window !== 'undefined') {
+  (window as typeof window & { __STORE?: Record<string, unknown> }).__STORE = {
+    ...(window as typeof window & { __STORE?: Record<string, unknown> }).__STORE,
+    onboarding: useOnboardingStore,
+  };
+}

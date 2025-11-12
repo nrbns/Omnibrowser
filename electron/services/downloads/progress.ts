@@ -3,8 +3,6 @@
  */
 
 import { EventEmitter } from 'node:events';
-import { QueuedDownload } from './queue';
-
 export interface ProgressUpdate {
   downloadId: string;
   progress: number;

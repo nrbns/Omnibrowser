@@ -28,7 +28,7 @@ interface VoiceCompanionState {
   setError: (error: string | null) => void;
 }
 
-export const useVoiceCompanionStore = create<VoiceCompanionState>((set, get) => ({
+export const useVoiceCompanionStore = create<VoiceCompanionState>((set) => ({
   open: false,
   listening: false,
   transcript: '',

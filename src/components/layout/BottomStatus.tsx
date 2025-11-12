@@ -483,7 +483,7 @@ export function BottomStatus() {
       className="px-4 py-2 bg-gray-900/90 backdrop-blur-sm border-t border-gray-700/50 flex flex-col gap-2"
       data-onboarding="status-bar"
     >
-      <div className="flex flex-wrap items-center gap-3 text-xs text-gray-300">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs text-gray-300">
         <PrivacySwitch />
 
         <StatusMeter
@@ -542,20 +542,6 @@ export function BottomStatus() {
 
         <div className="ml-auto flex items-center gap-2">
           <StatusBadge
-            icon={Cpu}
-            label="CPU"
-            description={`${cpuUsage}%`}
-            variant={cpuUsage > 70 ? 'warning' : 'default'}
-            title="CPU usage"
-          />
-          <StatusBadge
-            icon={MemoryStick}
-            label="RAM"
-            description={`${memoryUsage}%`}
-            variant={memoryUsage > 75 ? 'warning' : 'default'}
-            title="Memory usage"
-          />
-          <StatusBadge
             icon={Brain}
             label="Model"
             description={modelReady ? 'Ready' : 'Loading'}
@@ -565,7 +551,7 @@ export function BottomStatus() {
             title="Local model status"
           />
 
-          <div className="relative w-60">
+          <div className="relative w-48 sm:w-60 hidden sm:block">
             <input
               type="text"
               value={prompt}
@@ -669,6 +655,22 @@ export function BottomStatus() {
                       label="Efficiency"
                       description={efficiencyLabel || 'Normal'}
                       variant="default"
+                      className="justify-start"
+                    />
+                    <StatusBadge
+                      icon={Cpu}
+                      label="CPU"
+                      description={`${cpuUsage}%`}
+                      variant={cpuUsage > 70 ? 'warning' : 'default'}
+                      title="CPU usage"
+                      className="justify-start"
+                    />
+                    <StatusBadge
+                      icon={MemoryStick}
+                      label="RAM"
+                      description={`${memoryUsage}%`}
+                      variant={memoryUsage > 75 ? 'warning' : 'default'}
+                      title="Memory usage"
                       className="justify-start"
                     />
                   </div>

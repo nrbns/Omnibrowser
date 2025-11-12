@@ -6,7 +6,7 @@ import { registerHandler } from '../shared/ipc/router';
 import { z } from 'zod';
 import { getNetworkControlsService } from './network-controls';
 
-const NetworkControlsResponse = z.object({
+const networkControlsResponseSchema = z.object({
   quicEnabled: z.boolean(),
   ipv6Enabled: z.boolean(),
   ipv6LeakProtection: z.boolean(),
@@ -17,7 +17,7 @@ export function registerNetworkControlsIpc() {
   registerHandler('network:get', z.object({}), async () => {
     const service = getNetworkControlsService();
     const config = service.getConfig();
-    return config as z.infer<typeof NetworkControlsResponse>;
+    return networkControlsResponseSchema.parse(config);
   });
 
   // Disable QUIC

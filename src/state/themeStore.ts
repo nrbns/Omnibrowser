@@ -63,7 +63,7 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
 if (isBrowser && typeof window.matchMedia === 'function') {
   const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
   const handleChange = () => {
-    const { preference, setPreference } = useThemeStore.getState();
+    const { preference } = useThemeStore.getState();
     if (preference === 'system') {
       applyTheme('system');
       const resolved = getSystemTheme();

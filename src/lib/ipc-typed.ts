@@ -6,14 +6,15 @@
 // @ts-nocheck
 
 import { z } from 'zod';
-import { ResearchResult } from '../types/research';
 import type { PrivacyAuditSummary } from './ipc-events';
-import { getEnvVar, isDevEnv, isElectronRuntime } from './env';
+import { isDevEnv, isElectronRuntime } from './env';
 import type { EcoImpactForecast } from '../types/ecoImpact';
 import type { TrustSummary } from '../types/trustWeaver';
 import type { NexusListResponse, NexusPluginEntry } from '../types/extensionNexus';
 import type { IdentityCredential, IdentityRevealPayload, IdentityVaultSummary } from '../types/identity';
 import type { ConsentAction, ConsentRecord } from '../types/consent';
+import { useTabsStore } from '../state/tabsStore';
+import { useContainerStore } from '../state/containerStore';
 
 const IS_DEV = isDevEnv();
 
@@ -72,6 +73,50 @@ const FALLBACK_CHANNELS: Record<string, () => unknown> = {
   'vpn:check': () => ({ connected: false, stub: true }),
   'dns:status': () => ({ enabled: false, provider: 'system', stub: true }),
   'tabs:predictiveGroups': () => ({ groups: [], prefetch: [], summary: undefined }),
+  'tabs:list': () => {
+    try {
+      const state = useTabsStore.getState?.();
+      if (state) {
+        return [...state.tabs];
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  },
+  'tabs:getActive': () => {
+    try {
+      const state = useTabsStore.getState?.();
+      if (state) {
+        return state.tabs.find((tab) => tab.id === state.activeId) ?? null;
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  },
+  'containers:list': () => {
+    try {
+      const state = useContainerStore.getState?.();
+      if (state) {
+        return [...state.containers];
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  },
+  'containers:getActive': () => {
+    try {
+      const state = useContainerStore.getState?.();
+      if (state) {
+        return state.containers.find((c) => c.id === state.activeContainerId) ?? null;
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  },
   'identity:status': () => ({ status: 'locked', totalCredentials: 0, lastUpdatedAt: null } satisfies IdentityVaultSummary),
   'identity:unlock': () => ({ status: 'locked', totalCredentials: 0, lastUpdatedAt: null } satisfies IdentityVaultSummary),
   'identity:lock': () => ({ status: 'locked', totalCredentials: 0, lastUpdatedAt: null } satisfies IdentityVaultSummary),
@@ -95,8 +140,6 @@ function noteFallback(channel: string, reason: string) {
   reportedMissingChannels.add(channel);
   console.warn(`[IPC] Channel ${channel} unavailable (${reason}); using renderer fallback.`);
 }
-
-type IPCResponse<T> = { ok: true; data: T } | { ok: false; error: string };
 
 /**
  * Make a typed IPC call

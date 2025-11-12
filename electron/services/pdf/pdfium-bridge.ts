@@ -3,9 +3,7 @@
  * Falls back to pdfjs-dist if PDFium not available
  */
 
-import { getPDFParser } from '../knowledge/pdf-parser';
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 
 export interface PDFPage {
   pageNumber: number;
@@ -35,7 +33,7 @@ class PDFiumService {
     // Try to require pdfium-node or similar
     try {
       // @ts-ignore - optional dependency
-      const pdfium = require('pdfium-node');
+      require('pdfium-node');
       this.usePDFium = true;
       return true;
     } catch {

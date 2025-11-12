@@ -2,8 +2,6 @@
  * Global type declarations for Electron renderer process
  */
 
-import type { ElectronAPI } from '../lib/ipc-typed';
-
 declare global {
   interface Window {
     // Typed IPC (preload.ts exposes this)

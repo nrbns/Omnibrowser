@@ -53,19 +53,6 @@ export class FingerprintCloak {
       session.defaultSession.setUserAgent(this.config.userAgent);
     }
 
-    // Inject JavaScript to override navigator properties
-    const script = `
-      Object.defineProperty(navigator, 'hardwareConcurrency', {
-        get: () => ${this.config.hardwareConcurrency || 4}
-      });
-      Object.defineProperty(navigator, 'deviceMemory', {
-        get: () => ${this.config.deviceMemory || 8}
-      });
-      Object.defineProperty(navigator, 'languages', {
-        get: () => ${JSON.stringify(this.config.languages || ['en-US', 'en'])}
-      });
-    `;
-
     session.defaultSession.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
       // Inject script via webRequest (simplified - would need proper injection mechanism)
       callback({});

@@ -5,7 +5,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTabsStore } from '../../state/tabsStore';
-import { ipc } from '../../lib/ipc-typed';
 
 interface TabHoverCardProps {
   tabId: string;

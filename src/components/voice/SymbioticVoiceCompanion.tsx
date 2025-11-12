@@ -48,7 +48,6 @@ export function SymbioticVoiceCompanion() {
     setListening,
     setTranscript,
     setMood,
-    pushMessage,
     sendToCompanion,
     clearConversation,
     setError,

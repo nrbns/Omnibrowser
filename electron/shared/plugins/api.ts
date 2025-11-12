@@ -3,8 +3,6 @@
  * Defines the interface available to plugins in their sandboxed runtime
  */
 
-import { z } from 'zod';
-
 export interface OBHost {
   /**
    * Make a robots-aware HTTP request

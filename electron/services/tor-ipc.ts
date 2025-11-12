@@ -14,7 +14,7 @@ const TorStartRequest = z.object({
   newnymInterval: z.number().min(1).optional(),
 });
 
-const TorStatusResponse = z.object({
+const torStatusResponseSchema = z.object({
   running: z.boolean(),
   bootstrapped: z.boolean(),
   progress: z.number(),
@@ -133,16 +133,16 @@ export function registerTorIpc() {
   registerHandler('tor:status', z.object({}), async () => {
     try {
       if (useStub) {
-        return stubStatus as z.infer<typeof TorStatusResponse>;
+        return torStatusResponseSchema.parse(stubStatus);
       }
 
       const torService = getTorService();
       const status = torService.getStatus();
-      return status as z.infer<typeof TorStatusResponse>;
+      return torStatusResponseSchema.parse(status);
     } catch {
       logger.warn('Tor status fetch failed; returning stub');
       useStub = true;
-      return stubStatus as z.infer<typeof TorStatusResponse>;
+      return torStatusResponseSchema.parse(stubStatus);
     }
   });
 

@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { Search, ArrowRight, Box, Clock, Sparkles } from 'lucide-react';
 import type { CommandDescriptor } from '../../lib/commands/types';
 import { getAllCommands, onCommandsChanged } from '../../lib/commands/registry';
@@ -442,7 +442,6 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
   const groupedItems = useMemo(() => {
     const sections: Array<{ category: string; items: PaletteItem[]; startIndex: number }> = [];
     let currentCategory = '';
-    let startIndex = 0;
 
     filteredItems.forEach((item, index) => {
       if (item.category !== currentCategory) {

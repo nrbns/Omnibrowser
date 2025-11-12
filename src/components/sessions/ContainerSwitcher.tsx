@@ -31,7 +31,11 @@ const PERMISSION_OPTIONS: Array<{ key: PermissionKey; label: string; description
   },
 ];
 
-export function ContainerSwitcher() {
+interface ContainerSwitcherProps {
+  compact?: boolean;
+}
+
+export function ContainerSwitcher({ compact = false }: ContainerSwitcherProps) {
   const { containers, activeContainerId, setContainers, setActiveContainer } = useContainerStore();
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -201,9 +205,9 @@ export function ContainerSwitcher() {
     activeContainer.id === 'default' ||
     activeContainer.name.toLowerCase() === 'default';
 
-  const showLabel = !isDefaultContainer;
+  const showLabel = !compact && !isDefaultContainer;
 
-  const buttonSpacing = showLabel ? 'gap-2 px-3' : 'gap-1.5 px-2.5';
+  const buttonSpacing = showLabel ? 'gap-2 px-3' : 'gap-1.5 px-2';
 
   return (
     <div className="relative">

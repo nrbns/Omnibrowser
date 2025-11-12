@@ -144,12 +144,6 @@ let lastSnapshot: ResourceSnapshot = {
   carbonRegion: null,
 };
 
-let lastHibernateCount = 0;
-
-function setLastHibernateCount(count: number): void {
-  lastHibernateCount = count;
-}
-
 const batteryHistory: BatterySample[] = [];
 const carbonHistory: CarbonSample[] = [];
 const lastAlertAt = new Map<string, number>();
@@ -315,7 +309,6 @@ function maybeHibernateInactiveTabs(mode: EfficiencyMode, force = false): number
   }
 
   if (candidates.length === 0) {
-    setLastHibernateCount(0);
     return 0;
   }
 
@@ -336,7 +329,6 @@ function maybeHibernateInactiveTabs(mode: EfficiencyMode, force = false): number
   }
 
   lastHibernateAt = now;
-  setLastHibernateCount(toHibernate.length);
   if (toHibernate.length > 0) {
     emitHibernateAlert(toHibernate.length, mode);
   }

@@ -4,9 +4,7 @@
  */
 
 import { Worker } from 'node:worker_threads';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { PluginManifest, OBPermission } from '../../shared/plugins/manifest';
+import { PluginManifest } from '../../shared/plugins/manifest';
 import { OBHost, OBPlugin } from '../../shared/plugins/api';
 import * as PluginStorage from './storage';
 import { robotsAwareFetch } from './fetch';
@@ -28,9 +26,6 @@ export class PluginRuntime {
     this.host = this.createHost();
     
     // Load plugin worker script
-    const entryPath = join(this.pluginPath, this.manifest.entry);
-    const entryUrl = pathToFileURL(entryPath).href;
-    
     // Create Web Worker-like environment
     // For now, we'll use a simple RPC bridge
     // TODO: Implement full sandboxed worker with message passing
@@ -101,7 +96,7 @@ export class PluginRuntime {
       },
       
       ui: {
-        mountPanel: (component: React.ComponentType | string): void => {
+        mountPanel: (_component: React.ComponentType | string): void => {
           if (!permissions.has('ui:panel')) {
             throw new Error('Permission denied: ui:panel');
           }
@@ -115,18 +110,18 @@ export class PluginRuntime {
       },
       
       events: {
-        on: (event: string, callback: (...args: unknown[]) => void): void => {
+        on: (_event: string, _callback: (...args: unknown[]) => void): void => {
           if (!permissions.has('events')) {
             throw new Error('Permission denied: events');
           }
           // TODO: Implement event subscription
         },
-        off: (event: string, callback: (...args: unknown[]) => void): void => {
+        off: (_event: string, _callback: (...args: unknown[]) => void): void => {
           if (!permissions.has('events')) {
             throw new Error('Permission denied: events');
           }
         },
-        emit: (event: string, ...args: unknown[]): void => {
+        emit: (_event: string, ..._args: unknown[]): void => {
           if (!permissions.has('events')) {
             throw new Error('Permission denied: events');
           }
@@ -141,7 +136,7 @@ export class PluginRuntime {
           // TODO: Implement clipboard read
           return '';
         },
-        write: async (text: string): Promise<void> => {
+        write: async (_text: string): Promise<void> => {
           if (!permissions.has('clipboard:w')) {
             throw new Error('Permission denied: clipboard:w');
           }
@@ -150,7 +145,7 @@ export class PluginRuntime {
       },
       
       proxy: {
-        select: async (profileId: string): Promise<void> => {
+        select: async (_profileId: string): Promise<void> => {
           if (!permissions.has('proxy:select')) {
             throw new Error('Permission denied: proxy:select');
           }
@@ -164,7 +159,7 @@ export class PluginRuntime {
       },
       
       model: {
-        prompt: async (messages: Array<{ role: string; content: string }>): Promise<string> => {
+        prompt: async (_messages: Array<{ role: string; content: string }>): Promise<string> => {
           if (!permissions.has('model:local')) {
             throw new Error('Permission denied: model:local');
           }

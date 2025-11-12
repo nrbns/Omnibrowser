@@ -91,8 +91,9 @@ export async function persistVault(): Promise<void> {
     const filePath = path.join(dir, 'vault.json');
     const snapshot = await exportVaultSnapshot();
     await fs.writeFile(filePath, JSON.stringify(snapshot, null, 2), 'utf-8');
-  } catch (error) {
-    logger.warn('Consent vault persistence failed', { error: error instanceof Error ? error.message : String(error) });
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    logger.warn('Consent vault persistence failed', { error });
   }
 }
 
@@ -103,7 +104,7 @@ export async function loadVault(): Promise<void> {
     const content = await fs.readFile(filePath, 'utf-8');
     const snapshot = JSON.parse(content) as VaultSnapshot;
     chain.splice(0, chain.length, ...snapshot.entries);
-  } catch (error) {
+  } catch {
     // Vault not initialized yet or corrupted; start fresh
     logger.info('Consent vault initialized (new chain)');
   }

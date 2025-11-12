@@ -4,7 +4,6 @@
  */
 
 import { session } from 'electron';
-import { app } from 'electron';
 
 export interface OriginData {
   origin: string;
@@ -15,8 +14,6 @@ export interface OriginData {
   serviceWorkers: number;
   lastAccessed: number;
 }
-
-const originDataCache = new Map<string, OriginData>();
 
 /**
  * Get data for all origins

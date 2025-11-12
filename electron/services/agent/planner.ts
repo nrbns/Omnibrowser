@@ -43,8 +43,6 @@ export class Planner {
    * Generate plan using LLM (Ollama)
    */
   private async generatePlanWithLLM(goal: string, planId: string, context?: { mode?: string; constraints?: string[] }): Promise<Plan> {
-    const ollama = getOllamaAdapter();
-    
     const prompt = `Generate a step-by-step plan to achieve this goal: "${goal}"
 ${context?.mode ? `Mode: ${context.mode}` : ''}
 ${context?.constraints?.length ? `Constraints: ${context.constraints.join(', ')}` : ''}
@@ -111,7 +109,7 @@ Format as JSON array of steps:
   /**
    * Generate plan using heuristic patterns
    */
-  private async generatePlanHeuristic(goal: string, planId: string, context?: { mode?: string; constraints?: string[] }): Promise<Plan> {
+  private async generatePlanHeuristic(goal: string, planId: string, _context?: { mode?: string; constraints?: string[] }): Promise<Plan> {
     const steps: PlanStep[] = [];
     
     // Detect goal type and generate appropriate steps

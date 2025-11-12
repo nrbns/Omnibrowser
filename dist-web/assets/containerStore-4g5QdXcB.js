@@ -1,0 +1,2 @@
+import{c as s}from"./formatDistanceToNow-CwTn1k5x.js";const u=s(r=>({containers:[],activeContainerId:"default",setContainers:e=>r(n=>{const i=e.reduce((t,a)=>(t.find(d=>d.id===a.id)||t.push(a),t),[]),o=i.some(t=>t.id===n.activeContainerId);return{containers:i,activeContainerId:o?n.activeContainerId:i[0]?.id||"default"}}),setActiveContainer:e=>r(n=>({activeContainerId:e.id,containers:[e,...n.containers.filter(i=>i.id!==e.id)]}))}));export{u};
+//# sourceMappingURL=containerStore-4g5QdXcB.js.map

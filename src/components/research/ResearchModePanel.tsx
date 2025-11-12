@@ -4,7 +4,7 @@
  */
 
 import { useState } from 'react';
-import { Search, AlertTriangle, CheckCircle, XCircle, ExternalLink, BookOpen, TrendingUp } from 'lucide-react';
+import { Search, AlertTriangle, CheckCircle, ExternalLink, BookOpen, TrendingUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ipc } from '../../lib/ipc-typed';
 import { useTabsStore } from '../../state/tabsStore';

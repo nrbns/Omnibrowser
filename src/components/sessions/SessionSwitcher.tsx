@@ -8,16 +8,14 @@ import { formatDistanceToNow } from 'date-fns';
 import { User, Plus, X, Edit2, Check, RotateCcw, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ipc } from '../../lib/ipc-typed';
-import { useTabsStore } from '../../state/tabsStore';
-import { useAppStore } from '../../state/appStore';
 import type { BrowserSession } from '../../types/session';
-import { Avatar } from '../sessions/Avatar';
-import { ChevronDown, LogOut, Trash2, Lock, Zap, Copy, PenSquare } from 'lucide-react';
-import { Tooltip } from '../common/Tooltip';
-import { useOnboardingStore } from '../../state/onboardingStore';
 import { isDevEnv } from '../../lib/env';
 
-export function SessionSwitcher() {
+interface SessionSwitcherProps {
+  compact?: boolean;
+}
+
+export function SessionSwitcher({ compact = false }: SessionSwitcherProps) {
   const IS_DEV = isDevEnv();
   const [sessions, setSessions] = useState<BrowserSession[]>([]);
   const [activeSession, setActiveSession] = useState<BrowserSession | null>(null);
@@ -208,9 +206,9 @@ export function SessionSwitcher() {
     activeSession.id === 'default' ||
     activeSession.name.toLowerCase() === 'default';
 
-  const showLabel = !isDefaultSession;
+  const showLabel = !compact && !isDefaultSession;
 
-  const buttonSpacing = showLabel ? 'gap-2 px-3' : 'gap-1.5 px-2.5';
+  const buttonSpacing = showLabel ? 'gap-2 px-3' : 'gap-1.5 px-2';
 
   return (
     <div className="relative">

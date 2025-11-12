@@ -88,7 +88,7 @@ function getNextCheckDelay(watcher: PageWatcher): number {
   return Math.max(0, intervalMs - elapsed);
 }
 
-async function runWatcherCheck(id: string, reason: 'scheduled' | 'manual'): Promise<void> {
+async function runWatcherCheck(id: string): Promise<void> {
   const watcher = watchers.get(id);
   if (!watcher) return;
 
@@ -149,7 +149,7 @@ function scheduleWatcher(id: string): void {
 
   const delay = getNextCheckDelay(watcher);
   const timer = setTimeout(async () => {
-    await runWatcherCheck(id, 'scheduled');
+    await runWatcherCheck(id);
     scheduleWatcher(id);
   }, delay);
   timers.set(id, timer);
@@ -197,7 +197,7 @@ export function registerWatchersIpc(): void {
     emitUpdate();
     scheduleWatcher(id);
     // Run an immediate baseline check asynchronously
-    runWatcherCheck(id, 'manual').finally(() => scheduleWatcher(id));
+    runWatcherCheck(id).finally(() => scheduleWatcher(id));
     return watcher;
   });
 
@@ -221,7 +221,7 @@ export function registerWatchersIpc(): void {
     if (!watcher) {
       return { success: false, error: 'Watcher not found' };
     }
-    await runWatcherCheck(request.id, 'manual');
+    await runWatcherCheck(request.id);
     scheduleWatcher(request.id);
     return { success: true };
   });

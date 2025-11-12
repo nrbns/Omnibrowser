@@ -339,7 +339,6 @@ export function registerProfileIpc(): void {
     }
     const profile = setActiveProfileForWindow(win, request.profileId);
 
-    const profileForSessions = getProfile(profile.id);
     const sessionManager = require('./sessions').getSessionManager() as {
       getSessionForProfile: (profileId: string) => any;
       createSession: (name: string, profileId?: string, color?: string) => any;

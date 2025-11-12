@@ -64,7 +64,6 @@ export function registerCloudVectorIpc() {
     topK: z.number().optional(),
   }), async (_event, request) => {
     const cloudStore = getCloudVectorStore();
-    const localStore = getVectorStore();
 
     // Generate query embedding using local store
     const queryEmbedding = await (async () => {

@@ -108,7 +108,7 @@ export class EnhancedThreatScanner {
       result.recommendations = this.generateRecommendations(result);
 
       return result;
-    } catch (error) {
+    } catch {
       return {
         ...result,
         threatLevel: 'high',

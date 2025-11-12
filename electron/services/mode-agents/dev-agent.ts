@@ -21,7 +21,7 @@ export class DevAgent {
   /**
    * Inspect and log API calls from a page
    */
-  async inspectAPICalls(url: string): Promise<APICall[]> {
+  async inspectAPICalls(_url: string): Promise<APICall[]> {
     // This would be implemented by intercepting network requests
     // For now, return mock data
     return [];

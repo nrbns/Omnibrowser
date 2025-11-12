@@ -882,7 +882,7 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
 
   return (
     <div className="drag border-b border-surface bg-surface-panel shadow-lg text-primary transition-colors">
-      <div className="no-drag flex flex-wrap items-center gap-3 px-4 py-2">
+      <div className="no-drag flex flex-wrap items-center gap-2 sm:gap-3 px-2 sm:px-4 py-2">
         {/* Left cluster */}
         <div className="flex items-center gap-2">
           <ModeSwitch />

@@ -1,4 +1,4 @@
-import { normalizeInputToUrlOrSearch, buildSearchUrl } from './search';
+import { buildSearchUrl } from './search';
 import { openWithAccount } from '../components/AccountBadge';
 
 export async function runAutomationsFromUtterance(utterance: string) {

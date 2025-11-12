@@ -4,7 +4,7 @@
  * Works with Zoom, Google Meet, Teams, etc.
  */
 
-import { WebContents, BrowserWindow } from 'electron';
+import { WebContents } from 'electron';
 import { EventEmitter } from 'events';
 
 export interface VideoCallConfig {

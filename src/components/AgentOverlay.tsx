@@ -3,13 +3,30 @@
  * Tabs: Plan, Actions, Logs, Memory, Ledger
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Bot, Play, Square, Clock, Zap, FileText, Shield, Eye, Brain, ScrollText, CheckCircle2, XCircle, Sparkles, Loader2 } from 'lucide-react';
+import {
+  Bot,
+  Square,
+  Clock,
+  Zap,
+  FileText,
+  Shield,
+  Brain,
+  ScrollText,
+  CheckCircle2,
+  XCircle,
+  Sparkles,
+  MessageSquareText,
+  ShieldAlert,
+} from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
 import { useIPCEvent } from '../lib/use-ipc-event';
 import { ipc } from '../lib/ipc-typed';
+import { getEnvVar, isElectronRuntime } from '../lib/env';
+import { useAgentStreamStore, StreamStatus, AgentStreamEvent } from '../state/agentStreamStore';
 
-type TabType = 'plan' | 'actions' | 'logs' | 'memory' | 'ledger';
+type TabType = 'responses' | 'plan' | 'actions' | 'logs' | 'memory' | 'ledger';
 
 interface AgentStep {
   id: string;
@@ -19,6 +36,22 @@ interface AgentStep {
   status: 'pending' | 'running' | 'completed' | 'error';
   timestamp: number;
 }
+
+const STATUS_LABELS: Record<StreamStatus, string> = {
+  idle: 'Idle',
+  connecting: 'Connecting',
+  live: 'Streaming',
+  complete: 'Complete',
+  error: 'Error',
+};
+
+const STATUS_STYLES: Record<StreamStatus, string> = {
+  idle: 'bg-slate-800/60 text-slate-300',
+  connecting: 'border border-blue-500/40 bg-blue-500/20 text-blue-100',
+  live: 'border border-emerald-500/40 bg-emerald-500/20 text-emerald-100',
+  complete: 'border border-purple-500/40 bg-purple-500/20 text-purple-100',
+  error: 'border border-rose-500/40 bg-rose-500/20 text-rose-100',
+};
 
 const SparkleTrail = () => (
   <span className="flex items-center gap-1 text-purple-300/80">
@@ -61,7 +94,7 @@ interface ConsentEntry {
 
 export function AgentOverlay() {
   const [isActive, setIsActive] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabType>('plan');
+  const [activeTab, setActiveTab] = useState<TabType>('responses');
   const [plan, setPlan] = useState<AgentPlan | null>(null);
   const [actions, setActions] = useState<AgentStep[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
@@ -72,13 +105,169 @@ export function AgentOverlay() {
   const [requests, setRequests] = useState(0);
   const [startTime, setStartTime] = useState<number | null>(null);
   const [dryRun, setDryRun] = useState(false);
-  const [taskId, setTaskId] = useState<string | null>(null);
+  const isElectron = useMemo(() => isElectronRuntime(), []);
+  const apiBaseUrl = useMemo(
+    () => getEnvVar('API_BASE_URL') ?? getEnvVar('OMNIBROWSER_API_URL') ?? getEnvVar('OB_API_BASE_URL') ?? null,
+    [],
+  );
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const runId = useAgentStreamStore((state) => state.runId);
+  const streamStatus = useAgentStreamStore((state) => state.status);
+  const streamError = useAgentStreamStore((state) => state.error);
+  const streamTranscript = useAgentStreamStore((state) => state.transcript);
+  const streamEvents = useAgentStreamStore((state) => state.events);
+  const lastGoal = useAgentStreamStore((state) => state.lastGoal);
+  const setRun = useAgentStreamStore((state) => state.setRun);
+  const setStreamStatus = useAgentStreamStore((state) => state.setStatus);
+  const setStreamError = useAgentStreamStore((state) => state.setError);
+  const appendStreamEvent = useAgentStreamStore((state) => state.appendEvent);
+  const appendTranscript = useAgentStreamStore((state) => state.appendTranscript);
+  const resetAgentStream = useAgentStreamStore((state) => state.reset);
+
+  const appendMessage = useCallback(
+    (text: string) => {
+      const current = useAgentStreamStore.getState().transcript;
+      appendTranscript(current ? `\n${text}` : text);
+    },
+    [appendTranscript],
+  );
+
+  const pushStreamEvent = useCallback(
+    (event: Partial<AgentStreamEvent> & { type: AgentStreamEvent['type'] }) => {
+      const timestamp = event.timestamp ?? Date.now();
+      const id = event.id ?? `${event.type}-${timestamp}-${Math.random().toString(36).slice(2, 8)}`;
+      appendStreamEvent({ id, timestamp, ...event } as AgentStreamEvent);
+    },
+    [appendStreamEvent],
+  );
+
+  const stopStream = useCallback(() => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+  }, []);
+
+  const resetStream = useCallback(() => {
+    stopStream();
+    resetAgentStream();
+  }, [stopStream, resetAgentStream]);
+
+  const startStream = useCallback(
+    async (goal: string, planId?: string) => {
+      if (!apiBaseUrl) {
+        setStreamStatus('error');
+        setStreamError('API_BASE_URL environment variable is not configured.');
+        return;
+      }
+
+      stopStream();
+      resetAgentStream();
+
+      try {
+        const response = await fetch(`${apiBaseUrl}/agent/run`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ goal, plan_id: planId }),
+          credentials: 'include',
+        });
+
+        if (!response.ok) {
+          throw new Error(`Agent API responded with status ${response.status}`);
+        }
+
+        const payload = await response.json();
+        const newRunId: string | undefined = payload?.id || payload?.run_id || payload?.runId;
+        if (!newRunId) {
+          throw new Error('Agent API did not return a run identifier.');
+        }
+
+        setRun(newRunId, goal ?? null);
+        setStreamStatus('live');
+
+        const source = new EventSource(`${apiBaseUrl}/agent/runs/${newRunId}`);
+        eventSourceRef.current = source;
+
+        source.onmessage = (event) => {
+          if (!event.data) return;
+          try {
+            const data = JSON.parse(event.data);
+            const timestamp = Date.now();
+
+            if (typeof data.delta === 'string' && data.delta.length > 0) {
+              appendTranscript(data.delta);
+            }
+
+            if (typeof data.message === 'string' && data.message.length > 0) {
+              appendMessage(data.message);
+              pushStreamEvent({ type: 'log', content: data.message, timestamp });
+            }
+
+            if (data.type === 'start') {
+              pushStreamEvent({ type: 'start', timestamp });
+            }
+
+            if (data.type === 'step') {
+              pushStreamEvent({
+                type: 'step',
+                step: data.step,
+                status: data.status,
+                content: data.log || data.message,
+                timestamp,
+              });
+            }
+
+            if (data.type === 'consent') {
+              pushStreamEvent({
+                type: 'consent',
+                content: data.description,
+                risk: data.risk,
+                approved: data.approved,
+                timestamp,
+              });
+            }
+
+            if (data.type === 'done') {
+              pushStreamEvent({ type: 'done', timestamp });
+              setStreamStatus('complete');
+              source.close();
+              eventSourceRef.current = null;
+            }
+
+            if (typeof data.tokens === 'number') {
+              setTokens((prev) => prev + data.tokens);
+            }
+
+            if (data.type === 'step') {
+              setRequests((prev) => prev + 1);
+            }
+          } catch (error) {
+            console.warn('[agent] Unable to parse stream payload', error);
+          }
+        };
+
+        source.onerror = () => {
+          setStreamStatus('error');
+          setStreamError('Agent stream disconnected.');
+          pushStreamEvent({ type: 'error', content: 'Stream disconnected', timestamp: Date.now() });
+          source.close();
+          eventSourceRef.current = null;
+        };
+      } catch (error) {
+        console.error('[agent] Failed to start agent stream', error);
+        setStreamStatus('error');
+        setStreamError(error instanceof Error ? error.message : 'Failed to start agent run');
+      }
+    },
+    [apiBaseUrl, appendTranscript, appendMessage, pushStreamEvent, setRun, setStreamError, setStreamStatus, stopStream],
+  );
 
   // Listen for agent events
   useIPCEvent<AgentPlan>('agent:plan', (data) => {
+    resetStream();
     setIsActive(true);
+    setActiveTab('responses');
     setPlan(data);
-    setTaskId(data.taskId);
     setStartTime(Date.now());
     setTokens(0);
     setRequests(0);
@@ -86,7 +275,11 @@ export function AgentOverlay() {
     setActions([]);
     setConsentLedger([]);
     setMemory([]);
-  }, []);
+    pushStreamEvent({ type: 'start', timestamp: Date.now() });
+    if (isElectron) {
+      setStreamStatus('live');
+    }
+  }, [resetStream, pushStreamEvent, isElectron, setStreamStatus]);
 
   useIPCEvent('agent:step', (data: any) => {
     const stepId = data.stepId || data.id;
@@ -113,25 +306,54 @@ export function AgentOverlay() {
     }
     
     if (data.log) {
-      setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${data.log}`]);
+      const message = `[${new Date().toLocaleTimeString()}] ${data.log}`;
+      setLogs(prev => [...prev, message]);
+      appendMessage(data.log);
+      pushStreamEvent({
+        type: 'log',
+        content: data.log,
+        timestamp: data.timestamp || Date.now(),
+      });
     }
     if (data.tokens) {
       setTokens(prev => prev + data.tokens);
     }
     setRequests(prev => prev + 1);
-  }, []);
+    if (data.status) {
+      pushStreamEvent({
+        type: 'step',
+        step: data.sequence ?? data.step ?? undefined,
+        status: data.status,
+        content: data.log || data.tool || data.status,
+        timestamp: data.timestamp || Date.now(),
+      });
+      if (streamStatus === 'idle') {
+        setStreamStatus('live');
+      }
+    }
+  }, [streamStatus, pushStreamEvent, appendMessage]);
 
   useIPCEvent('agent:log', (data: any) => {
     if (data.message) {
-      setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${data.message}`]);
+      const message = `[${new Date().toLocaleTimeString()}] ${data.message}`;
+      setLogs(prev => [...prev, message]);
+      appendMessage(data.message);
+      pushStreamEvent({ type: 'log', content: data.message, timestamp: data.timestamp || Date.now() });
     }
-  }, []);
+  }, [appendMessage, pushStreamEvent]);
 
   useIPCEvent('agent:consent:request', (data: any) => {
     if (data.entry) {
       setConsentLedger(prev => [...prev, data.entry]);
+      pushStreamEvent({
+        type: 'consent',
+        content: data.entry.action?.description,
+        risk: data.entry.action?.risk,
+        approved: data.entry.approved !== false,
+        timestamp: data.entry.timestamp || Date.now(),
+      });
     }
-  }, []);
+  }, [pushStreamEvent]);
 
   useIPCEvent('agent:memory', (data: any) => {
     if (data.memory) {
@@ -140,9 +362,31 @@ export function AgentOverlay() {
   }, []);
 
   useIPCEvent('agent:complete', () => {
-    setIsActive(false);
+    setStreamStatus('complete');
+    stopStream();
     setCurrentStep(null);
-  }, []);
+  }, [setStreamStatus, stopStream]);
+
+  useEffect(() => {
+    if (!isActive) {
+      stopStream();
+    }
+  }, [isActive, stopStream]);
+
+  useEffect(() => () => stopStream(), [stopStream]);
+
+  useEffect(() => {
+    if (!isActive) return;
+    if (!plan?.goal) return;
+    if (isElectron) return;
+    if (!apiBaseUrl) {
+      setStreamStatus('error');
+      setStreamError('API_BASE_URL environment variable is not configured.');
+      return;
+    }
+    if (lastGoal === plan.goal && streamStatus !== 'error') return;
+    void startStream(plan.goal, plan.taskId);
+  }, [isActive, plan?.goal, plan?.taskId, isElectron, apiBaseUrl, startStream, setStreamError, setStreamStatus, lastGoal, streamStatus]);
 
   useEffect(() => {
     // Load consent ledger from consent API
@@ -176,6 +420,7 @@ export function AgentOverlay() {
   if (!isActive) return null;
 
   const tabs = [
+    { id: 'responses' as TabType, label: 'Responses', icon: MessageSquareText },
     { id: 'plan' as TabType, label: 'Plan', icon: FileText },
     { id: 'actions' as TabType, label: 'Actions', icon: Zap },
     { id: 'logs' as TabType, label: 'Logs', icon: ScrollText },
@@ -198,7 +443,10 @@ export function AgentOverlay() {
             <h3 className="font-semibold text-gray-200">Agent Console</h3>
           </div>
           <button
-            onClick={() => setIsActive(false)}
+            onClick={() => {
+              stopStream();
+              setIsActive(false);
+            }}
             className="p-1 rounded hover:bg-gray-800 text-gray-400 hover:text-gray-200"
           >
             <Square size={16} />
@@ -278,6 +526,116 @@ export function AgentOverlay() {
       {/* Content */}
       <div className="flex-1 overflow-auto p-4">
         <AnimatePresence mode="wait">
+          {activeTab === 'responses' && (
+            <motion.div
+              key="responses"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-4"
+            >
+              <div className="flex flex-wrap items-center gap-3 text-xs">
+                <span
+                  className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-medium ${STATUS_STYLES[streamStatus]}`}
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                  {STATUS_LABELS[streamStatus]}
+                </span>
+                {runId && (
+                  <span className="font-mono text-[11px] text-gray-500">Run #{runId.slice(-6)}</span>
+                )}
+                {!isElectron && !apiBaseUrl && (
+                  <span className="text-[11px] text-amber-300">
+                    Set API_BASE_URL to enable live streaming outside Electron.
+                  </span>
+                )}
+              </div>
+
+              {streamTranscript && (
+                <div className="rounded-lg border border-slate-700/60 bg-slate-900/70 p-3 text-sm text-slate-200 whitespace-pre-wrap">
+                  {streamTranscript}
+                </div>
+              )}
+
+              {streamError && (
+                <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-100">
+                  {streamError}
+                </div>
+              )}
+
+              <div className="space-y-3">
+                {streamEvents.map((event) => (
+                  <div
+                    key={event.id}
+                    className="rounded-lg border border-slate-700/60 bg-slate-900/60 p-3 text-sm text-slate-200"
+                  >
+                    <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                      <span>{event.type}</span>
+                      <span>{formatDistanceToNow(new Date(event.timestamp), { addSuffix: true })}</span>
+                    </div>
+                    {event.content && (
+                      <div className="mt-2 whitespace-pre-wrap text-slate-200">
+                        {event.content}
+                      </div>
+                    )}
+                    {event.type === 'consent' && (
+                      <div className="mt-2 flex items-center gap-2 text-xs text-slate-300">
+                        <ShieldAlert
+                          size={14}
+                          className={
+                            event.risk === 'high'
+                              ? 'text-rose-400'
+                              : event.risk === 'medium'
+                              ? 'text-amber-400'
+                              : 'text-emerald-400'
+                          }
+                        />
+                        <span>
+                          {event.approved ? 'Approved' : 'Denied'}
+                          {event.risk ? ` • ${event.risk.toUpperCase()}` : ''}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                {streamEvents.length === 0 && (
+                  <div className="rounded-lg border border-dashed border-slate-700/60 bg-slate-900/50 p-4 text-xs text-slate-400">
+                    {streamStatus === 'connecting' && 'Connecting to Redix agent…'}
+                    {streamStatus === 'live' && 'Awaiting first tokens from the agent…'}
+                    {streamStatus === 'complete' && 'Run complete. Review the transcript above.'}
+                    {streamStatus === 'idle' && 'Trigger an agent action to see responses in real time.'}
+                    {streamStatus === 'error' && (streamError || 'Agent stream unavailable.')}
+                  </div>
+                )}
+              </div>
+
+              {consentLedger.length > 0 && (
+                <div className="pt-2">
+                  <h4 className="text-sm font-semibold text-gray-300 mb-2">Recent consent checks</h4>
+                  <div className="space-y-2 text-xs text-slate-300">
+                    {consentLedger.slice(-5).map((entry) => (
+                      <div
+                        key={entry.id}
+                        className="rounded-lg border border-slate-700/60 bg-slate-900/60 p-3"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-200">{entry.action.description}</span>
+                          <span className={`font-medium ${entry.approved ? 'text-emerald-300' : 'text-rose-300'}`}>
+                            {entry.approved ? 'Approved' : 'Denied'}
+                          </span>
+                        </div>
+                        <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
+                          <span>{entry.action.type}</span>
+                          <span>{new Date(entry.timestamp).toLocaleTimeString()}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          )}
           {activeTab === 'plan' && plan && (
             <motion.div
               key="plan"
@@ -425,7 +783,7 @@ export function AgentOverlay() {
             >
               {actions.length === 0 ? (
                 <div className="space-y-2">
-                  {plan?.steps.slice(0, 3).map((step, index) => (
+                  {plan?.steps.slice(0, 3).map((step) => (
                     <div
                       key={`skeleton-${step.id}`}
                       className="overflow-hidden rounded-lg border border-blue-500/30 bg-blue-500/5 p-3"

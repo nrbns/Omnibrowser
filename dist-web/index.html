@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OmniBrowser</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { height: 100%; width: 100%; }
+      body { background-color: #1A1D28; color: #fff; overflow: hidden; }
+      #root { height: 100%; width: 100%; }
+    </style>
+    <script type="module" crossorigin src="./assets/index-DMKJqC5Z.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-BdbHRHlx.css">
+  </head>
+  <body>
+    <div id="root" class="app-shell"></div>
+    <div id="portal-root"></div>
+    <script>
+      try {
+        const t = localStorage.getItem('theme');
+        if (t === 'dark') document.documentElement.classList.add('dark');
+        // Respond to OS theme changes at runtime (if no explicit user choice)
+        const mq = window.matchMedia('(prefers-color-scheme: dark)');
+        mq.addEventListener?.('change', (e) => {
+          if (localStorage.getItem('theme')) return; // user override present
+          document.documentElement.classList.toggle('dark', !!e.matches);
+        });
+      } catch (e) {}
+    </script>
+  </body>
+</html>
+

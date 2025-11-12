@@ -6,7 +6,6 @@
 import { app } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { z } from 'zod';
 import { AgentStore } from './agent/store';
 import { getTabs, getActiveTabIdForWindow, closeAllTabs, createTabOnWindow, activateTabByWindowId } from './tabs';
 import { getMainWindow } from './windows';

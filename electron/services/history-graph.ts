@@ -186,7 +186,6 @@ export class HistoryGraphService {
   }
 
   private addEdge(source: string, target: string, type: HistoryEdge['type'], timestamp: number): void {
-    const edgeId = `${source}->${target}:${type}`;
     const exists = this.graph.edges.some(e => 
       e.source === source && e.target === target && e.type === type
     );

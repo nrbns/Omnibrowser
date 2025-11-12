@@ -102,7 +102,7 @@ export class StreamingAIAdapter extends EventEmitter {
               this.emit('done');
               return;
             }
-          } catch (parseError) {
+          } catch {
             // Invalid JSON, skip
             continue;
           }

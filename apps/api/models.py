@@ -16,6 +16,7 @@ class User(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     email = Column(String, unique=True, nullable=False, index=True)
     handle = Column(String, nullable=True)
+    password_hash = Column(String, nullable=False)
     plan = Column(String, default="free")
     created_at = Column(DateTime, default=datetime.utcnow)
     

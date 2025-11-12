@@ -3,10 +3,9 @@
  * Handles ob:// and obx:// protocols for internal pages and plugin surfaces
  */
 
-import { protocol, ProtocolRequest, ProtocolResponse } from 'electron';
+import { protocol } from 'electron';
 import { app } from 'electron';
 import * as path from 'node:path';
-import { readFileSync } from 'node:fs';
 
 /**
  * Register custom protocols

@@ -54,7 +54,7 @@ class CommentStorage {
       const data = await fs.readFile(filePath, 'utf-8');
       const comments = JSON.parse(data) as Comment[];
       return Array.isArray(comments) ? comments : [];
-    } catch (error) {
+    } catch {
       // File doesn't exist or invalid - return empty array
       return [];
     }

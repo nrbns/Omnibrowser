@@ -20,7 +20,7 @@ export class EmbeddingService {
    */
   async embedChunks(
     chunks: Chunk[],
-    collection?: string
+    _collection?: string
   ): Promise<EmbeddingResult[]> {
     const vectorStore = getCloudVectorStore();
     const results: EmbeddingResult[] = [];

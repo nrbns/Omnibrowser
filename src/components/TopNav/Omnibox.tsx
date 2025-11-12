@@ -10,10 +10,11 @@ import { Search, Lock, Shield, AlertCircle, Globe, Calculator, Sparkles, Clock }
 import { motion, AnimatePresence } from 'framer-motion';
 import { ipc } from '../../lib/ipc-typed';
 import { useTabsStore } from '../../state/tabsStore';
-import { TabUpdate } from '../../lib/ipc-events';
+import { TabUpdate, ipcEvents } from '../../lib/ipc-events';
 import { useIPCEvent } from '../../lib/use-ipc-event';
 import { debounce } from 'lodash-es';
 import { useContainerStore } from '../../state/containerStore';
+import { isElectronRuntime } from '../../lib/env';
 
 interface Suggestion {
   type: 'history' | 'tab' | 'command' | 'search';
@@ -83,7 +84,6 @@ const evaluateExpression = (raw: string) => {
   }
 
   try {
-    // eslint-disable-next-line no-new-func
     const value = Function(`"use strict"; return (${expr.replace(/\^/g, '**')})`)();
     if (typeof value === 'number' && Number.isFinite(value)) {
       return value;
@@ -217,6 +217,23 @@ const MAX_RECENTS = 20;
 export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) {
   const { tabs, activeId } = useTabsStore();
   const activeContainerId = useContainerStore((state) => state.activeContainerId);
+  const isElectron = isElectronRuntime();
+  const formatTabsForEvent = (list: Array<{ id: string; title?: string; url?: string; active?: boolean; mode?: string; containerId?: string; containerName?: string; containerColor?: string; createdAt?: number; lastActiveAt?: number; sessionId?: string; profileId?: string; sleeping?: boolean }>) =>
+    list.map((t) => ({
+      id: t.id,
+      title: t.title || 'New Tab',
+      url: t.url || 'about:blank',
+      active: Boolean(t.active),
+      mode: t.mode,
+      containerId: t.containerId,
+      containerName: t.containerName,
+      containerColor: t.containerColor,
+      createdAt: t.createdAt,
+      lastActiveAt: t.lastActiveAt,
+      sessionId: t.sessionId,
+      profileId: t.profileId,
+      sleeping: t.sleeping,
+    }));
   const [url, setUrl] = useState('');
   const [focused, setFocused] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -678,6 +695,66 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
     }
 
     const openInBackground = background && !newWindow;
+
+    if (!isElectron) {
+      const normalizedTitle = titleOverride || finalUrl;
+      const state = useTabsStore.getState();
+      const baseTabs = (state.tabs ?? []).map((tab) => ({ ...tab }));
+      let nextTabs = baseTabs;
+      let nextActiveId = state.activeId ?? null;
+
+      if (!state.activeId || baseTabs.length === 0) {
+        const newId = `local-${Date.now()}`;
+        nextTabs = baseTabs.map((tab) => ({ ...tab, active: false }));
+        nextTabs.push({
+          id: newId,
+          title: normalizedTitle,
+          url: finalUrl,
+          active: true,
+          mode: 'normal',
+        });
+        nextActiveId = newId;
+      } else if (openInBackground) {
+        const newId = `local-${Date.now()}`;
+        nextTabs = baseTabs.map((tab) => ({ ...tab }));
+        nextTabs.push({
+          id: newId,
+          title: normalizedTitle,
+          url: finalUrl,
+          active: false,
+          mode: 'normal',
+        });
+      } else {
+        nextTabs = baseTabs.map((tab) => ({
+          ...tab,
+          title: tab.id === state.activeId ? normalizedTitle : tab.title,
+          url: tab.id === state.activeId ? finalUrl : tab.url,
+          active: tab.id === state.activeId,
+        }));
+        nextActiveId = state.activeId;
+      }
+
+      useTabsStore.setState({ tabs: nextTabs, activeId: nextActiveId });
+      ipcEvents.emit('tabs:updated', formatTabsForEvent(nextTabs));
+
+      setFocused(false);
+      setSuggestions([]);
+      if (!openInBackground) {
+        setUrl(finalUrl);
+      }
+      rememberRecent(normalizedTitle, finalUrl);
+
+      try {
+        if (newWindow || openInBackground) {
+          window.open(finalUrl, '_blank', 'noopener,noreferrer');
+        } else {
+          setUrl(finalUrl);
+        }
+      } catch (error) {
+        console.warn('Failed to handle navigation in browser runtime:', error);
+      }
+      return;
+    }
 
     if (newWindow) {
       try {

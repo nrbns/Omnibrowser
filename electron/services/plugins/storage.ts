@@ -4,9 +4,8 @@
  */
 
 import { app } from 'electron';
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, unlinkSync, rmdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
 
 const pluginStorageDir = join(app.getPath('userData'), 'plugin-storage');
 

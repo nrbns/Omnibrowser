@@ -5,7 +5,6 @@
 
 // @ts-nocheck
 
-import { ipc } from './ipc-typed';
 
 export interface TabUpdate {
   id: string;

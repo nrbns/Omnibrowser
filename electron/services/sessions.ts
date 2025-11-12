@@ -3,10 +3,9 @@
  * Handles multiple concurrent browser sessions (multi-login accounts)
  */
 
-import { session, Session } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'events';
-import { getProfile, listProfiles, createProfile, ProfileData } from './profiles';
+import { getProfile, createProfile } from './profiles';
 
 export interface BrowserSession {
   id: string;

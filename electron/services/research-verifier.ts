@@ -205,7 +205,7 @@ export function verifyResearchResult(result: ResearchResult): VerificationResult
     
     if (!hasCitation) {
       // Check if claim is grounded in sources
-      const { grounded, supportingSources } = isClaimGrounded(claim.claim, result.sources);
+      const { grounded } = isClaimGrounded(claim.claim, result.sources);
       
       if (!grounded) {
         // Determine severity based on claim characteristics

@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useAppStore } from '../state/appStore';
 
 export default function PhantomDock() {
-  const [picked, setPicked] = useState('');
   const open = useAppStore(s=>s.graphDockOpen || s.ledgerDockOpen) ? false : true; // simple always-available pane disabled when other docks open
   if (!open) return null;
   return (

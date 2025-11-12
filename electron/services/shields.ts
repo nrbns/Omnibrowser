@@ -129,7 +129,7 @@ class ShieldsService extends EventEmitter {
             newEngine: this.adblocker.engine,
             session: session.defaultSession,
           } as any);
-        } catch (e) {
+        } catch {
           // If update fails, fallback to request filters
           console.warn('[Shields] Could not enable adblocker, using fallback');
           this.setupFallbackAdBlocking();

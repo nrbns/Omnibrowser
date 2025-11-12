@@ -25,7 +25,6 @@ function closeTabsBySession(win: BrowserWindow, sessionId: string): void {
   
   // Remove tabs from array
   const tabIdsToRemove = new Set(sessionTabs.map(t => t.id));
-  const index = tabs.length;
   for (let i = tabs.length - 1; i >= 0; i--) {
     if (tabIdsToRemove.has(tabs[i].id)) {
       tabs.splice(i, 1);

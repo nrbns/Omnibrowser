@@ -24,10 +24,9 @@ export async function storeSecret(key: string, value: string): Promise<void> {
       await keytar.setPassword(SERVICE_NAME, key, value);
       return;
     }
-  } catch (error) {
+  } catch {
     // Fall back to Electron safeStorage if keytar fails
     if (safeStorage.isEncryptionAvailable()) {
-      const encrypted = safeStorage.encryptString(value);
       // Store encrypted value (would need to persist to disk)
       // For MVP, we'll use a simple in-memory cache
       console.warn('[Secrets] keytar unavailable, using safeStorage (in-memory only)');

@@ -5,7 +5,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { FileText, Loader2, Copy, Check } from 'lucide-react';
-import { ipc } from '../../lib/ipc-typed';
 
 interface SummaryPanelProps {
   filePath: string;

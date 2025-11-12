@@ -143,9 +143,8 @@ function getDomain(url: string): string {
 /**
  * Classify source type based on URL/domain
  */
-function classifySourceType(url: string, title: string): ResearchSource['sourceType'] {
+function classifySourceType(url: string, _title: string): ResearchSource['sourceType'] {
   const domain = getDomain(url).toLowerCase();
-  const titleLower = title.toLowerCase();
   
   if (domain.includes('arxiv.org') || domain.includes('pubmed') || domain.includes('.edu') || domain.includes('scholar')) {
     return 'academic';
@@ -264,7 +263,7 @@ async function fetchReadable(target: string, timeout = 10000, meta?: HybridSearc
     }
 
     return source;
-  } catch (error) {
+  } catch {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeout);
@@ -401,55 +400,6 @@ async function searchMultipleEngines(
     urls: urls.slice(0, maxResults),
     metadata,
   };
-}
-
-/**
- * Calculate relevance score for a source
- */
-function calculateRelevanceScore(source: ResearchSource, query: string, weights: ScoreWeights): number {
-  const queryTerms = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const textLower = source.text.toLowerCase();
-  const titleLower = source.title.toLowerCase();
-  
-  let score = 0;
-  
-  // Title matches are more important
-  for (const term of queryTerms) {
-    if (titleLower.includes(term)) score += 5;
-    if (textLower.includes(term)) score += 1;
-  }
-  
-  const authorityMultiplier = 1 + Math.max(0, Math.min(1, weights.authorityWeight));
-  switch (source.sourceType) {
-    case 'academic':
-      score += 10 * authorityMultiplier;
-      break;
-    case 'documentation':
-      score += 6 * authorityMultiplier;
-      break;
-    case 'news':
-      score += 4 * authorityMultiplier * 0.8;
-      break;
-    default:
-      break;
-  }
-  
-  const recencyMultiplier = 1 + Math.max(0, Math.min(1, weights.recencyWeight));
-  if (source.timestamp) {
-    const ageMs = Date.now() - source.timestamp;
-    const ageDays = ageMs / (24 * 60 * 60 * 1000);
-    const recencyScore = Math.max(0, 1 - Math.min(ageDays, 90) / 90); // 0..1
-    score += recencyScore * 10 * recencyMultiplier;
-  }
-  
-  if (source.metadata && typeof source.metadata.score === 'number') {
-    score += Number(source.metadata.score) * 10;
-  }
-  
-  // Penalize very short content
-  if (source.text.length < 100) score -= 5;
-  
-  return Math.max(0, score);
 }
 
 /**

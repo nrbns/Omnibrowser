@@ -5,7 +5,6 @@
 
 import { getOllamaAdapter } from '../ollama-adapter';
 import { registry } from '../skills/registry';
-import { z } from 'zod';
 
 export interface DeepResearchInput {
   query: string;
@@ -52,7 +51,6 @@ export async function runDeepResearch(input: DeepResearchInput): Promise<DeepRes
 
   for (const source of sources) {
     // Extract text from HTML
-    const extractSkill = registry.get('extract_table');
     let text = '';
     if (source.html) {
       // Use readable extractor if available

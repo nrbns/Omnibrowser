@@ -1,0 +1,2 @@
+import{c as p}from"./formatDistanceToNow-CwTn1k5x.js";const n=p((o,c)=>({mode:"Browse",setMode:e=>o({mode:e}),graphDockOpen:!1,toggleGraphDock:()=>{const e=!c().graphDockOpen;o({graphDockOpen:e}),window.ui?.setRightDock?.(e?360:0)},ledgerDockOpen:!1,toggleLedgerDock:()=>{const e=!c().ledgerDockOpen;o({ledgerDockOpen:e}),window.ui?.setRightDock?.(e?360:0)}}));export{n as u};
+//# sourceMappingURL=appStore-YdLSx3oj.js.map

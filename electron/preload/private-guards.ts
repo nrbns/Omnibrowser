@@ -57,7 +57,7 @@ export function injectPrivateGuards() {
   const blockWebRTC = () => {
     const RTCPeerConnection = (window as any).RTCPeerConnection || (window as any).webkitRTCPeerConnection || (window as any).mozRTCPeerConnection;
     if (RTCPeerConnection) {
-      (window as any).RTCPeerConnection = function(...args: any[]) {
+      (window as any).RTCPeerConnection = function(..._args: any[]) {
         console.warn('[Private Mode] WebRTC blocked');
         throw new Error('WebRTC is disabled in private mode');
       };
@@ -77,7 +77,7 @@ export function injectPrivateGuards() {
     }
 
     // Intercept clipboard read events
-    document.addEventListener('copy', (e) => {
+    document.addEventListener('copy', () => {
       // Allow copy but log
       console.log('[Private Mode] Copy event detected');
     });
