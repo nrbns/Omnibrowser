@@ -497,19 +497,27 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
     });
   }, []);
 
-  const handleSkip = useCallback(() => {
-    if (process.env.NODE_ENV === 'development') {
-      console.debug('[Onboarding] Skip pressed at step', stepIndex);
+  const handleSkip = useCallback((e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
     }
-    // Finish onboarding (this updates the store and marks as completed)
-    finishOnboarding();
-    
-    if (process.env.NODE_ENV === 'development') {
-      console.debug('[Onboarding] Skip: finishOnboarding() called, calling onClose()');
+    try {
+      if (process.env.NODE_ENV === 'development') {
+        console.debug('[Onboarding] Skip pressed at step', stepIndex);
+      }
+      // Finish onboarding (this updates the store and marks as completed)
+      finishOnboarding();
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.debug('[Onboarding] Skip: finishOnboarding() called, calling onClose()');
+      }
+      
+      // Call onClose for any cleanup
+      onClose();
+    } catch (error) {
+      console.error('[Onboarding] Error in handleSkip:', error);
     }
-    
-    // Call onClose for any cleanup
-    onClose();
   }, [finishOnboarding, onClose, stepIndex]);
 
   return (
@@ -544,19 +552,26 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
           className="relative w-[min(520px,90vw)] rounded-3xl border border-slate-700/70 bg-slate-950/95 p-6 text-gray-100 shadow-2xl"
         >
           <button
-            className="absolute right-5 top-5 rounded-full border border-slate-700/60 bg-slate-900/70 p-1.5 text-gray-400 hover:text-gray-200"
-            onClick={() => {
-              if (process.env.NODE_ENV === 'development') {
-                console.debug('[Onboarding] X button clicked');
+            type="button"
+            className="absolute right-5 top-5 z-10 rounded-full border border-slate-700/60 bg-slate-900/70 p-1.5 text-gray-400 hover:text-gray-200"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              try {
+                if (process.env.NODE_ENV === 'development') {
+                  console.debug('[Onboarding] X button clicked');
+                }
+                // Finish onboarding (this updates the store and marks as completed)
+                finishOnboarding();
+                
+                if (process.env.NODE_ENV === 'development') {
+                  console.debug('[Onboarding] X: finishOnboarding() called, calling onClose()');
+                }
+                
+                onClose();
+              } catch (error) {
+                console.error('[Onboarding] Error in X button handler:', error);
               }
-              // Finish onboarding (this updates the store and marks as completed)
-              finishOnboarding();
-              
-              if (process.env.NODE_ENV === 'development') {
-                console.debug('[Onboarding] X: finishOnboarding() called, calling onClose()');
-              }
-              
-              onClose();
             }}
             aria-label="Close onboarding"
           >
