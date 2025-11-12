@@ -12,6 +12,8 @@ import { registerHandler } from '../shared/ipc/router';
 import { createLogger } from './utils/logger';
 import { z } from 'zod';
 import { verifyResearchResult, VerificationResult } from './research-verifier';
+// Note: Frontend citation verifier available at src/lib/research/citation-verifier.ts
+// for real-time sentence-level citation checking in UI
 import { getHybridSearchService, SearchResult as HybridSearchResult } from './search/hybrid-search';
 import { stealthFetchPage } from './stealth-fetch';
 

@@ -7,12 +7,13 @@ interface RedixStatusProps {
   loading: boolean;
   hasIssues: boolean;
   lastRunAt: number | null;
+  citationCoverage?: number; // 0-1 citation coverage from verifier
 }
 
 const shimmer =
   'bg-gradient-to-r from-transparent via-white/10 to-transparent animate-[shimmer_1.5s_infinite]';
 
-export function RedixStatus({ loading, hasIssues, lastRunAt }: RedixStatusProps) {
+export function RedixStatus({ loading, hasIssues, lastRunAt, citationCoverage }: RedixStatusProps) {
   const { mode, label, badge, snapshot } = useEfficiencyStore((state) => ({
     mode: state.mode,
     label: state.label,
@@ -73,6 +74,12 @@ export function RedixStatus({ loading, hasIssues, lastRunAt }: RedixStatusProps)
             <span className="font-semibold">{loading ? '···' : `${greenScore}%`}</span>
           </motion.span>
 
+          {citationCoverage !== undefined && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-blue-400/40 bg-blue-500/20 px-3 py-1 text-xs font-medium">
+              Citations&nbsp;
+              <span className="font-semibold">{Math.round(citationCoverage * 100)}%</span>
+            </span>
+          )}
           <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/40 bg-emerald-500/20 px-3 py-1 text-xs font-medium">
             <BatteryCharging className="h-3.5 w-3.5 text-emerald-200" />
             {label}

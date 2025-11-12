@@ -6,6 +6,7 @@ import { useResearchStore } from '../state/researchStore';
 import { useTabsStore } from '../state/tabsStore';
 import { Portal } from '../components/common/Portal';
 import { RedixStatus, ResearchSkeleton } from '../components/research/RedixStatus';
+import { verifyCitationCoverage } from '../lib/research/citation-verifier';
 
 const ISSUE_DESCRIPTIONS: Record<string, string> = {
   uncited: 'Sentence has no supporting citation',
@@ -224,11 +225,42 @@ export function Research() {
     }
   }, [appendChunk, question, reset, setError, setIssues, setLoading, setSources]);
 
+  // Real-time citation verification
+  const citationVerification = useMemo(() => {
+    if (chunks.length === 0) return null;
+    
+    const fullText = chunks.map(c => c.content).join(' ');
+    const allCitations = chunks.flatMap((chunk, chunkIdx) => 
+      (chunk.citations || []).map(citeId => {
+        // Find citation index from sources
+        const citeNumber = citationOrder.get(citeId) || 0;
+        return { index: citeNumber, sourceIndex: 0 }; // Simplified - would map to actual sourceIndex
+      })
+    );
+    
+    return verifyCitationCoverage(fullText, allCitations);
+  }, [chunks, citationOrder]);
+
   useEffect(() => {
     if (!isLoading && chunks.length > 0) {
       setLastCompletedAt(Date.now());
+      
+      // Auto-flag uncited sentences using verifier
+      if (citationVerification && citationVerification.issues.length > 0) {
+        const newIssues = citationVerification.issues.map(issue => ({
+          type: 'uncited' as const,
+          sentenceIdx: issue.sentenceIdx,
+          detail: issue.detail,
+        }));
+        // Only add issues that aren't already present
+        const existingIndices = new Set(issues.map(i => i.sentenceIdx));
+        const uniqueNewIssues = newIssues.filter(i => !existingIndices.has(i.sentenceIdx));
+        if (uniqueNewIssues.length > 0) {
+          setIssues([...issues, ...uniqueNewIssues]);
+        }
+      }
     }
-  }, [isLoading, chunks.length]);
+  }, [isLoading, chunks.length, citationVerification, issues, setIssues]);
 
   const formattedAnswer = useMemo(() => {
     let offset = 0;
@@ -311,6 +343,7 @@ export function Research() {
             loading={isLoading}
             hasIssues={issues.length > 0}
             lastRunAt={lastCompletedAt}
+            citationCoverage={citationVerification?.citationCoverage}
           />
         </div>
 
