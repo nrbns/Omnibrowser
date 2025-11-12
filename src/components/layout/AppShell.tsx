@@ -210,6 +210,13 @@ export function AppShell() {
   const onboardingVisible = useOnboardingStore((state) => state.visible);
   const startOnboarding = useOnboardingStore((state) => state.start);
   const finishOnboarding = useOnboardingStore((state) => state.finish);
+  
+  // Debug: log visibility changes
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      console.debug('[AppShell] onboardingVisible changed:', onboardingVisible);
+    }
+  }, [onboardingVisible]);
   const [graphDropHint, setGraphDropHint] = useState(false);
   useEffect(() => {
     let dragCounter = 0;
