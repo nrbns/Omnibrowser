@@ -167,10 +167,10 @@ const typedApi = {
   },
 };
 
-// Expose IPC bridge
+// Expose IPC bridge to renderer
 try {
   contextBridge.exposeInMainWorld('ipc', typedApi);
-  console.log('[Preload] IPC bridge exposed successfully');
+  console.log('[Preload] IPC bridge exposed successfully via contextBridge');
 } catch (error) {
   console.error('[Preload] Failed to expose IPC bridge:', error);
 }
@@ -178,26 +178,27 @@ try {
 // Listen for IPC ready signal from main process
 ipcRenderer.on('ipc:ready', () => {
   console.log('[Preload] IPC ready signal received from main process');
-  window.dispatchEvent(new CustomEvent('ipc:ready'));
+  // Dispatch to renderer's window (not preload's window)
+  // The renderer will receive this event on its window object
+  if (typeof window !== 'undefined' && window.dispatchEvent) {
+    window.dispatchEvent(new CustomEvent('ipc:ready'));
+  }
 });
 
-// Immediately dispatch ready event if IPC is already set up
-// This handles cases where the preload script loads after the ready signal
+// Immediately dispatch ready event to renderer
+// Note: window.ipc doesn't exist in preload context, only in renderer context
+// So we just dispatch the event - the renderer will check for window.ipc
 setTimeout(() => {
-  // Check if IPC was successfully exposed
-  if (window.ipc && typeof window.ipc.invoke === 'function') {
-    console.log('[Preload] IPC bridge is available, dispatching ready event');
+  console.log('[Preload] Dispatching initial IPC ready event');
+  if (typeof window !== 'undefined' && window.dispatchEvent) {
     window.dispatchEvent(new CustomEvent('ipc:ready'));
-  } else {
-    console.warn('[Preload] IPC bridge not available on window object');
-    console.warn('[Preload] window.ipc:', window.ipc);
-    console.warn('[Preload] typeof window:', typeof window);
   }
 }, 0);
 
 // Also dispatch after a short delay to ensure renderer has registered listeners
 setTimeout(() => {
-  if (window.ipc && typeof window.ipc.invoke === 'function') {
+  console.log('[Preload] Dispatching delayed IPC ready event');
+  if (typeof window !== 'undefined' && window.dispatchEvent) {
     window.dispatchEvent(new CustomEvent('ipc:ready'));
   }
 }, 100);
