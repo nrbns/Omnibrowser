@@ -7,27 +7,27 @@ import {
   ArrowLeft,
   ArrowRight,
   RefreshCw,
-  Search,
   Download,
-  History,
   Settings,
   Bot,
   ChevronDown,
   Workflow,
   Camera,
   PictureInPicture,
-  Home,
-  ZoomIn,
-  ZoomOut,
   Code,
   FileText,
   Network,
   Layers,
-  Activity,
   Sparkles,
   Highlighter,
   Shield,
   Wifi,
+  Play,
+  History,
+  Search,
+  Activity,
+  Home,
+  MoreHorizontal,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -41,18 +41,18 @@ import { ipc } from '../../lib/ipc-typed';
 import { ModeSwitch } from '../TopNav/ModeSwitch';
 import { Omnibox } from '../TopNav/Omnibox';
 import { ProgressBar } from '../TopNav/ProgressBar';
-import { ShieldsButton } from '../TopNav/ShieldsButton';
-import { NetworkButton } from '../TopNav/NetworkButton';
 import { SessionSwitcher } from '../sessions/SessionSwitcher';
 import { ProfileQuickSwitcher } from '../sessions/ProfileQuickSwitcher';
 import { ContainerSwitcher } from '../sessions/ContainerSwitcher';
 import { useIPCEvent } from '../../lib/use-ipc-event';
-import { DownloadUpdate, TabNavigationState } from '../../lib/ipc-events';
+import { DownloadUpdate } from '../../lib/ipc-events';
 import { ThemeSwitcher } from '../TopNav/ThemeSwitcher';
 import { useAppStore } from '../../state/appStore';
 import { PrivacySentinelBadge } from '../TopNav/PrivacySentinelBadge';
+import { ShieldsButton } from '../TopNav/ShieldsButton';
+import { NetworkButton } from '../TopNav/NetworkButton';
 
-type MenuId = 'view' | 'workspace' | 'tools' | 'agent' | 'security';
+type MenuId = 'browse' | 'ai' | 'tools' | 'security';
 
 type MenuEntry =
   | {
@@ -102,12 +102,48 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
   const [downloadCount, setDownloadCount] = useState(0);
   const [agentActive, setAgentActive] = useState(false);
   const [activeMenu, setActiveMenu] = useState<MenuId | null>(null);
-  const closeMenus = useCallback(() => setActiveMenu(null), []);
+  const [menuLoading, setMenuLoading] = useState<Record<MenuId, boolean>>({ browse: false, ai: false, tools: false, security: false });
+  const menuTimersRef = useRef<Record<MenuId, ReturnType<typeof setTimeout> | null>>({ browse: null, ai: null, tools: null, security: null });
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement | null>(null);
+
+  const clearMenuTimer = useCallback((menu: MenuId) => {
+    const timer = menuTimersRef.current[menu];
+    if (timer) {
+      clearTimeout(timer);
+      menuTimersRef.current[menu] = null;
+    }
+  }, []);
+
+  const startMenuLoad = useCallback((menu: MenuId) => {
+    clearMenuTimer(menu);
+    setMenuLoading({ browse: false, ai: false, tools: false, security: false });
+    setMenuLoading((prev) => ({ ...prev, [menu]: true }));
+    menuTimersRef.current[menu] = setTimeout(() => {
+      setMenuLoading((prev) => ({ ...prev, [menu]: false }));
+      menuTimersRef.current[menu] = null;
+    }, 220);
+  }, [clearMenuTimer]);
+
+  const closeMenus = useCallback(() => {
+    setActiveMenu(null);
+    setMenuLoading({ browse: false, ai: false, tools: false, security: false });
+    (Object.keys(menuTimersRef.current) as MenuId[]).forEach((menu) => clearMenuTimer(menu));
+  }, [clearMenuTimer]);
+
   const toggleMenu = useCallback(
     (menu: MenuId) => {
-      setActiveMenu((current) => (current === menu ? null : menu));
+      setActiveMenu((current) => {
+        if (current === menu) {
+          clearMenuTimer(menu);
+          setMenuLoading({ browse: false, ai: false, tools: false, security: false });
+          return null;
+        }
+        startMenuLoad(menu);
+        return menu;
+      });
     },
-    []
+    [clearMenuTimer, startMenuLoad]
   );
   const navigationStateRef = useRef({
     activeId: activeId ?? null,
@@ -143,8 +179,9 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
         clearTimeout(refreshTimerRef.current);
         refreshTimerRef.current = null;
       }
+      (Object.keys(menuTimersRef.current) as MenuId[]).forEach((menu) => clearMenuTimer(menu));
     };
-  }, []);
+  }, [clearMenuTimer]);
 
   useEffect(() => {
     if (!activeMenu) return;
@@ -346,8 +383,7 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
       try {
         // The navigation state will be updated via IPC events
         // But we can also try to get it directly if needed
-        const tabs = await ipc.tabs.list();
-        const activeTab = tabs.find((t: any) => t.id === activeId);
+        await ipc.tabs.list();
         // Navigation state is managed by backend and sent via events
       } catch (error) {
         console.error('Failed to update navigation state:', error);
@@ -421,46 +457,7 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
 
   const isMac = typeof navigator !== 'undefined' && navigator.platform?.toUpperCase().includes('MAC');
 
-  const viewMenuEntries: MenuEntry[] = [
-    {
-      type: 'item',
-      key: 'zoom-in',
-      icon: ZoomIn,
-      label: 'Zoom In',
-      shortcut: isMac ? '⌘ +' : 'Ctrl +',
-      disabled: !activeId,
-      onSelect: async () => {
-        if (!activeId) return;
-        await ipc.tabs.zoomIn(activeId);
-      },
-    },
-    {
-      type: 'item',
-      key: 'zoom-out',
-      icon: ZoomOut,
-      label: 'Zoom Out',
-      shortcut: isMac ? '⌘ -' : 'Ctrl -',
-      disabled: !activeId,
-      onSelect: async () => {
-        if (!activeId) return;
-        await ipc.tabs.zoomOut(activeId);
-      },
-    },
-    {
-      type: 'item',
-      key: 'zoom-reset',
-      icon: Search,
-      label: 'Reset Zoom',
-      shortcut: isMac ? '⌘ 0' : 'Ctrl 0',
-      disabled: !activeId,
-      onSelect: async () => {
-        if (!activeId) return;
-        await ipc.tabs.zoomReset(activeId);
-      },
-    },
-  ];
-
-  const workspaceMenuEntries = useMemo<MenuEntry[]>(() => {
+  const browseMenuEntries = useMemo<MenuEntry[]>(() => {
     const base: Record<string, MenuEntry & { type: 'item' }> = {
       'knowledge-graph': {
         type: 'item',
@@ -472,7 +469,7 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
       'history-graph': {
         type: 'item',
         key: 'history-graph',
-        icon: Network,
+        icon: History,
         label: 'History Graph',
         onSelect: () => navigate('/history'),
       },
@@ -493,7 +490,7 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
       'automation-runs': {
         type: 'item',
         key: 'automation-runs',
-        icon: Bot,
+        icon: Play,
         label: 'Automation Runs',
         onSelect: () => navigate('/runs'),
       },
@@ -507,7 +504,7 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
       'tab-graph': {
         type: 'item',
         key: 'tab-graph',
-        icon: Network,
+        icon: Layers,
         label: 'Tab DNA Overlay',
         onSelect: () => void openTabGraph(),
       },
@@ -652,7 +649,7 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
     },
   ];
 
-  const agentMenuEntries: MenuEntry[] = [
+  const aiMenuEntries: MenuEntry[] = [
     {
       type: 'item',
       key: 'agent-console',
@@ -755,7 +752,7 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
     },
   ];
 
-  const renderMenuButton = (menuId: MenuId, label: string, entries: MenuEntry[]) => {
+  const renderMenuButton = (menuId: MenuId, label: string, Icon: LucideIcon, entries: MenuEntry[]) => {
     const isOpen = activeMenu === menuId;
     return (
       <div key={menuId} className="relative">
@@ -764,15 +761,17 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
           onClick={() => toggleMenu(menuId)}
           aria-expanded={isOpen}
           aria-haspopup="true"
+          data-testid={`nav-menu-${menuId}`}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          className={`button-surface flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm ${
+          className={`button-surface flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-sm ${
             isOpen ? 'button-surface--active text-primary' : 'text-muted'
           }`}
           title={`${label} menu`}
         >
-          <span>{label}</span>
-          <ChevronDown size={14} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+          <Icon size={16} className="text-muted" />
+          <span className="hidden xl:inline">{label}</span>
+          <ChevronDown size={14} className={`hidden xl:inline transition-transform ${isOpen ? 'rotate-180' : ''}`} />
         </motion.button>
 
         <AnimatePresence>
@@ -796,40 +795,54 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
                 transition={{ duration: 0.15 }}
                 className="absolute right-0 top-full mt-2 w-60 bg-surface-elevated border border-surface rounded-lg shadow-2xl z-50 py-2"
               >
-                {entries.map((entry) => {
-                  if (entry.type === 'divider') {
-                    return <div key={entry.key} className="h-px my-1 bg-[var(--surface-border)]/60" />;
-                  }
-                  if (entry.type === 'section') {
+                {menuLoading[menuId] ? (
+                  <div className="space-y-2 px-3 py-2">
+                    {Array.from({ length: 4 }).map((_, index) => (
+                      <div
+                        key={`skeleton-${menuId}-${index}`}
+                        className="h-8 rounded-md bg-slate-800/70 animate-pulse"
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  entries.map((entry) => {
+                    if (entry.type === 'divider') {
+                      return <div key={entry.key} className="h-px my-1 bg-[var(--surface-border)]/60" />;
+                    }
+                    if (entry.type === 'section') {
+                      return (
+                        <div
+                          key={entry.key}
+                          className="px-4 pt-1 pb-2 text-[10px] uppercase tracking-[0.24em] text-muted"
+                        >
+                          <div>{entry.label}</div>
+                          {entry.description && (
+                            <div className="mt-1 text-[10px] normal-case tracking-normal text-muted/80">
+                              {entry.description}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
                     return (
-                      <div key={entry.key} className="px-4 pt-1 pb-2 text-[10px] uppercase tracking-[0.24em] text-muted">
-                        <div>{entry.label}</div>
-                        {entry.description && (
-                          <div className="mt-1 text-[10px] normal-case tracking-normal text-muted/80">
-                            {entry.description}
-                          </div>
+                      <button
+                        key={entry.key}
+                        type="button"
+                        disabled={entry.disabled}
+                        onClick={() => handleMenuSelect(entry)}
+                        className="menu-item w-full"
+                      >
+                        <entry.icon size={16} className="text-muted" />
+                        <span className="flex-1 text-left">{entry.label}</span>
+                        {entry.shortcut && (
+                          <kbd className="text-xs text-muted border border-surface rounded px-1.5 py-0.5">
+                            {entry.shortcut}
+                          </kbd>
                         )}
-                      </div>
+                      </button>
                     );
-                  }
-                  return (
-                    <button
-                      key={entry.key}
-                      type="button"
-                      disabled={entry.disabled}
-                      onClick={() => handleMenuSelect(entry)}
-                      className="menu-item w-full"
-                    >
-                      <entry.icon size={16} className="text-muted" />
-                      <span className="flex-1 text-left">{entry.label}</span>
-                      {entry.shortcut && (
-                        <kbd className="text-xs text-muted border border-surface rounded px-1.5 py-0.5">
-                          {entry.shortcut}
-                        </kbd>
-                      )}
-                    </button>
-                  );
-                })}
+                  })
+                )}
               </motion.div>
             </>
           )}
@@ -839,152 +852,243 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
   };
 
   return (
-    <div className="drag h-14 flex items-center px-4 gap-4 bg-surface-panel border-b border-surface shadow-lg text-primary transition-colors">
-      {/* Left: Mode & Session controls */}
-      <div className="no-drag flex items-center gap-2">
-        <ModeSwitch />
-        <SessionSwitcher />
-        <div className="hidden xl:flex items-center gap-2">
-          <ProfileQuickSwitcher />
-          <ContainerSwitcher />
+    <div className="drag border-b border-surface bg-surface-panel shadow-lg text-primary transition-colors">
+      <div className="no-drag flex flex-wrap items-center gap-3 px-4 py-2">
+        {/* Left cluster */}
+        <div className="flex items-center gap-2">
+          <ModeSwitch />
+          <SessionSwitcher compact />
+          <div className="hidden 2xl:flex items-center gap-2">
+            <ProfileQuickSwitcher compact />
+            <ContainerSwitcher compact />
+          </div>
         </div>
-      </div>
 
-      {/* Browser Navigation Controls */}
-      <div className="no-drag flex items-center gap-1.5 flex-shrink-0">
-        {/* Home Button */}
-        <motion.button
-          onClick={() => navigate('/')}
-          aria-label="Go to home"
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          className="no-drag p-2.5 rounded-lg button-surface hover:text-primary"
-          title="Home (Go to home screen)"
-        >
-          <Home size={18} />
-        </motion.button>
-        
-        <motion.button
-          onClick={handleBack}
-          disabled={!canGoBack || !activeId}
-          aria-label="Go back"
-          aria-disabled={!canGoBack || !activeId}
-          whileHover={{ scale: canGoBack && activeId ? 1.05 : 1 }}
-          whileTap={{ scale: canGoBack && activeId ? 0.95 : 1 }}
-          className={`no-drag p-2.5 rounded-lg button-surface ${
-            canGoBack && activeId ? 'hover:text-primary' : 'opacity-40 cursor-not-allowed'
-          }`}
-          title="Back (Alt+← / ⌘←)"
-        >
-          <ArrowLeft size={18} />
-        </motion.button>
-        <motion.button
-          onClick={handleForward}
-          disabled={!canGoForward || !activeId}
-          aria-label="Go forward"
-          aria-disabled={!canGoForward || !activeId}
-          whileHover={{ scale: canGoForward && activeId ? 1.05 : 1 }}
-          whileTap={{ scale: canGoForward && activeId ? 0.95 : 1 }}
-          className={`no-drag p-2.5 rounded-lg button-surface ${
-            canGoForward && activeId ? 'hover:text-primary' : 'opacity-40 cursor-not-allowed'
-          }`}
-          title="Forward (Alt+→ / ⌘→)"
-        >
-          <ArrowRight size={18} />
-        </motion.button>
-        <motion.button
-          onClick={handleRefresh}
-          disabled={!activeId}
-          aria-label="Refresh page"
-          aria-disabled={!activeId}
-          whileHover={{ scale: activeId ? 1.05 : 1 }}
-          whileTap={{ scale: activeId ? 0.95 : 1 }}
-          className={`no-drag p-2.5 rounded-lg button-surface ${
-            activeId ? 'hover:text-primary' : 'opacity-40 cursor-not-allowed'
-          }`}
-          title="Refresh (Ctrl+R / ⌘R)"
-        >
-          <motion.div
-            animate={{ rotate: isLoading ? 360 : 0 }}
-            transition={{ duration: 1, repeat: isLoading ? Infinity : 0, ease: "linear" }}
-            className="flex items-center justify-center"
+        {/* Browser Navigation Controls */}
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {/* Home Button */}
+          <motion.button
+            onClick={() => navigate('/')}
+            aria-label="Go to home"
+            data-testid="nav-home-button"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            className="no-drag p-2.5 rounded-lg button-surface hover:text-primary"
+            title="Home (Go to home screen)"
           >
-            <RefreshCw size={18} />
-          </motion.div>
-        </motion.button>
-      </div>
-
-      {/* Center: Omnibox with Progress Bar */}
-      <div className="no-drag flex-1 relative mx-4" data-onboarding="omnibox">
-        <Omnibox onCommandPalette={onCommandPalette} />
-        <ProgressBar />
-      </div>
-
-      {/* Right: Actions & Badges */}
-      <div className="no-drag flex items-center gap-1.5">
-        {renderMenuButton('agent', 'Agent', agentMenuEntries)}
-        {renderMenuButton('view', 'View', viewMenuEntries)}
-        {renderMenuButton('workspace', 'Workspace', workspaceMenuEntries)}
-        {renderMenuButton('tools', 'Tools', toolsMenuEntries)}
-        {renderMenuButton('security', 'Security', securityMenuEntries)}
-        <PrivacySentinelBadge />
-        <ThemeSwitcher />
-        <div className="hidden 2xl:flex items-center gap-1.5">
-          <ShieldsButton />
-          <NetworkButton />
-        </div>
-        <motion.button
-          onClick={() => {
-            navigate('/downloads');
-          }}
-          aria-label={`Downloads${downloadCount > 0 ? ` (${downloadCount} active)` : ''}`}
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          className="no-drag relative p-2 rounded-lg button-surface hover:text-primary"
-          title={`Downloads${downloadCount > 0 ? ` (${downloadCount} active)` : ''}`}
-        >
-          <Download size={18} />
-          {downloadCount > 0 && (
-            <motion.span
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              className="absolute -top-1 -right-1 w-4 h-4 bg-blue-500 text-white text-xs rounded-full flex items-center justify-center font-bold"
-              aria-label={`${downloadCount} active download${downloadCount > 1 ? 's' : ''}`}
+            <Home size={18} />
+          </motion.button>
+          
+          <motion.button
+            onClick={handleBack}
+            disabled={!canGoBack || !activeId}
+            aria-label="Go back"
+            aria-disabled={!canGoBack || !activeId}
+            data-testid="nav-back-button"
+            whileHover={{ scale: canGoBack && activeId ? 1.05 : 1 }}
+            whileTap={{ scale: canGoBack && activeId ? 0.95 : 1 }}
+            className={`no-drag p-2.5 rounded-lg button-surface ${
+              canGoBack && activeId ? 'hover:text-primary' : 'opacity-40 cursor-not-allowed'
+            }`}
+            title="Back (Alt+← / ⌘←)"
+          >
+            <ArrowLeft size={18} />
+          </motion.button>
+          <motion.button
+            onClick={handleForward}
+            disabled={!canGoForward || !activeId}
+            aria-label="Go forward"
+            aria-disabled={!canGoForward || !activeId}
+            data-testid="nav-forward-button"
+            whileHover={{ scale: canGoForward && activeId ? 1.05 : 1 }}
+            whileTap={{ scale: canGoForward && activeId ? 0.95 : 1 }}
+            className={`no-drag p-2.5 rounded-lg button-surface ${
+              canGoForward && activeId ? 'hover:text-primary' : 'opacity-40 cursor-not-allowed'
+            }`}
+            title="Forward (Alt+→ / ⌘→)"
+          >
+            <ArrowRight size={18} />
+          </motion.button>
+          <motion.button
+            onClick={handleRefresh}
+            disabled={!activeId}
+            aria-label="Refresh page"
+            aria-disabled={!activeId}
+            data-testid="nav-refresh-button"
+            whileHover={{ scale: activeId ? 1.05 : 1 }}
+            whileTap={{ scale: activeId ? 0.95 : 1 }}
+            className={`no-drag p-2.5 rounded-lg button-surface ${
+              activeId ? 'hover:text-primary' : 'opacity-40 cursor-not-allowed'
+            }`}
+            title="Refresh (Ctrl+R / ⌘R)"
+          >
+            <motion.div
+              animate={{ rotate: isLoading ? 360 : 0 }}
+              transition={{ duration: 1, repeat: isLoading ? Infinity : 0, ease: "linear" }}
+              className="flex items-center justify-center"
             >
-              {downloadCount > 9 ? '9+' : downloadCount}
-            </motion.span>
-          )}
-        </motion.button>
-        <motion.button
-          onClick={() => navigate('/settings')}
-          aria-label="Open settings"
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          className="no-drag p-2 rounded-lg button-surface hover:text-primary"
-          title="Settings"
-        >
-          <Settings size={18} />
-        </motion.button>
-        <motion.button
-          onClick={onAgentToggle}
-          aria-label={`Agent console${agentActive ? ' (active)' : ''}`}
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          className={`no-drag p-2 rounded-lg button-surface ${
-            agentActive ? 'button-surface--active shadow-[0_0_18px_rgba(59,130,246,0.35)] text-primary' : 'hover:text-primary'
-          }`}
-          title="Agent Console (⌘⇧A)"
-        >
-          <Bot size={18} />
-          {agentActive && (
-            <motion.span
-              className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-green-400 rounded-full border-2 border-gray-900"
-              animate={{ scale: [1, 1.2, 1], opacity: [1, 0.8, 1] }}
-              transition={{ duration: 2, repeat: Infinity }}
-              aria-label="Agent is active"
-            />
-          )}
-        </motion.button>
+              <RefreshCw size={18} />
+            </motion.div>
+          </motion.button>
+        </div>
+
+        {/* Center: Omnibox with Progress Bar */}
+        <div className="flex-1 min-w-[220px]" data-onboarding="omnibox">
+          <div className="relative">
+            <Omnibox onCommandPalette={onCommandPalette} />
+            <ProgressBar />
+          </div>
+        </div>
+
+        {/* Right: Actions & Badges - Grouped for better hierarchy */}
+        <div className="flex items-center gap-2 ml-auto">
+          {/* Primary Actions: Always visible */}
+          <div className="flex items-center gap-1.5 border-r border-surface/40 pr-2">
+            <motion.button
+              onClick={onAgentToggle}
+              aria-label={`Agent console${agentActive ? ' (active)' : ''}`}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              data-testid="nav-agent-button"
+              className={`relative p-2 rounded-lg button-surface ${
+                agentActive ? 'button-surface--active shadow-[0_0_18px_rgba(59,130,246,0.35)] text-primary' : 'hover:text-primary'
+              }`}
+              title="Agent Console (⌘⇧A)"
+            >
+              <Bot size={18} />
+              {agentActive && (
+                <motion.span
+                  className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-green-400 rounded-full border-2 border-gray-900"
+                  animate={{ scale: [1, 1.2, 1], opacity: [1, 0.8, 1] }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                  aria-label="Agent is active"
+                />
+              )}
+            </motion.button>
+          </div>
+
+          {/* Menu Actions: Grouped menus */}
+          <div className="flex items-center gap-1">
+            {renderMenuButton('ai', 'AI', Sparkles, aiMenuEntries)}
+            {renderMenuButton('browse', 'Browse', Layers, browseMenuEntries)}
+            {renderMenuButton('tools', 'Tools', Workflow, toolsMenuEntries)}
+            {renderMenuButton('security', 'Security', Shield, securityMenuEntries)}
+          </div>
+
+          {/* Security & Privacy: Compact group */}
+          <div className="hidden lg:flex items-center gap-1 border-l border-surface/40 pl-2">
+            <PrivacySentinelBadge />
+            <div className="hidden xl:flex items-center gap-1">
+              <ShieldsButton />
+              <NetworkButton />
+            </div>
+          </div>
+
+          {/* Utility Actions: Collapsible into "More" on smaller screens */}
+          <div className="hidden md:flex items-center gap-1 border-l border-surface/40 pl-2">
+            <ThemeSwitcher />
+            <motion.button
+              onClick={() => navigate('/downloads')}
+              aria-label={`Downloads${downloadCount > 0 ? ` (${downloadCount} active)` : ''}`}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              data-testid="nav-downloads-button"
+              className="relative p-2 rounded-lg button-surface hover:text-primary"
+              title={`Downloads${downloadCount > 0 ? ` (${downloadCount} active)` : ''}`}
+            >
+              <Download size={18} />
+              {downloadCount > 0 && (
+                <motion.span
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  className="absolute -top-1 -right-1 w-4 h-4 bg-blue-500 text-white text-xs rounded-full flex items-center justify-center font-bold"
+                  aria-label={`${downloadCount} active download${downloadCount > 1 ? 's' : ''}`}
+                >
+                  {downloadCount > 9 ? '9+' : downloadCount}
+                </motion.span>
+              )}
+            </motion.button>
+            <motion.button
+              onClick={() => navigate('/settings')}
+              aria-label="Open settings"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              data-testid="nav-settings-button"
+              className="p-2 rounded-lg button-surface hover:text-primary"
+              title="Settings"
+            >
+              <Settings size={18} />
+            </motion.button>
+          </div>
+
+          {/* Mobile/Compact: "More" dropdown for utilities */}
+          <div className="md:hidden relative" ref={moreMenuRef}>
+            <button
+              type="button"
+              onClick={() => setMoreMenuOpen((prev) => !prev)}
+              className="p-2 rounded-lg button-surface hover:text-primary"
+              aria-label="More options"
+              aria-expanded={moreMenuOpen}
+              data-testid="nav-more-button"
+              title="More options"
+            >
+              <MoreHorizontal size={18} />
+            </button>
+            <AnimatePresence>
+              {moreMenuOpen && (
+                <>
+                  <motion.button
+                    key="more-backdrop"
+                    type="button"
+                    aria-label="Close more menu"
+                    className="fixed inset-0 z-40 bg-transparent pointer-events-auto focus:outline-none"
+                    onClick={() => setMoreMenuOpen(false)}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                  />
+                  <motion.div
+                    key="more-menu"
+                    initial={{ opacity: 0, y: -8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute right-0 top-full mt-2 w-48 bg-surface-elevated border border-surface rounded-lg shadow-2xl z-50 py-2"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigate('/downloads');
+                        setMoreMenuOpen(false);
+                      }}
+                      className="menu-item w-full"
+                      data-testid="nav-more-downloads"
+                    >
+                      <Download size={16} />
+                      <span>Downloads{downloadCount > 0 ? ` (${downloadCount})` : ''}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigate('/settings');
+                        setMoreMenuOpen(false);
+                      }}
+                      className="menu-item w-full"
+                      data-testid="nav-more-settings"
+                    >
+                      <Settings size={16} />
+                      <span>Settings</span>
+                    </button>
+                    <div className="h-px my-1 bg-[var(--surface-border)]/60" />
+                    <div className="px-3 py-1">
+                      <ThemeSwitcher />
+                    </div>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
       </div>
     </div>
   );
