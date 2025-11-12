@@ -486,19 +486,75 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
     if (!onboardingVisible) return;
 
     const nextButton = primaryButtonRef.current;
+    const skipButton = document.querySelector('[data-onboarding-skip]') as HTMLButtonElement;
+    const backButton = document.querySelector('[data-onboarding-back]') as HTMLButtonElement;
+    const closeButton = document.querySelector('[data-onboarding-close]') as HTMLButtonElement;
+
+    const handleNextClick = (e: Event) => {
+      console.log('[Onboarding] Native click detected on Next button!', e);
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      goNext();
+    };
+
+    const handleSkipClick = (e: Event) => {
+      console.log('[Onboarding] Native click detected on Skip button!', e);
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      handleSkip();
+    };
+
+    const handleBackClick = (e: Event) => {
+      console.log('[Onboarding] Native click detected on Back button!', e);
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      goBack();
+    };
+
+    const handleCloseClick = (e: Event) => {
+      console.log('[Onboarding] Native click detected on Close button!', e);
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      finishOnboarding();
+      onClose();
+    };
+
     if (nextButton) {
-      const handleNativeClick = (e: Event) => {
-        console.log('[Onboarding] Native click detected on Next button!', e);
-        e.preventDefault();
-        e.stopPropagation();
-        goNext();
-      };
-      nextButton.addEventListener('click', handleNativeClick, true);
-      return () => {
-        nextButton.removeEventListener('click', handleNativeClick, true);
-      };
+      nextButton.addEventListener('click', handleNextClick, true);
+      nextButton.addEventListener('mousedown', handleNextClick, true);
     }
-  }, [onboardingVisible, goNext]);
+    if (skipButton) {
+      skipButton.addEventListener('click', handleSkipClick, true);
+      skipButton.addEventListener('mousedown', handleSkipClick, true);
+    }
+    if (backButton) {
+      backButton.addEventListener('click', handleBackClick, true);
+      backButton.addEventListener('mousedown', handleBackClick, true);
+    }
+    if (closeButton) {
+      closeButton.addEventListener('click', handleCloseClick, true);
+      closeButton.addEventListener('mousedown', handleCloseClick, true);
+    }
+
+    return () => {
+      if (nextButton) {
+        nextButton.removeEventListener('click', handleNextClick, true);
+        nextButton.removeEventListener('mousedown', handleNextClick, true);
+      }
+      if (skipButton) {
+        skipButton.removeEventListener('click', handleSkipClick, true);
+        skipButton.removeEventListener('mousedown', handleSkipClick, true);
+      }
+      if (backButton) {
+        backButton.removeEventListener('click', handleBackClick, true);
+        backButton.removeEventListener('mousedown', handleBackClick, true);
+      }
+      if (closeButton) {
+        closeButton.removeEventListener('click', handleCloseClick, true);
+        closeButton.removeEventListener('mousedown', handleCloseClick, true);
+      }
+    };
+  }, [onboardingVisible, goNext, handleSkip, goBack, finishOnboarding, onClose]);
 
   const goBack = useCallback(() => {
     setStepIndex((current) => {
@@ -570,10 +626,13 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
           >
           <button
             type="button"
+            data-onboarding-close
             className="absolute right-5 top-5 rounded-full border border-slate-700/60 bg-slate-900/70 p-1.5 text-gray-400 hover:text-gray-200 cursor-pointer"
             style={{ pointerEvents: 'auto', position: 'absolute', zIndex: 1003 }}
-            onClick={() => {
-              console.log('[Onboarding] X button clicked');
+            onClick={(e) => {
+              console.log('[Onboarding] X button clicked via React');
+              e.preventDefault();
+              e.stopPropagation();
               finishOnboarding();
               onClose();
             }}
@@ -697,38 +756,47 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
           <div className="mt-6 flex items-center justify-between text-sm" style={{ pointerEvents: 'auto', zIndex: 1002, position: 'relative' }}>
             <button
               type="button"
-              onClick={() => {
-                console.log('[Onboarding] Back button clicked');
+              data-onboarding-back
+              onClick={(e) => {
+                console.log('[Onboarding] Back button clicked via React');
+                e.preventDefault();
+                e.stopPropagation();
                 goBack();
               }}
               disabled={!canGoBack}
               className="rounded-lg border border-slate-700/60 px-3 py-2 text-gray-300 transition hover:border-slate-500/80 hover:text-gray-100 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
-              style={{ pointerEvents: 'auto', position: 'relative', zIndex: 1003 }}
+              style={{ pointerEvents: 'auto', position: 'relative', zIndex: 1003, touchAction: 'manipulation' }}
             >
               Back
             </button>
             <div className="flex items-center gap-2" style={{ pointerEvents: 'auto', position: 'relative', zIndex: 1003 }}>
               <button
                 type="button"
-                onClick={() => {
-                  console.log('[Onboarding] Skip button clicked');
+                data-onboarding-skip
+                onClick={(e) => {
+                  console.log('[Onboarding] Skip button clicked via React');
+                  e.preventDefault();
+                  e.stopPropagation();
                   handleSkip();
                 }}
                 className="rounded-lg border border-slate-700/60 px-3 py-2 text-gray-400 transition hover:border-slate-500/80 hover:text-gray-200 cursor-pointer"
-                style={{ pointerEvents: 'auto', position: 'relative', zIndex: 1003 }}
+                style={{ pointerEvents: 'auto', position: 'relative', zIndex: 1003, touchAction: 'manipulation' }}
               >
                 Skip
               </button>
               <button
                 type="button"
+                data-onboarding-next
                 ref={primaryButtonRef}
-                onClick={() => {
-                  console.log('[Onboarding] Next/Finish button clicked');
+                onClick={(e) => {
+                  console.log('[Onboarding] Next/Finish button clicked via React');
+                  e.preventDefault();
+                  e.stopPropagation();
                   goNext();
                 }}
                 disabled={isNextDisabled}
                 className="rounded-lg border border-emerald-500/60 bg-emerald-500/10 px-4 py-2 font-medium text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
-                style={{ pointerEvents: 'auto', position: 'relative', zIndex: 1003 }}
+                style={{ pointerEvents: 'auto', position: 'relative', zIndex: 1003, touchAction: 'manipulation' }}
               >
                 {isLastStep ? 'Finish' : 'Next'}
               </button>
