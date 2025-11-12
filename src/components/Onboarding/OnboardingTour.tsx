@@ -533,7 +533,9 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
           className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70 backdrop-blur-sm"
           onClick={(e) => {
             // Prevent clicks on backdrop from closing (only buttons should close)
-            e.stopPropagation();
+            if (e.target === e.currentTarget) {
+              e.stopPropagation();
+            }
           }}
         >
           {spotlight && (
@@ -555,7 +557,11 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 20 }}
             transition={{ duration: 0.2 }}
-            className="relative w-[min(520px,90vw)] rounded-3xl border border-slate-700/70 bg-slate-950/95 p-6 text-gray-100 shadow-2xl"
+            className="relative w-[min(520px,90vw)] rounded-3xl border border-slate-700/70 bg-slate-950/95 p-6 text-gray-100 shadow-2xl z-[1001]"
+            onClick={(e) => {
+              // Prevent clicks on modal from bubbling to backdrop
+              e.stopPropagation();
+            }}
           >
           <button
             type="button"

@@ -787,16 +787,24 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
 
     try {
       if (!window.ipc || typeof (window.ipc as any).invoke !== 'function') {
-        console.warn('IPC not ready for navigation, waiting...');
+        console.warn('[Omnibox] IPC not ready for navigation, waiting...');
         await new Promise(resolve => setTimeout(resolve, 500));
       }
 
+      console.log('[Omnibox] Navigating to:', finalUrl, { activeId, openInBackground, activeContainerId });
+      
       if (!activeId) {
-        await ipc.tabs.create({ url: finalUrl, containerId: activeContainerId, activate: !openInBackground });
+        console.log('[Omnibox] Creating new tab (no active tab)');
+        const newTab = await ipc.tabs.create({ url: finalUrl, containerId: activeContainerId, activate: !openInBackground });
+        console.log('[Omnibox] Tab created:', newTab);
       } else if (openInBackground) {
-        await ipc.tabs.create({ url: finalUrl, containerId: activeContainerId, activate: false });
+        console.log('[Omnibox] Creating background tab');
+        const newTab = await ipc.tabs.create({ url: finalUrl, containerId: activeContainerId, activate: false });
+        console.log('[Omnibox] Background tab created:', newTab);
       } else {
+        console.log('[Omnibox] Navigating active tab:', activeId);
         await ipc.tabs.navigate(activeId, finalUrl);
+        console.log('[Omnibox] Navigation complete');
       }
 
       setFocused(false);
