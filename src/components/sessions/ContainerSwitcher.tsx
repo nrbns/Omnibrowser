@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Boxes, Plus } from 'lucide-react';
 import { ipc } from '../../lib/ipc-typed';
 import { useContainerStore } from '../../state/containerStore';
 import { ContainerInfo } from '../../lib/ipc-events';
 import { ipcEvents } from '../../lib/ipc-events';
+import { useTabsStore } from '../../state/tabsStore';
 
 type PermissionKey = 'media' | 'display-capture' | 'notifications' | 'fullscreen';
 
@@ -37,6 +38,10 @@ interface ContainerSwitcherProps {
 
 export function ContainerSwitcher({ compact = false }: ContainerSwitcherProps) {
   const { containers, activeContainerId, setContainers, setActiveContainer } = useContainerStore();
+  const { activeId, tabs } = useTabsStore((state) => ({
+    activeId: state.activeId,
+    tabs: state.tabs,
+  }));
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
@@ -165,6 +170,18 @@ export function ContainerSwitcher({ compact = false }: ContainerSwitcherProps) {
   };
 
   const activeContainer = containers.find((c) => c.id === activeContainerId);
+  const activeTab = useMemo(() => tabs.find((tab) => tab.id === activeId), [tabs, activeId]);
+  const activeOrigin = useMemo(() => {
+    if (!activeTab?.url) return null;
+    try {
+      const parsed = new URL(activeTab.url);
+      if (!parsed.protocol.startsWith('http')) return null;
+      return `${parsed.protocol}//${parsed.host}`;
+    } catch {
+      return null;
+    }
+  }, [activeTab?.url]);
+  const activeOriginLabel = useMemo(() => (activeOrigin ? activeOrigin.replace(/^https?:\/\//, '') : null), [activeOrigin]);
   const activePermissions = activeContainer ? permissionState[activeContainer.id] ?? [] : [];
   const sitePermissionEntries = activeContainer ? sitePermissionState[activeContainer.id] ?? [] : [];
   const originsForPermission = (permission: PermissionKey) =>
@@ -197,6 +214,21 @@ export function ContainerSwitcher({ compact = false }: ContainerSwitcherProps) {
       }
     } catch (error) {
       console.error('Failed to revoke site permission:', error);
+    }
+  };
+
+  const handleAllowOrigin = async (permissionKey: PermissionKey) => {
+    if (!activeContainer || !activeOrigin) return;
+    try {
+      const entries = await ipc.containers.allowSitePermission(activeContainer.id, permissionKey, activeOrigin);
+      if (Array.isArray(entries)) {
+        setSitePermissionState((prev) => ({
+          ...prev,
+          [activeContainer.id]: entries as Array<{ permission: PermissionKey; origins: string[] }>,
+        }));
+      }
+    } catch (error) {
+      console.error('Failed to allow site permission:', error);
     }
   };
 
@@ -330,6 +362,10 @@ export function ContainerSwitcher({ compact = false }: ContainerSwitcherProps) {
                 <div className="mt-3 space-y-3">
                   {PERMISSION_OPTIONS.map((option) => {
                     const enabled = activePermissions.includes(option.key);
+                    const allowedOrigins = originsForPermission(option.key);
+                    const hasActiveOrigin = activeOrigin ? allowedOrigins.includes(activeOrigin) : false;
+                    const actionDisabled = !activeOrigin || (!hasActiveOrigin && !enabled);
+                    const displayOrigin = activeOriginLabel || activeOrigin || 'this site';
                     return (
                       <label
                         key={option.key}
@@ -341,43 +377,99 @@ export function ContainerSwitcher({ compact = false }: ContainerSwitcherProps) {
                           checked={enabled}
                           onChange={() => handleTogglePermission(option.key)}
                         />
-                        <div className="flex-1 space-y-1">
-                          <div className="text-sm font-medium text-gray-200">
-                            {option.label}
+                        <div className="flex-1 space-y-2">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="space-y-1">
+                              <div className="text-sm font-medium text-gray-200">
+                                {option.label}
+                              </div>
+                              <p className="text-xs text-gray-500 leading-snug">
+                                {option.description}
+                              </p>
+                              {activeOrigin && (
+                                <p className={`text-[11px] ${hasActiveOrigin ? 'text-emerald-400' : 'text-gray-500'}`}>
+                                  {hasActiveOrigin
+                                    ? `Allowed for ${displayOrigin}`
+                                    : `Not allowed for ${displayOrigin}`}
+                                </p>
+                              )}
+                              {!enabled && (
+                                <p className="text-[11px] text-amber-400">
+                                  Container-level access disabled
+                                </p>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                if (!activeOrigin) return;
+                                if (hasActiveOrigin) {
+                                  void handleRemoveOrigin(option.key, activeOrigin);
+                                } else {
+                                  void handleAllowOrigin(option.key);
+                                }
+                              }}
+                              disabled={actionDisabled}
+                              className={`rounded-full border px-2 py-1 text-[11px] font-medium transition-colors ${
+                                actionDisabled
+                                  ? 'cursor-not-allowed border-gray-800 bg-gray-900/60 text-gray-500'
+                                  : hasActiveOrigin
+                                  ? 'border-amber-400/60 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20'
+                                  : 'border-blue-400/60 bg-blue-500/10 text-blue-100 hover:bg-blue-500/20'
+                              }`}
+                            >
+                              {!activeOrigin
+                                ? 'Open a site'
+                                : hasActiveOrigin
+                                ? 'Revoke site'
+                                : 'Allow site'}
+                            </button>
                           </div>
-                          <p className="text-xs text-gray-500 leading-snug">
-                            {option.description}
-                          </p>
-                      {originsForPermission(option.key).length > 0 && (
-                        <div className="mt-2 space-y-1">
-                          <span className="text-[11px] uppercase tracking-wide text-gray-500">
-                            Allowed sites
-                          </span>
-                          <div className="flex flex-wrap gap-2">
-                            {originsForPermission(option.key).map((origin) => (
-                              <span
-                                key={`${option.key}-${origin}`}
-                                className="group inline-flex items-center gap-2 rounded-full border border-gray-700 bg-gray-800/60 px-2 py-0.5 text-[11px] text-gray-300"
-                                title={origin}
-                              >
-                                <span className="max-w-[140px] truncate">{origin.replace(/^https?:\/\//, '')}</span>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    void handleRemoveOrigin(option.key, origin);
-                                  }}
-                                  className="rounded-full bg-transparent p-0.5 text-gray-500 hover:bg-gray-700 hover:text-gray-200 transition-colors"
-                                  aria-label={`Remove ${origin} from ${option.label}`}
-                                >
-                                  ×
-                                </button>
+                          {allowedOrigins.length > 0 && (
+                            <div className="mt-2 space-y-1">
+                              <span className="text-[11px] uppercase tracking-wide text-gray-500">
+                                Allowed sites
                               </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                              <div className="flex flex-wrap gap-2">
+                                {allowedOrigins.map((origin) => {
+                                  const highlight = activeOrigin && origin === activeOrigin;
+                                  return (
+                                    <span
+                                      key={`${option.key}-${origin}`}
+                                      className={`group inline-flex items-center gap-2 rounded-full border px-2 py-0.5 text-[11px] transition-colors ${
+                                        highlight
+                                          ? 'border-blue-400 bg-blue-500/20 text-blue-100'
+                                          : 'border-gray-700 bg-gray-800/60 text-gray-300'
+                                      }`}
+                                      title={origin}
+                                    >
+                                      <span className="max-w-[140px] truncate">
+                                        {origin.replace(/^https?:\/\//, '')}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          void handleRemoveOrigin(option.key, origin);
+                                        }}
+                                        className={`rounded-full bg-transparent p-0.5 transition-colors ${
+                                          highlight
+                                            ? 'text-blue-200 hover:bg-blue-500/20'
+                                            : 'text-gray-500 hover:bg-gray-700 hover:text-gray-200'
+                                        }`}
+                                        aria-label={`Remove ${origin} from ${option.label}`}
+                                      >
+                                        ×
+                                      </button>
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </label>
                     );

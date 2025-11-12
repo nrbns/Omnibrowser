@@ -387,6 +387,26 @@ export function registerContainersIpc() {
     return manager.listSitePermissions(request.containerId);
   });
 
+  registerHandler('containers:allowSitePermission', z.object({
+    containerId: z.string(),
+    permission: z.enum(['media', 'display-capture', 'notifications', 'fullscreen']),
+    origin: z.string(),
+  }), async (_event, request) => {
+    let origin = request.origin.trim();
+    if (origin) {
+      try {
+        const url = new URL(origin);
+        origin = `${url.protocol}//${url.host}`;
+      } catch {
+        // keep original
+      }
+    }
+    if (origin) {
+      manager.recordSitePermission(request.containerId, request.permission, origin);
+    }
+    return manager.listSitePermissions(request.containerId);
+  });
+
   registerHandler('containers:revokeSitePermission', z.object({
     containerId: z.string(),
     permission: z.enum(['media', 'display-capture', 'notifications', 'fullscreen']),

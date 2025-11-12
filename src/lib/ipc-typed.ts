@@ -477,6 +477,8 @@ export const ipc = {
       ipcCall<{ containerId: string; permission: 'media' | 'display-capture' | 'notifications' | 'fullscreen'; enabled: boolean }, { containerId: string; permissions: string[] }>('containers:setPermission', { containerId, permission, enabled }),
     getSitePermissions: (containerId: string) =>
       ipcCall<{ containerId: string }, Array<{ permission: 'media' | 'display-capture' | 'notifications' | 'fullscreen'; origins: string[] }>>('containers:getSitePermissions', { containerId }),
+    allowSitePermission: (containerId: string, permission: 'media' | 'display-capture' | 'notifications' | 'fullscreen', origin: string) =>
+      ipcCall<{ containerId: string; permission: 'media' | 'display-capture' | 'notifications' | 'fullscreen'; origin: string }, Array<{ permission: 'media' | 'display-capture' | 'notifications' | 'fullscreen'; origins: string[] }>>('containers:allowSitePermission', { containerId, permission, origin }),
     revokeSitePermission: (containerId: string, permission: 'media' | 'display-capture' | 'notifications' | 'fullscreen', origin: string) =>
       ipcCall<{ containerId: string; permission: 'media' | 'display-capture' | 'notifications' | 'fullscreen'; origin: string }, Array<{ permission: 'media' | 'display-capture' | 'notifications' | 'fullscreen'; origins: string[] }>>('containers:revokeSitePermission', { containerId, permission, origin }),
   },
