@@ -401,15 +401,20 @@ app.whenReady().then(async () => {
     } else {
       console.log('[Main] Shields IPC disabled - registering stub handler');
       // Register stub handler to prevent "No handler registered" errors
-      registerHandler('shields:getStatus', z.object({}), async () => ({
-        adsBlocked: 0,
-        trackersBlocked: 0,
-        httpsUpgrades: 0,
-        cookies3p: 'allow' as const,
-        webrtcBlocked: false,
-        fingerprinting: false,
-      }));
-      console.log('[Main] Shields stub handler registered');
+      try {
+        const schema = z.object({});
+        registerHandler('shields:getStatus', schema, async () => ({
+          adsBlocked: 0,
+          trackersBlocked: 0,
+          httpsUpgrades: 0,
+          cookies3p: 'allow' as const,
+          webrtcBlocked: false,
+          fingerprinting: false,
+        }));
+        console.log('[Main] Shields stub handler registered successfully');
+      } catch (error) {
+        console.error('[Main] Failed to register Shields stub handler:', error);
+      }
     }
     registerVPNIpc();
     registerNetworkControlsIpc();
@@ -454,20 +459,24 @@ app.whenReady().then(async () => {
       }
       // Register stub handler to prevent "No handler registered" errors
       // Use the same schema as the real handler
-      const PrivacyAuditSchema = z.object({
-        tabId: z.string().optional().nullable(),
-      });
-      registerHandler('privacy:sentinel:audit', PrivacyAuditSchema, async () => ({
-        score: 100,
-        grade: 'high' as const,
-        trackers: [],
-        thirdPartyHosts: [],
-        message: 'Privacy Sentinel is disabled',
-        suggestions: [],
-        timestamp: Date.now(),
-        ai: null,
-      }));
-      console.log('[Main] Privacy Sentinel stub handler registered');
+      try {
+        const PrivacyAuditSchema = z.object({
+          tabId: z.string().optional().nullable(),
+        });
+        registerHandler('privacy:sentinel:audit', PrivacyAuditSchema, async () => ({
+          score: 100,
+          grade: 'high' as const,
+          trackers: [],
+          thirdPartyHosts: [],
+          message: 'Privacy Sentinel is disabled',
+          suggestions: [],
+          timestamp: Date.now(),
+          ai: null,
+        }));
+        console.log('[Main] Privacy Sentinel stub handler registered successfully');
+      } catch (error) {
+        console.error('[Main] Failed to register Privacy Sentinel stub handler:', error);
+      }
     }
     registerTrustWeaverIpc();
     try {

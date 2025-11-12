@@ -30,6 +30,12 @@ export function registerHandler<TRequest, TResponse>(
 ): void {
   const fullChannel = `ob://ipc/v1/${channel}`;
   
+  // Validate schema
+  if (!schema || typeof schema.safeParse !== 'function') {
+    console.error(`[IPC Router] Invalid schema for ${fullChannel}: schema.safeParse is not a function`);
+    throw new Error(`Invalid schema for ${fullChannel}: schema.safeParse is not a function`);
+  }
+  
   // Remove existing handler if any
   if (handlers.has(fullChannel)) {
     ipcMain.removeHandler(fullChannel);
@@ -40,8 +46,19 @@ export function registerHandler<TRequest, TResponse>(
   // Register with Electron IPC
   ipcMain.handle(fullChannel, async (event, rawRequest: unknown) => {
     try {
+      // Get handler from map (might have been removed)
+      const handlerEntry = handlers.get(fullChannel);
+      if (!handlerEntry) {
+        const message = `No handler registered for '${fullChannel}'`;
+        console.error(`[IPC Router] ${message}`);
+        return {
+          ok: false,
+          error: message,
+        } as IPCResponse;
+      }
+      
       // Validate request
-      const parsed = schema.safeParse(rawRequest);
+      const parsed = handlerEntry.schema.safeParse(rawRequest);
       if (!parsed.success) {
         return {
           ok: false,
@@ -49,9 +66,8 @@ export function registerHandler<TRequest, TResponse>(
         } as IPCResponse;
       }
       
-      // Call handler (cast to handle generic types)
-      const handlerFn = handlers.get(fullChannel)!.handler;
-      const response = await handlerFn(event, parsed.data);
+      // Call handler
+      const response = await handlerEntry.handler(event, parsed.data);
       
       return {
         ok: true,
@@ -66,6 +82,10 @@ export function registerHandler<TRequest, TResponse>(
       } as IPCResponse;
     }
   });
+  
+  if (process.env.NODE_ENV === 'development') {
+    console.log(`[IPC Router] Registered handler for ${fullChannel}`);
+  }
 }
 
 /**
