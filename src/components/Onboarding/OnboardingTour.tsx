@@ -292,6 +292,25 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
     }
   }, [stepIndex, selectedPersona]);
 
+  // Add native event listeners as fallback to test if clicks are reaching buttons
+  useEffect(() => {
+    if (!onboardingVisible) return;
+
+    const nextButton = primaryButtonRef.current;
+    if (nextButton) {
+      const handleNativeClick = (e: Event) => {
+        console.log('[Onboarding] Native click detected on Next button!', e);
+        e.preventDefault();
+        e.stopPropagation();
+        goNext();
+      };
+      nextButton.addEventListener('click', handleNativeClick, true);
+      return () => {
+        nextButton.removeEventListener('click', handleNativeClick, true);
+      };
+    }
+  }, [onboardingVisible, goNext]);
+
   const step = useMemo(() => STEPS[stepIndex] ?? STEPS[0], [stepIndex]);
   const progressPercent = Math.round(((stepIndex + 1) / TOTAL_STEPS) * 100);
   const isLastStep = stepIndex >= TOTAL_STEPS - 1;
