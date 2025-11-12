@@ -2,7 +2,7 @@
  * AppShell - Main layout container with all components wired
  */
 
-import React, { useState, useEffect, Suspense, useMemo } from 'react';
+import React, { useState, useEffect, Suspense, useMemo, useCallback } from 'react';
 import { AlertTriangle, RotateCcw, Loader2 } from 'lucide-react';
 import { Outlet } from 'react-router-dom';
 import { PermissionRequest, ConsentRequest, ipcEvents } from '../../lib/ipc-events';
@@ -14,6 +14,7 @@ import { Portal } from '../common/Portal';
 import { formatDistanceToNow } from 'date-fns';
 import { useTabGraphStore } from '../../state/tabGraphStore';
 import { isDevEnv } from '../../lib/env';
+import { TabContentSurface } from './TabContentSurface';
 
 type ErrorBoundaryState = {
   hasError: boolean;
@@ -190,10 +191,12 @@ const ClipperOverlay = React.lazy(() => import('../Overlays/ClipperOverlay').the
 const ReaderOverlay = React.lazy(() => import('../Overlays/ReaderOverlay').then(m => ({ default: m.ReaderOverlay })));
 const TabGraphOverlay = React.lazy(() => import('./TabGraphOverlay').then(m => ({ default: m.TabGraphOverlay })));
 const ConsentDashboard = React.lazy(() => import('../Consent/ConsentDashboard').then(m => ({ default: m.ConsentDashboard })));
+const TrustEthicsDashboard = React.lazy(() => import('../trust/TrustEthicsDashboard').then(m => ({ default: m.TrustEthicsDashboard })));
 const OnboardingTour = React.lazy(() => import('../Onboarding/OnboardingTour').then(m => ({ default: m.OnboardingTour })));
 
 import { useOnboardingStore, onboardingStorage } from '../../state/onboardingStore';
 import { useConsentOverlayStore } from '../../state/consentOverlayStore';
+import { useTrustDashboardStore } from '../../state/trustDashboardStore';
 
 export function AppShell() {
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
@@ -283,14 +286,54 @@ export function AppShell() {
     };
   }, []);
   const consentVisible = useConsentOverlayStore((state) => state.visible);
+  const trustDashboardVisible = useTrustDashboardStore((state) => state.visible);
   const tabsState = useTabsStore();
   const activeTab = tabsState.tabs.find(tab => tab.id === tabsState.activeId);
+  const [contentSplit, setContentSplit] = useState(0.62);
+  const [isResizingContent, setIsResizingContent] = useState(false);
   const overlayActive =
     commandPaletteOpen ||
     Boolean(permissionRequest) ||
     Boolean(consentRequest) ||
     clipperActive ||
     readerActive;
+  const activeTabUrl = activeTab?.url ?? '';
+  const showWebContent =
+    Boolean(activeTabUrl) &&
+    !activeTabUrl.startsWith('ob://') &&
+    !activeTabUrl.startsWith('about:') &&
+    !activeTabUrl.startsWith('chrome://') &&
+    !activeTabUrl.startsWith('edge://') &&
+    !activeTabUrl.startsWith('app://');
+  const handleResizeStart = useCallback(() => {
+    if (!showWebContent) return;
+    setIsResizingContent(true);
+  }, [showWebContent]);
+
+  useEffect(() => {
+    if (!isResizingContent) return;
+
+    const handlePointerMove = (event: MouseEvent) => {
+      setContentSplit((prev) => {
+        const ratio = event.clientX / window.innerWidth;
+        if (Number.isNaN(ratio)) return prev;
+        return Math.min(0.85, Math.max(0.25, ratio));
+      });
+    };
+
+    const handlePointerUp = () => {
+      setIsResizingContent(false);
+    };
+
+    window.addEventListener('mousemove', handlePointerMove);
+    window.addEventListener('mouseup', handlePointerUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handlePointerMove);
+      window.removeEventListener('mouseup', handlePointerUp);
+    };
+  }, [isResizingContent]);
+
   const [restoreSummary, setRestoreSummary] = useState<{ updatedAt: number; windowCount: number; tabCount: number } | null>(null);
   const [restoreDismissed, setRestoreDismissed] = useState(false);
   const [restoreStatus, setRestoreStatus] = useState<'idle' | 'restoring'>('idle');
@@ -304,12 +347,16 @@ export function AppShell() {
     }
   }, [restoreSummary]);
 
+  // Auto-start onboarding for new users (with a small delay to let UI settle)
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (!onboardingStorage.isCompleted()) {
-      startOnboarding();
-    }
-  }, [startOnboarding]);
+    const timer = setTimeout(() => {
+      if (!onboardingStorage.isCompleted() && !onboardingVisible) {
+        startOnboarding();
+      }
+    }, 800); // Delay to let UI render first
+    return () => clearTimeout(timer);
+  }, [onboardingVisible, startOnboarding]);
 
   useEffect(() => {
     if (restoreDismissed) return;
@@ -638,12 +685,37 @@ export function AppShell() {
         </Suspense>
           )}
 
-          {/* Route Content - Full Width */}
-          <div className={`relative flex-1 min-h-0 min-w-0 overflow-hidden ${isFullscreen ? 'absolute inset-0' : ''}`}>
-            <div className={`h-full min-h-0 overflow-auto ${overlayActive ? 'webview--masked' : ''}`}>
-              <Outlet />
+          {/* Route/Web Content */}
+          {showWebContent ? (
+            <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
+              <div
+                className="min-h-0 min-w-[320px] flex-shrink-0 flex-grow-0"
+                style={{ width: `${Math.round(contentSplit * 100)}%` }}
+              >
+                <TabContentSurface tab={activeTab} overlayActive={overlayActive} />
+              </div>
+              <div
+                onMouseDown={handleResizeStart}
+                className="z-20 flex h-full w-[6px] cursor-col-resize items-center justify-center bg-slate-900/50 transition-colors hover:bg-slate-800"
+              >
+                <div className="h-24 w-[2px] rounded-full bg-slate-700/80" />
+              </div>
+              <div
+                className="relative min-h-0 min-w-[260px] flex-1 overflow-hidden"
+                style={{ width: `${Math.round((1 - contentSplit) * 100)}%` }}
+              >
+                <div className={`h-full min-h-0 overflow-auto border-l border-slate-800/60 bg-slate-950/40`}>
+                  <Outlet />
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className={`relative flex-1 min-h-0 min-w-0 overflow-hidden ${isFullscreen ? 'absolute inset-0' : ''}`}>
+              <div className={`h-full min-h-0 overflow-auto ${overlayActive ? 'webview--masked' : ''}`}>
+                <Outlet />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right Panel (Agent Console) - Hidden in fullscreen */}
@@ -731,6 +803,16 @@ export function AppShell() {
           <Portal>
             <ErrorBoundary componentName="ConsentDashboard">
               <ConsentDashboard />
+            </ErrorBoundary>
+          </Portal>
+        </Suspense>
+      )}
+
+      {trustDashboardVisible && (
+        <Suspense fallback={null}>
+          <Portal>
+            <ErrorBoundary componentName="TrustEthicsDashboard">
+              <TrustEthicsDashboard />
             </ErrorBoundary>
           </Portal>
         </Suspense>

@@ -3,116 +3,433 @@
  * Think: ChatGPT home + Arc Spaces + Obsidian Quick Launch
  */
 
-import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { 
-  Sparkles, Search, FileText, Workflow, Clock, Pin, 
-  Bot, Zap, BookOpen, TrendingUp, Shield, Network
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { formatDistanceToNow } from 'date-fns';
+import {
+  Sparkles,
+  Search,
+  FileText,
+  Workflow,
+  Clock,
+  Pin,
+  RefreshCw,
+  Leaf,
+  Compass,
+  Bot,
+  GaugeCircle,
+  BatteryCharging,
+  Cloud,
+  CheckCircle2,
+  TrendingUp,
+  TrendingDown,
+  ClipboardCopy,
+  FileSearch,
+  Sparkle,
 } from 'lucide-react';
 import { useTabsStore } from '../state/tabsStore';
 import { useAppStore } from '../state/appStore';
 import { ipc } from '../lib/ipc-typed';
 import { useNavigate } from 'react-router-dom';
 import { ipcEvents } from '../lib/ipc-events';
+import { useEfficiencyStore } from '../state/efficiencyStore';
+import { useWorkspaceEventsStore } from '../state/workspaceEventsStore';
+import { useAgentStreamStore, type StreamStatus } from '../state/agentStreamStore';
+import { CardSkeleton, ListSkeleton } from './common/Skeleton';
 
-export function OmniDesk() {
-  const { tabs, activeId } = useTabsStore();
-  const { mode, setMode } = useAppStore();
-  const navigate = useNavigate();
-  const [recentWorkspaces, setRecentWorkspaces] = useState<any[]>([]);
-  const [pinnedInsights, setPinnedInsights] = useState<any[]>([]);
-  const [continueSessions, setContinueSessions] = useState<any[]>([]);
+type OmniDeskVariant = 'overlay' | 'split';
 
-  // Load workspace and session data
-  useEffect(() => {
-    const loadData = async () => {
-      // Wait for IPC to be ready
-      if (!window.ipc || typeof window.ipc.invoke !== 'function') {
-        // Retry after a delay
-        setTimeout(loadData, 500);
-        return;
-      }
-      
-      try {
-        // Load recent workspaces
-        const workspaceResult = await ipc.workspaceV2.list();
-        const workspaces = (workspaceResult as any)?.workspaces || [];
-        setRecentWorkspaces(workspaces.slice(0, 3));
-      } catch {
-        // Silently handle - will retry if needed
-      }
+interface OmniDeskProps {
+  variant?: OmniDeskVariant;
+  forceShow?: boolean;
+}
 
-      try {
-        // Load recent sessions from session manager
-        const sessionsResult = await ipc.sessions.list();
-        const sessions = (sessionsResult as any) || [];
-        
-        // Transform sessions into continue format
-        const continueItems = sessions
-          .slice(0, 2)
-          .map((session: any) => ({
-            id: session.id,
-            type: session.name?.includes('Research') ? 'Research' : 
-                  session.name?.includes('Trade') ? 'Trade' : 'Browse',
-            title: session.name || 'Untitled Session',
-            url: 'about:blank',
-            timestamp: session.createdAt || Date.now() - 3600000,
-            sessionId: session.id
-          }));
-        
-        if (continueItems.length > 0) {
-          setContinueSessions(continueItems);
-        } else {
-          // Fallback: Show mock sessions if none exist
-          setContinueSessions([
-            { 
-              type: 'Research', 
-              title: 'Quantum Computing Research', 
-              url: 'about:blank', 
-              timestamp: Date.now() - 3600000 
-            },
-            { 
-              type: 'Trade', 
-              title: 'Market Analysis', 
-              url: 'about:blank', 
-              timestamp: Date.now() - 7200000 
-            },
-          ]);
-        }
-      } catch {
-        // Silently handle - will retry if needed
-        // Fallback to mock data
+type ContinueSession = {
+  id?: string;
+  type: string;
+  title: string;
+  url?: string;
+  timestamp: number;
+  sessionId?: string;
+};
+
+type Workspace = {
+  id: string;
+  name: string;
+};
+
+const SEARCH_ENDPOINT = 'https://duckduckgo.com/?q=';
+
+const suggestedPrompts = [
+  'graph the AI ethics landscape',
+  'summarize today’s markets',
+  'compare battery life of M-series laptops',
+  'find regenerative design principles',
+];
+
+function buildSearchUrl(query: string) {
+  return `${SEARCH_ENDPOINT}${encodeURIComponent(query)}`;
+}
+
+function useDashboardData() {
+  const [recentWorkspaces, setRecentWorkspaces] = useState<Workspace[]>([]);
+  const [continueSessions, setContinueSessions] = useState<ContinueSession[]>([]);
+  const [loadingWorkspaces, setLoadingWorkspaces] = useState(true);
+  const [loadingSessions, setLoadingSessions] = useState(true);
+  const pushWorkspaceEvent = useWorkspaceEventsStore((state) => state.pushEvent);
+
+  const loadData = useCallback(async () => {
+    if (!window.ipc || typeof window.ipc.invoke !== 'function') {
+      return false;
+    }
+
+    setLoadingWorkspaces(true);
+    setLoadingSessions(true);
+
+    try {
+      const workspaceResult = await ipc.workspaceV2.list();
+      const workspaces = (workspaceResult as any)?.workspaces || [];
+      setRecentWorkspaces(workspaces.slice(0, 4));
+      setLoadingWorkspaces(false);
+    } catch {
+      setRecentWorkspaces([]);
+      setLoadingWorkspaces(false);
+    }
+
+    try {
+      const sessionsResult = await ipc.sessions.list();
+      const sessions = Array.isArray(sessionsResult) ? (sessionsResult as any[]) : [];
+      const continueItems: ContinueSession[] = sessions.slice(0, 3).map((session: any) => ({
+        id: session.id,
+        type: session.name?.includes('Research')
+          ? 'Research'
+          : session.name?.includes('Trade')
+          ? 'Trade'
+          : 'Browse',
+        title: session.name || 'Untitled Session',
+        url: session.lastUrl || 'about:blank',
+        timestamp: session.updatedAt || session.createdAt || Date.now() - 3600000,
+        sessionId: session.id,
+      }));
+
+      if (continueItems.length > 0) {
+        setContinueSessions(continueItems);
+      } else {
         setContinueSessions([
-          { 
-            type: 'Research', 
-            title: 'Quantum Computing Research', 
-            url: 'about:blank', 
-            timestamp: Date.now() - 3600000 
+          {
+            type: 'Research',
+            title: 'Quantum Computing Research',
+            url: 'about:blank',
+            timestamp: Date.now() - 3600000,
           },
-          { 
-            type: 'Trade', 
-            title: 'Market Analysis', 
-            url: 'about:blank', 
-            timestamp: Date.now() - 7200000 
+          {
+            type: 'Trade',
+            title: 'Market Analysis',
+            url: 'about:blank',
+            timestamp: Date.now() - 7200000,
           },
         ]);
       }
+      setLoadingSessions(false);
+    } catch {
+      setContinueSessions([
+        {
+          type: 'Research',
+          title: 'Quantum Computing Research',
+          url: 'about:blank',
+          timestamp: Date.now() - 3600000,
+        },
+        {
+          type: 'Trade',
+          title: 'Market Analysis',
+          url: 'about:blank',
+          timestamp: Date.now() - 7200000,
+        },
+      ]);
+      setLoadingSessions(false);
+    }
+
+    return true;
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const kickOff = () => {
+      if (cancelled) return;
+      loadData().then((ready) => {
+        if (!ready && !cancelled) {
+          setTimeout(kickOff, 500);
+        }
+      });
     };
 
-    // Delay initial load to allow IPC to initialize
-    setTimeout(() => {
-      loadData();
-    }, 400);
-
-    // Listen for workspace updates
+    const initial = setTimeout(kickOff, 350);
     const unsubscribeWorkspace = ipcEvents.on('workspace:updated', () => {
-      loadData();
+      pushWorkspaceEvent({
+        type: 'workspace:updated',
+        message: 'Workspace metadata refreshed',
+      });
+      if (!cancelled) {
+        void loadData();
+      }
     });
 
     return () => {
+      cancelled = true;
+      clearTimeout(initial);
       unsubscribeWorkspace();
     };
-  }, []);
+  }, [loadData]);
+
+  return { recentWorkspaces, continueSessions, reload: loadData, loadingWorkspaces, loadingSessions };
+}
+
+export function OmniDesk({ variant = 'overlay', forceShow = false }: OmniDeskProps) {
+  const { tabs, activeId } = useTabsStore();
+  const { setMode } = useAppStore();
+  const navigate = useNavigate();
+  const { recentWorkspaces, continueSessions, reload, loadingWorkspaces, loadingSessions } = useDashboardData();
+  const [searchQuery, setSearchQuery] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  const efficiencyLabel = useEfficiencyStore((state) => state.label);
+  const efficiencyBadge = useEfficiencyStore((state) => state.badge);
+  const efficiencySnapshot = useEfficiencyStore((state) => state.snapshot);
+  const efficiencyUpdated = useEfficiencyStore((state) => state.lastUpdated);
+  const efficiencyHistory = useEfficiencyStore((state) => state.history);
+  const pushWorkspaceEvent = useWorkspaceEventsStore((state) => state.pushEvent);
+  const agentStatus = useAgentStreamStore((state) => state.status);
+  const agentLastGoal = useAgentStreamStore((state) => state.lastGoal);
+  const agentEvents = useAgentStreamStore((state) => state.events);
+  const agentTranscript = useAgentStreamStore((state) => state.transcript);
+
+  const agentPreview = useMemo(() => {
+    const latestEvents = agentEvents.slice(-3).reverse();
+    const lastUpdated = latestEvents.length > 0 ? latestEvents[0].timestamp : null;
+    const transcriptLines = agentTranscript
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const statusPalette: Record<string, { label: string; tone: string }> = {
+      idle: { label: 'Idle', tone: 'border-slate-700/60 bg-slate-800/60 text-slate-300' },
+      connecting: { label: 'Connecting', tone: 'border-blue-500/40 bg-blue-500/15 text-blue-100' },
+      live: { label: 'Streaming', tone: 'border-emerald-500/40 bg-emerald-500/15 text-emerald-100' },
+      complete: { label: 'Complete', tone: 'border-purple-500/40 bg-purple-500/15 text-purple-100' },
+      error: { label: 'Error', tone: 'border-rose-500/40 bg-rose-500/15 text-rose-100' },
+    };
+    const statusTone = statusPalette[agentStatus] ?? statusPalette.idle;
+
+    const timeline = latestEvents.map((event) => {
+      switch (event.type) {
+        case 'start':
+          return {
+            ...event,
+            label: 'Run started',
+            detail: event.content ?? 'Agent boot sequence initiated.',
+            variant: 'border-blue-400/40 bg-blue-500/10 text-blue-100',
+          };
+        case 'step':
+          return {
+            ...event,
+            label: `Step ${event.step ?? ''}`.trim(),
+            detail: event.content ?? event.status ?? 'Executing tool call…',
+            variant: 'border-purple-400/40 bg-purple-500/10 text-purple-100',
+          };
+        case 'log':
+          return {
+            ...event,
+            label: 'Log update',
+            detail: event.content ?? 'Log appended.',
+            variant: 'border-slate-400/40 bg-slate-500/10 text-slate-100',
+          };
+        case 'consent':
+          return {
+            ...event,
+            label: event.approved ? 'Consent granted' : 'Consent requested',
+            detail: event.content ?? `Risk ${event.risk ?? 'medium'} · ${event.approved ? 'approved' : 'pending'}`,
+            variant: event.approved
+              ? 'border-emerald-400/40 bg-emerald-500/10 text-emerald-100'
+              : 'border-amber-400/40 bg-amber-500/10 text-amber-100',
+          };
+        case 'done':
+          return {
+            ...event,
+            label: 'Run complete',
+            detail: event.content ?? 'Outputs finalised.',
+            variant: 'border-emerald-400/40 bg-emerald-500/10 text-emerald-100',
+          };
+        case 'error':
+          return {
+            ...event,
+            label: 'Run error',
+            detail: event.content ?? 'Check diagnostics for details.',
+            variant: 'border-rose-400/40 bg-rose-500/10 text-rose-100',
+          };
+        default:
+          return {
+            ...event,
+            label: event.type,
+            detail: event.content ?? 'Event received.',
+            variant: 'border-slate-400/40 bg-slate-500/10 text-slate-100',
+          };
+      }
+    });
+
+    const snippetSource = timeline
+      .map((entry) => entry.detail)
+      .filter(Boolean)
+      .slice(0, 2);
+    const snippet = snippetSource.length > 0 ? snippetSource : transcriptLines.slice(-2);
+
+    return {
+      latestEvents,
+      timeline,
+      snippet,
+      lastUpdated,
+      statusTone,
+    };
+  }, [agentEvents, agentTranscript, agentStatus]);
+
+  const hasTranscript = useMemo(() => agentTranscript.trim().length > 0, [agentTranscript]);
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copying' | 'copied' | 'error'>('idle');
+
+  const handleCopyTranscript = useCallback(async () => {
+    if (!hasTranscript || typeof navigator === 'undefined' || !navigator.clipboard) {
+      setCopyStatus('error');
+      return;
+    }
+    try {
+      setCopyStatus('copying');
+      await navigator.clipboard.writeText(agentTranscript.trim());
+      setCopyStatus('copied');
+    } catch (error) {
+      console.warn('[OmniDesk] Failed to copy transcript', error);
+      setCopyStatus('error');
+    }
+  }, [agentTranscript, hasTranscript]);
+
+  useEffect(() => {
+    if (copyStatus !== 'copied') return;
+    const timeout = window.setTimeout(() => setCopyStatus('idle'), 2000);
+    return () => window.clearTimeout(timeout);
+  }, [copyStatus]);
+
+  const ecoMetrics = useMemo(() => {
+    const batteryPctValue = typeof efficiencySnapshot.batteryPct === 'number' ? Math.max(0, Math.min(100, Math.round(efficiencySnapshot.batteryPct))) : null;
+    const carbonIntensityValue =
+      typeof efficiencySnapshot.carbonIntensity === 'number' ? Math.max(0, Math.round(efficiencySnapshot.carbonIntensity)) : null;
+    const cpuLoad = Number.isFinite(efficiencySnapshot.cpuLoad1) ? Math.max(0, Math.min(100, Math.round(efficiencySnapshot.cpuLoad1))) : 0;
+    const activeTabs = efficiencySnapshot.activeTabs ?? 0;
+    const ecoScore = (() => {
+      const batteryComponent = batteryPctValue !== null ? batteryPctValue * 0.4 : 35;
+      const cpuComponent = 100 - cpuLoad;
+      const carbonComponent = carbonIntensityValue !== null ? Math.max(0, 220 - carbonIntensityValue) / 220 * 100 : 50;
+      const tabComponent = Math.max(0, 12 - activeTabs) / 12 * 100;
+      const raw = 0.35 * batteryComponent + 0.25 * cpuComponent + 0.25 * carbonComponent + 0.15 * tabComponent;
+      return Math.round(Math.max(5, Math.min(98, raw)));
+    })();
+
+    const achievements = [
+      {
+        id: 'battery',
+        label: batteryPctValue !== null ? `${batteryPctValue}% battery reserve` : 'Gathering battery telemetry',
+        description: batteryPctValue !== null && batteryPctValue >= 60 ? 'Great reserve for deep work.' : 'Stay plugged in to build reserve.',
+        achieved: batteryPctValue !== null && batteryPctValue >= 60,
+        icon: BatteryCharging,
+      },
+      {
+        id: 'carbon',
+        label: carbonIntensityValue !== null ? `${carbonIntensityValue} gCO₂/kWh grid intensity` : 'Estimating regional carbon mix',
+        description:
+          carbonIntensityValue !== null && carbonIntensityValue <= 180
+            ? 'Low-carbon window — ideal for heavy tasks.'
+            : 'Carbon intensity elevated. Schedule net-heavy work later.',
+        achieved: carbonIntensityValue !== null && carbonIntensityValue <= 180,
+        icon: Cloud,
+      },
+      {
+        id: 'tabs',
+        label: `${activeTabs} active tabs`,
+        description: activeTabs <= 6 ? 'Lean session profile — memory savings unlocked.' : 'Consider Hibernate to free resources.',
+        achieved: activeTabs <= 6,
+        icon: Sparkles,
+      },
+    ] as const;
+
+    return {
+      batteryPctValue,
+      carbonIntensityValue,
+      cpuLoad,
+      activeTabs,
+      ecoScore,
+      achievements,
+    };
+  }, [efficiencySnapshot]);
+
+  const ecoHistoryInsights = useMemo(() => {
+    const recent = efficiencyHistory.slice(-24);
+    const batterySeries = recent
+      .map((sample) => (typeof sample.batteryPct === 'number' ? sample.batteryPct : null))
+      .filter((value): value is number => value !== null);
+    const carbonSeries = recent
+      .map((sample) => (typeof sample.carbonIntensity === 'number' ? sample.carbonIntensity : null))
+      .filter((value): value is number => value !== null);
+
+    const computeTrend = (series: number[]) => {
+      if (series.length < 2) return { delta: 0, direction: 'flat' as const };
+      const last = series[series.length - 1];
+      const baseIndex = Math.max(0, series.length - 6);
+      const previous = series[baseIndex];
+      const delta = last - previous;
+      return {
+        delta,
+        direction: delta > 1 ? ('up' as const) : delta < -1 ? ('down' as const) : ('flat' as const),
+      };
+    };
+
+    const computeSparkline = (series: number[]) => {
+      if (series.length < 2) return '';
+      const min = Math.min(...series);
+      const max = Math.max(...series);
+      const range = max - min || 1;
+      return series
+        .map((value, index) => {
+          const x = (index / Math.max(series.length - 1, 1)) * 100;
+          const normalized = 100 - ((value - min) / range) * 80 - 10;
+          return `${x.toFixed(2)},${normalized.toFixed(2)}`;
+        })
+        .join(' ');
+    };
+
+    return {
+      battery: {
+        series: batterySeries,
+        path: computeSparkline(batterySeries),
+        trend: computeTrend(batterySeries),
+      },
+      carbon: {
+        series: carbonSeries,
+        path: computeSparkline(carbonSeries),
+        trend: computeTrend(carbonSeries),
+      },
+    };
+  }, [efficiencyHistory]);
+
+  const agentStatusLabels: Record<StreamStatus, string> = {
+    idle: 'Agent idle',
+    connecting: 'Connecting to Redix…',
+    live: 'Streaming answer in real time',
+    complete: 'Last run completed',
+    error: 'Run encountered an issue',
+  };
+
+  const ecoGauge = useMemo(() => {
+    const radius = 46;
+    const circumference = 2 * Math.PI * radius;
+    const clampedScore = Math.max(0, Math.min(100, ecoMetrics.ecoScore));
+    const offset = circumference - (clampedScore / 100) * circumference;
+    return { radius, circumference, offset, clampedScore };
+  }, [ecoMetrics.ecoScore]);
 
   const quickActions = [
     { 
@@ -155,6 +472,15 @@ export function OmniDesk() {
     description: 'Automate multi-step workflows with reusable recipes.'
     },
   ];
+
+  const ecoStats = useMemo(() => {
+    const batteryPct =
+      ecoMetrics.batteryPctValue !== null ? `${ecoMetrics.batteryPctValue}%` : '—';
+    const carbonIntensity =
+      ecoMetrics.carbonIntensityValue !== null ? `${ecoMetrics.carbonIntensityValue} gCO₂/kWh` : 'Syncing…';
+    const activeTabs = `${ecoMetrics.activeTabs}`;
+    return { batteryPct, carbonIntensity, activeTabs };
+  }, [ecoMetrics]);
 
   const handleContinueSession = async (session: any) => {
     try {
@@ -212,149 +538,630 @@ export function OmniDesk() {
       // Last resort: create a blank tab
       try {
         await ipc.tabs.create('about:blank');
+        pushWorkspaceEvent({
+          type: 'workspace:resume-session',
+          workspaceId: session.sessionId ?? null,
+          message: `Started fallback tab for session "${session.title}"`,
+        });
       } catch (e) {
         console.error('Failed to create fallback tab:', e);
       }
     }
   };
 
+  const handleSearchLaunch = useCallback(
+    async (value: string) => {
+      const query = value.trim();
+      if (!query) return;
+
+      const targetUrl = buildSearchUrl(query);
+      setMode('Research');
+
+      try {
+        await ipc.tabs.create(targetUrl);
+        setSearchQuery('');
+      } catch (error) {
+        console.warn('Search launch fallback:', error);
+        if (typeof window !== 'undefined') {
+          window.open(targetUrl, '_blank', 'noopener,noreferrer');
+        }
+      }
+    },
+    [setMode]
+  );
+
   const activeTab = tabs.find((tab) => tab.id === activeId);
-  const shouldShowDashboard =
-    tabs.length === 0 ||
-    !activeTab ||
-    !activeTab.url ||
-    activeTab.url === 'about:blank' ||
-    activeTab.url.startsWith('ob://newtab') ||
-    activeTab.url.startsWith('ob://home');
+  const shouldShowDashboard = forceShow
+    ? true
+    : tabs.length === 0 ||
+      !activeTab ||
+      !activeTab.url ||
+      activeTab.url === 'about:blank' ||
+      activeTab.url.startsWith('ob://newtab') ||
+      activeTab.url.startsWith('ob://home');
 
   if (!shouldShowDashboard) return null;
 
+  const containerClass =
+    variant === 'overlay'
+      ? 'absolute inset-0 z-10 flex h-full w-full overflow-auto bg-gradient-to-br from-[#131722] via-[#171B2A] to-[#10131C] px-6 py-8'
+      : 'flex h-full w-full overflow-auto bg-gradient-to-br from-[#0F121C] via-[#131827] to-[#0F121C] px-6 py-8';
+
+  const handleManualRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await reload();
+      pushWorkspaceEvent({ type: 'workspace:manual-refresh', message: 'Dashboard refreshed' });
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const sessionSkeletons = useMemo(() => Array.from({ length: 2 }), []);
+  const workspaceSkeletons = useMemo(() => Array.from({ length: 3 }), []);
+
   return (
-    <div className="absolute inset-0 h-full w-full bg-gradient-to-br from-[#1A1D28] via-[#1F2332] to-[#1A1D28] flex items-center justify-center p-8 overflow-auto z-10">
-      <div className="max-w-5xl w-full space-y-8">
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-10 space-y-3 text-left"
-        >
-          <p className="text-xs uppercase tracking-[0.3em] text-gray-500">
-            Command Center
-          </p>
-          <h1 className="text-4xl font-semibold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400">
-            OmniBrowser
-          </h1>
-          <p className="max-w-2xl text-sm text-gray-400">
-            Launch an agentic workspace, resume a saved session, or jump straight into a trusted playbook.
-          </p>
-        </motion.div>
-
-        {/* Quick Actions */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
-        >
-          {quickActions.map((action) => {
-            const Icon = action.icon;
-            return (
-              <motion.button
-                key={action.label}
-                onClick={action.action}
-                whileHover={{ y: -2 }}
-                whileTap={{ scale: 0.97 }}
-                className="group flex h-full flex-col items-start gap-3 rounded-xl border border-gray-700/50 bg-gray-800/60 px-4 py-5 text-left transition-all hover:border-gray-600 hover:bg-gray-800/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900"
-              >
-                <span
-                  className={`inline-flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br ${action.color} text-white shadow-lg shadow-black/20`}
-                >
-                  <Icon className="h-5 w-5" />
-                </span>
-                <div className="space-y-1">
-                  <div className="text-sm font-semibold text-gray-100 group-hover:text-white transition-colors">
-                    {action.label}
-                  </div>
-                  {action.description ? (
-                    <p className="text-xs leading-snug text-gray-500 group-hover:text-gray-300 transition-colors">
-                      {action.description}
-                    </p>
-                  ) : null}
-                </div>
-              </motion.button>
-            );
-          })}
-        </motion.div>
-
-        {/* Continue Sessions */}
-        {continueSessions.length > 0 && (
+    <div className={containerClass} data-onboarding="dashboard">
+      <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-6 xl:flex-row">
+        <div className="flex-1 space-y-6">
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="space-y-2"
+            transition={{ duration: 0.4 }}
+            className="rounded-3xl border border-slate-800/70 bg-slate-900/70 px-6 py-7 shadow-2xl shadow-black/30"
           >
-            <h2 className="text-sm font-semibold text-gray-400 mb-3 flex items-center gap-2">
-              <Clock size={16} />
-              Continue Last Session
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {continueSessions.map((session, idx) => (
-                <motion.button
-                  key={idx}
-                  onClick={() => handleContinueSession(session)}
-                  whileHover={{ scale: 1.02, x: 4 }}
-                  className="p-4 rounded-lg bg-gray-800/50 border border-gray-700/50 hover:border-gray-600 transition-all text-left group cursor-pointer"
+            <p className="text-xs uppercase tracking-[0.32em] text-slate-400">Regenerative Command Center</p>
+            <h1 className="mt-3 text-3xl font-semibold text-slate-100 sm:text-4xl">
+              Guide your next deep work session with OmniBrowser & Redix
+            </h1>
+            <p className="mt-3 max-w-2xl text-sm text-slate-400">
+              Spin up an agent, resume an exploration, or launch a new search. Your flow state starts here.
+            </p>
+
+            <form
+              className="mt-6 space-y-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleSearchLaunch(searchQuery);
+              }}
+            >
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <div className="flex min-h-[52px] flex-1 items-center gap-3 rounded-2xl border border-slate-700/60 bg-slate-800/70 px-4 py-3 text-slate-200 focus-within:border-blue-500/60">
+                  <Search size={18} className="text-blue-400" />
+                  <input
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder="Search the open web, knowledge base, or ask Redix…"
+                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-500"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="inline-flex items-center justify-center rounded-2xl border border-blue-500/60 bg-blue-500/20 px-5 py-3 text-sm font-semibold text-blue-100 shadow-[0_10px_40px_-20px_rgba(59,130,246,0.8)] transition hover:border-blue-400 hover:bg-blue-500/30"
                 >
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className={`text-xs px-2 py-0.5 rounded ${
-                      session.type === 'Research' ? 'bg-purple-500/20 text-purple-400' :
-                      session.type === 'Trade' ? 'bg-green-500/20 text-green-400' :
-                      'bg-blue-500/20 text-blue-400'
-                    }`}>
-                      {session.type}
-                    </span>
-                    <span className="text-xs text-gray-500">
-                      {new Date(session.timestamp).toLocaleTimeString()}
-                    </span>
-                  </div>
-                  <div className="text-sm font-medium text-gray-200 group-hover:text-white transition-colors">
-                    {session.title}
+                  Launch Flow
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs text-slate-400">
+                {suggestedPrompts.map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery(prompt);
+                      void handleSearchLaunch(prompt);
+                    }}
+                    className="rounded-full border border-slate-700/60 bg-slate-800/60 px-3 py-1.5 transition hover:border-blue-500/50 hover:text-blue-200"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            </form>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1, duration: 0.4 }}
+            className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3"
+          >
+            {quickActions.map((action) => {
+              const Icon = action.icon;
+              return (
+                <motion.button
+                  key={action.label}
+                  onClick={action.action}
+                  whileHover={{ y: -4, scale: 1.02 }}
+                  whileTap={{ scale: 0.96 }}
+                  transition={{ type: 'spring', stiffness: 400, damping: 17 }}
+                  className="group flex h-full flex-col justify-between gap-4 rounded-2xl border border-slate-800/70 bg-slate-900/60 px-5 py-6 text-left shadow-[0_12px_40px_-24px_rgba(15,23,42,0.9)] transition hover:border-slate-700/70 hover:bg-slate-900/80"
+                >
+                  <span
+                    className={`inline-flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br ${action.color} text-white shadow-[0_15px_30px_-20px_currentColor]`}
+                  >
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <div className="space-y-1">
+                    <div className="text-sm font-semibold text-slate-100 group-hover:text-white">
+                      {action.label}
+                    </div>
+                    {action.description ? (
+                      <p className="text-xs leading-snug text-slate-400 group-hover:text-slate-300">
+                        {action.description}
+                      </p>
+                    ) : null}
                   </div>
                 </motion.button>
-              ))}
+              );
+            })}
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.16, duration: 0.4 }}
+            className="rounded-3xl border border-violet-500/30 bg-violet-500/10 px-6 py-5 text-violet-100 shadow-[0_45px_120px_-60px_rgba(139,92,246,0.6)]"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-violet-400/40 bg-violet-500/20">
+                  <Bot size={16} />
+                </span>
+                Live Redix Pulse
+              </div>
+              <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] ${agentPreview.statusTone.tone}`}>
+                <span className="h-2 w-2 rounded-full bg-current" />
+                {agentStatusLabels[agentStatus]}
+              </span>
+            </div>
+
+            <div className="mt-4 space-y-3 text-sm text-purple-100/90">
+              {agentLastGoal ? (
+                <div className="rounded-2xl border border-violet-400/30 bg-violet-500/10 px-4 py-3 text-xs text-purple-100/80">
+                  <span className="text-[11px] uppercase tracking-[0.28em] text-purple-200/70">Last goal</span>
+                  <p className="mt-2 text-sm text-purple-100">{agentLastGoal}</p>
+                </div>
+              ) : null}
+
+              <div className="rounded-2xl border border-violet-400/20 bg-violet-500/10 px-4 py-4">
+                <span className="text-[11px] uppercase tracking-[0.3em] text-purple-200/70">Preview</span>
+                <div className="mt-2 text-xs text-purple-100/80">
+                  <AnimatePresence mode="popLayout">
+                    {agentPreview.snippet.length > 0 ? (
+                      agentPreview.snippet.map((line, index) => (
+                        <motion.p
+                          key={`${line}-${index}`}
+                          initial={{ opacity: 0, y: 6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -6 }}
+                          transition={{ duration: 0.25 }}
+                          className="leading-relaxed"
+                        >
+                          {line}
+                        </motion.p>
+                      ))
+                    ) : (
+                      <motion.p initial={{ opacity: 0.6 }} animate={{ opacity: 1 }} className="text-purple-200/70">
+                        No live transcript yet. Kick off a prompt to watch the agent stream.
+                      </motion.p>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2 text-[11px]">
+                <button
+                  type="button"
+                  onClick={handleCopyTranscript}
+                  disabled={!hasTranscript || copyStatus === 'copying'}
+                  className="inline-flex items-center gap-1 rounded-full border border-violet-400/40 bg-violet-500/15 px-3 py-1 font-medium text-purple-100 transition hover:border-violet-300/60 hover:bg-violet-500/25 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <ClipboardCopy size={12} />
+                  {copyStatus === 'copied'
+                    ? 'Copied!'
+                    : copyStatus === 'copying'
+                      ? 'Copying…'
+                      : 'Copy transcript'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate('/agent')}
+                  className="inline-flex items-center gap-1 rounded-full border border-violet-400/40 bg-violet-500/15 px-3 py-1 font-medium text-purple-100 transition hover:border-violet-300/60 hover:bg-violet-500/25"
+                >
+                  <FileSearch size={12} />
+                  View run log
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate('/agent')}
+                  className="inline-flex items-center gap-1 rounded-full border border-violet-400/40 bg-violet-500/15 px-3 py-1 font-medium text-purple-100 transition hover:border-violet-300/60 hover:bg-violet-500/25"
+                >
+                  <Sparkle size={12} />
+                  Launch prompt
+                </button>
+              </div>
+
+              <div>
+                <span className="text-[11px] uppercase tracking-[0.28em] text-purple-200/70">Timeline</span>
+                <div className="mt-2 space-y-2">
+                  <AnimatePresence initial={false}>
+                    {agentPreview.timeline.length > 0 ? (
+                      agentPreview.timeline.map((event) => (
+                        <motion.div
+                          key={event.id}
+                          initial={{ opacity: 0, x: 8 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{ opacity: 0, x: -8 }}
+                          transition={{ duration: 0.2 }}
+                          className={`flex items-center justify-between rounded-xl px-3 py-2 text-[11px] ${event.variant}`}
+                        >
+                          <span className="capitalize">{event.label}</span>
+                          <span className="text-purple-300/70">
+                            {formatDistanceToNow(event.timestamp, { addSuffix: true })}
+                          </span>
+                        </motion.div>
+                      ))
+                    ) : (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -8 }}
+                        className="rounded-xl border border-dashed border-violet-400/30 px-4 py-3 text-[11px] text-purple-200/70"
+                      >
+                        No agent events yet — run a plan or quick prompt to populate this stream.
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-wrap justify-between gap-2 text-xs">
+              <div className="text-purple-200/60">
+                {agentPreview.lastUpdated
+                  ? `Updated ${formatDistanceToNow(agentPreview.lastUpdated, { addSuffix: true })}`
+                  : 'Awaiting first signal'}
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate('/agent')}
+                className="inline-flex items-center gap-2 rounded-full border border-violet-400/40 bg-violet-500/20 px-3 py-1.5 text-xs font-medium text-purple-100 hover:border-violet-300/60 hover:bg-violet-500/30"
+              >
+                Open agent console
+              </button>
             </div>
           </motion.div>
-        )}
 
-        {/* Recent Workspaces */}
-        {recentWorkspaces.length > 0 && (
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-            className="space-y-2"
+            transition={{ delay: 0.2, duration: 0.4 }}
+            className="rounded-3xl border border-slate-800/60 bg-slate-900/60 px-6 py-5 shadow-lg"
           >
-            <h2 className="text-sm font-semibold text-gray-400 mb-3 flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-3 text-sm text-slate-400">
+              <Compass size={16} className="text-slate-300" />
+              <span>Pro tip:</span>
+              <span className="text-slate-300">
+                Drag any research tab into Redix MindMap to instantly connect ideas.
+              </span>
+            </div>
+          </motion.div>
+        </div>
+
+        <aside className="w-full flex-shrink-0 space-y-4 xl:w-[360px]">
+          <motion.div
+            initial={{ opacity: 0, x: 10 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.4 }}
+            className="rounded-2xl border border-slate-800/70 bg-slate-900/70 p-5 shadow-lg"
+          >
+            <div className="mb-3 flex items-center justify-between text-sm font-semibold text-slate-300">
+              <div className="flex items-center gap-2">
+                <Clock size={16} />
+                Continue Session
+              </div>
+              <button
+                onClick={handleManualRefresh}
+                className="rounded-full border border-slate-700/60 p-1.5 text-slate-400 transition hover:border-slate-500/60 hover:text-slate-200"
+                title="Refresh"
+              >
+                <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+              </button>
+            </div>
+            <div className="space-y-3">
+              {loadingSessions
+                ? sessionSkeletons.map((_, idx) => (
+                    <motion.div
+                      key={`session-skeleton-${idx}`}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: idx * 0.1, duration: 0.3 }}
+                      className="h-[86px] w-full rounded-xl border border-slate-800/60 bg-slate-900/40 p-4"
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="h-5 w-16 rounded-full bg-slate-800/60 animate-pulse" />
+                        <div className="h-4 w-20 rounded-full bg-slate-800/60 animate-pulse" />
+                      </div>
+                      <div className="h-5 w-3/4 rounded bg-slate-800/60 animate-pulse" />
+                    </motion.div>
+                  ))
+                : continueSessions.length > 0
+                ? continueSessions.map((session, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => handleContinueSession(session)}
+                      className="group w-full rounded-xl border border-slate-800/60 bg-slate-900/60 px-4 py-3 text-left transition hover:border-slate-600/60 hover:bg-slate-900"
+                    >
+                      <div className="flex items-center gap-2 text-xs text-slate-400">
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[11px] ${
+                            session.type === 'Research'
+                              ? 'bg-purple-500/20 text-purple-300'
+                              : session.type === 'Trade'
+                              ? 'bg-emerald-500/20 text-emerald-300'
+                              : 'bg-blue-500/20 text-blue-200'
+                          }`}
+                        >
+                          {session.type}
+                        </span>
+                        <span>
+                          {formatDistanceToNow(session.timestamp, { addSuffix: true })}
+                        </span>
+                      </div>
+                      <div className="mt-2 text-sm font-medium text-slate-100 group-hover:text-white">
+                        {session.title}
+                      </div>
+                    </button>
+                  ))
+                : (
+                    <div className="rounded-xl border border-dashed border-slate-700/60 px-4 py-6 text-center text-xs text-slate-500">
+                      We’ll keep your auto-snapshots here for quick handoffs.
+                    </div>
+                  )}
+            </div>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, x: 10 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.1, duration: 0.4 }}
+            className="rounded-2xl border border-slate-800/70 bg-slate-900/70 p-5 shadow-lg"
+          >
+            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-300">
               <Pin size={16} />
               Recent Workspaces
-            </h2>
-            <div className="grid grid-cols-3 gap-3">
-              {recentWorkspaces.map((workspace, idx) => (
-                <motion.button
-                  key={idx}
-                  onClick={() => navigate(`/w/${workspace.id}`)}
-                  whileHover={{ scale: 1.05 }}
-                  className="p-3 rounded-lg bg-gray-800/50 border border-gray-700/50 hover:border-gray-600 transition-all cursor-pointer"
-                >
-                  <div className="text-sm font-medium text-gray-200 truncate">
-                    {workspace.name}
-                  </div>
-                </motion.button>
-              ))}
+            </div>
+            <div className="space-y-2">
+              {loadingWorkspaces
+                ? workspaceSkeletons.map((_, idx) => (
+                    <motion.div
+                      key={`workspace-skeleton-${idx}`}
+                      initial={{ opacity: 0, x: -8 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: idx * 0.08, duration: 0.3 }}
+                      className="h-14 w-full rounded-xl border border-slate-800/60 bg-slate-900/40 p-3 flex items-center"
+                    >
+                      <div className="h-4 w-2/3 rounded bg-slate-800/60 animate-pulse" />
+                    </motion.div>
+                  ))
+                : recentWorkspaces.length > 0
+                ? recentWorkspaces.map((workspace) => (
+                    <button
+                      key={workspace.id}
+                      onClick={() => navigate(`/w/${workspace.id}`)}
+                      className="flex w-full items-center justify-between rounded-xl border border-slate-800/60 bg-slate-900/60 px-4 py-3 text-left text-sm text-slate-200 transition hover:border-slate-600/70 hover:text-white"
+                    >
+                      <span className="truncate">{workspace.name}</span>
+                      <span className="text-xs text-slate-500">Open</span>
+                    </button>
+                  ))
+                : (
+                    <div className="rounded-xl border border-dashed border-slate-700/60 px-4 py-6 text-center text-xs text-slate-500">
+                      Create a workspace to keep your Redix graph evolving.
+                    </div>
+                  )}
             </div>
           </motion.div>
-        )}
+
+          <motion.div
+            initial={{ opacity: 0, x: 10 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.2, duration: 0.4 }}
+            className="overflow-hidden rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-emerald-950/80 via-emerald-900/70 to-emerald-950/90 p-5 text-emerald-100 shadow-lg shadow-emerald-900/50"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-emerald-400/40 bg-emerald-500/10">
+                  <Leaf size={16} />
+                </span>
+                Eco Scoreboard
+              </div>
+              <div className="text-right text-xs text-emerald-200/70">
+                <div className="uppercase tracking-[0.3em] text-emerald-300/60">Eco score</div>
+                <div className="text-xl font-semibold text-emerald-100">
+                  {ecoGauge.clampedScore}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-5 md:grid-cols-[150px,1fr]">
+              <div className="relative mx-auto flex h-36 w-36 items-center justify-center">
+                <svg width="150" height="150" viewBox="0 0 150 150" className="absolute inset-0 text-emerald-500/40">
+                  <circle
+                    cx="75"
+                    cy="75"
+                    r={ecoGauge.radius}
+                    stroke="currentColor"
+                    strokeWidth="10"
+                    fill="none"
+                    className="opacity-30"
+                  />
+                  <motion.circle
+                    cx="75"
+                    cy="75"
+                    r={ecoGauge.radius}
+                    stroke="url(#ecoGradient)"
+                    strokeWidth="10"
+                    strokeLinecap="round"
+                    fill="none"
+                    strokeDasharray={ecoGauge.circumference}
+                    strokeDashoffset={ecoGauge.offset}
+                    initial={{ strokeDashoffset: ecoGauge.circumference }}
+                    animate={{ strokeDashoffset: ecoGauge.offset }}
+                    transition={{ duration: 0.8, ease: 'easeOut' }}
+                    transform="rotate(-90 75 75)"
+                  />
+                  <defs>
+                    <linearGradient id="ecoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#34d399" />
+                      <stop offset="100%" stopColor="#22d3ee" />
+                    </linearGradient>
+                  </defs>
+                </svg>
+                <div className="relative z-10 text-center">
+                  <GaugeCircle size={28} className="mx-auto text-emerald-300" />
+                  <div className="mt-2 text-3xl font-semibold text-emerald-50">
+                    {ecoGauge.clampedScore}
+                  </div>
+                  <div className="text-[11px] uppercase tracking-[0.28em] text-emerald-200/70">
+                    Regenerative
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-5">
+                <div className="grid grid-cols-3 gap-3 rounded-2xl border border-emerald-400/20 bg-emerald-500/5 p-4 text-xs text-emerald-100/80">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.28em] text-emerald-200/70">Battery</p>
+                    <p className="mt-2 text-lg font-semibold text-emerald-50">{ecoStats.batteryPct}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.28em] text-emerald-200/70">Carbon</p>
+                    <p className="mt-2 text-sm font-semibold text-emerald-50 leading-tight">
+                      {ecoStats.carbonIntensity}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.28em] text-emerald-200/70">Active Tabs</p>
+                    <p className="mt-2 text-lg font-semibold text-emerald-50">{ecoStats.activeTabs}</p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  {ecoMetrics.achievements.map((achievement) => {
+                    const Icon = achievement.icon;
+                    return (
+                      <div
+                        key={achievement.id}
+                        className="flex items-start gap-3 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-xs text-emerald-100/80"
+                      >
+                        <span
+                          className={`mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-xl border ${
+                            achievement.achieved
+                              ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-200'
+                              : 'border-emerald-400/20 bg-emerald-500/5 text-emerald-200/60'
+                          }`}
+                        >
+                          {achievement.achieved ? <CheckCircle2 size={14} /> : <Icon size={14} />}
+                        </span>
+                        <div>
+                          <div className="font-semibold text-emerald-100">{achievement.label}</div>
+                          <div className="mt-1 text-[11px] text-emerald-200/70">{achievement.description}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-4 text-xs text-emerald-100/80">
+                  <div className="flex items-center justify-between">
+                    <div className="font-semibold text-emerald-100">Trends</div>
+                    <span className="text-[11px] uppercase tracking-[0.28em] text-emerald-200/70">
+                      Last {Math.min(efficiencyHistory.length, 24)} samples
+                    </span>
+                  </div>
+                  <div className="mt-3 grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-emerald-100">
+                        Battery
+                        {ecoHistoryInsights.battery.trend.direction === 'up' ? (
+                          <TrendingUp size={12} className="text-emerald-300" />
+                        ) : ecoHistoryInsights.battery.trend.direction === 'down' ? (
+                          <TrendingDown size={12} className="text-amber-300" />
+                        ) : null}
+                        <span className="text-[11px] text-emerald-200/70">
+                          {ecoHistoryInsights.battery.trend.delta > 0
+                            ? `+${ecoHistoryInsights.battery.trend.delta.toFixed(1)}`
+                            : ecoHistoryInsights.battery.trend.delta.toFixed(1)}
+                          %
+                        </span>
+                      </div>
+                      <div className="relative h-16 overflow-hidden rounded-xl border border-emerald-400/20 bg-emerald-500/10">
+                        {ecoHistoryInsights.battery.path ? (
+                          <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full text-emerald-300">
+                            <polyline
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="3"
+                              points={ecoHistoryInsights.battery.path}
+                            />
+                          </svg>
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-[11px] text-emerald-200/60">
+                            Not enough data
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-emerald-100">
+                        Carbon
+                        {ecoHistoryInsights.carbon.trend.direction === 'down' ? (
+                          <TrendingDown size={12} className="text-emerald-300" />
+                        ) : ecoHistoryInsights.carbon.trend.direction === 'up' ? (
+                          <TrendingUp size={12} className="text-amber-300" />
+                        ) : null}
+                        <span className="text-[11px] text-emerald-200/70">
+                          {ecoHistoryInsights.carbon.trend.delta > 0
+                            ? `+${ecoHistoryInsights.carbon.trend.delta.toFixed(0)}`
+                            : ecoHistoryInsights.carbon.trend.delta.toFixed(0)}{' '}
+                          g
+                        </span>
+                      </div>
+                      <div className="relative h-16 overflow-hidden rounded-xl border border-emerald-400/20 bg-emerald-500/10">
+                        {ecoHistoryInsights.carbon.path ? (
+                          <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full text-emerald-200">
+                            <polyline
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="3"
+                              points={ecoHistoryInsights.carbon.path}
+                            />
+                          </svg>
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-[11px] text-emerald-200/60">
+                            Awaiting carbon samples
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {efficiencyUpdated && (
+              <p className="mt-5 text-[11px] text-emerald-100/60">
+                Updated {formatDistanceToNow(efficiencyUpdated, { addSuffix: true })}
+              </p>
+            )}
+            <p className="mt-1 text-[11px] text-emerald-100/70">
+              {efficiencyLabel}
+              {efficiencyBadge ? ` • ${efficiencyBadge}` : ''}
+            </p>
+          </motion.div>
+        </aside>
       </div>
     </div>
   );
