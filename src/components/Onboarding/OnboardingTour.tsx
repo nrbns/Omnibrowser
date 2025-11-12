@@ -521,11 +521,6 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
     }
   }, [finishOnboarding, onClose, stepIndex]);
 
-  // If not visible, don't render (AppShell will handle unmounting)
-  if (!onboardingVisible) {
-    return null;
-  }
-
   return (
     <AnimatePresence mode="wait">
       {onboardingVisible && (
