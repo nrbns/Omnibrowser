@@ -517,6 +517,9 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
     if (!onboardingVisible) return;
 
     console.log('[Onboarding] Setting up native event listeners...');
+    console.log('[Onboarding] Current stepIndex:', stepIndex);
+    console.log('[Onboarding] isNextDisabled:', isNextDisabled);
+    console.log('[Onboarding] canGoBack:', canGoBack);
 
     // Use setTimeout to ensure DOM is ready
     const timeoutId = setTimeout(() => {
@@ -866,14 +869,24 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
                 data-onboarding-next
                 ref={primaryButtonRef}
                 onClick={(e) => {
-                  console.log('[Onboarding] Next/Finish button clicked via React');
+                  console.log('[Onboarding] Next/Finish button clicked via React', { isNextDisabled, stepIndex });
                   e.preventDefault();
                   e.stopPropagation();
-                  goNext();
+                  if (!isNextDisabled) {
+                    goNext();
+                  } else {
+                    console.warn('[Onboarding] Next button is disabled!', { isNextDisabled, stepIndex, selectedPersona });
+                  }
                 }}
                 disabled={isNextDisabled}
                 className="rounded-lg border border-emerald-500/60 bg-emerald-500/10 px-4 py-2 font-medium text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
-                style={{ pointerEvents: 'auto', position: 'relative', zIndex: 1003, touchAction: 'manipulation' }}
+                style={{ 
+                  pointerEvents: isNextDisabled ? 'none' : 'auto', 
+                  position: 'relative', 
+                  zIndex: 1003, 
+                  touchAction: 'manipulation',
+                  cursor: isNextDisabled ? 'not-allowed' : 'pointer'
+                }}
               >
                 {isLastStep ? 'Finish' : 'Next'}
               </button>
