@@ -506,8 +506,16 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
     });
   }, [finishOnboarding, onClose, stepIndex]);
 
+  // Get visibility state to control AnimatePresence
+  const onboardingVisible = useOnboardingStore((state) => state.visible);
+  
+  // If not visible, don't render (let AnimatePresence handle exit)
+  if (!onboardingVisible) {
+    return null;
+  }
+
   return (
-    <AnimatePresence>
+    <AnimatePresence mode="wait">
       <motion.div
         key="onboarding-overlay"
         initial={{ opacity: 0 }}
