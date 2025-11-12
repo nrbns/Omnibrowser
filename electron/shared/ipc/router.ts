@@ -84,10 +84,14 @@ export function registerHandler<TRequest, TResponse>(
   };
   
   // Register the handler with Electron
-  ipcMain.handle(fullChannel, handlerWrapper);
-  
-  if (process.env.NODE_ENV === 'development') {
-    console.log(`[IPC Router] Registered handler for ${fullChannel}`);
+  try {
+    ipcMain.handle(fullChannel, handlerWrapper);
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[IPC Router] Registered handler for ${fullChannel}`);
+    }
+  } catch (error) {
+    console.error(`[IPC Router] Failed to register handler for ${fullChannel}:`, error);
+    throw error;
   }
 }
 
