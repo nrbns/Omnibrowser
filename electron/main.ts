@@ -437,13 +437,12 @@ app.whenReady().then(async () => {
     }
     registerTrustWeaverIpc();
     try {
-      const { registerTelemetryIpc } = await import('./services/observability/telemetry');
+      const { registerTelemetryIpc } = await import('./services/telemetry');
       registerTelemetryIpc();
       console.log('[Main] Telemetry IPC registered');
     } catch (error) {
       console.warn('[Main] Telemetry IPC not available:', error instanceof Error ? error.message : String(error));
     }
-    console.log('[Main] Telemetry IPC registered');
     
     // Signal renderer that IPC is ready
     mainWindow.webContents.once('did-finish-load', () => {
