@@ -14,7 +14,9 @@ import { TabUpdate, ipcEvents } from '../../lib/ipc-events';
 import { useIPCEvent } from '../../lib/use-ipc-event';
 import { debounce } from 'lodash-es';
 import { useContainerStore } from '../../state/containerStore';
-import { isElectronRuntime } from '../../lib/env';
+import { isElectronRuntime, isDevEnv } from '../../lib/env';
+
+const IS_DEV = isDevEnv();
 
 interface Suggestion {
   type: 'history' | 'tab' | 'command' | 'search';
@@ -527,9 +529,23 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
         let history: any[] = [];
         if (!offline) {
           if (queryLower.trim().length === 0 || queryLower.length < 2) {
-            history = await ipc.history.search('');
+            try {
+              history = await ipc.history.search('');
+            } catch (error) {
+              if (IS_DEV) {
+                console.warn('History search failed:', error);
+              }
+              history = [];
+            }
           } else {
-            history = await ipc.history.search(normalized);
+            try {
+              history = await ipc.history.search(normalized);
+            } catch (error) {
+              if (IS_DEV) {
+                console.warn('History search failed:', error);
+              }
+              history = [];
+            }
           }
         }
 
@@ -690,7 +706,9 @@ export function Omnibox({ onCommandPalette }: { onCommandPalette: () => void }) 
       if (domainPattern.test(finalUrl) || finalUrl.includes('.')) {
         finalUrl = `https://${finalUrl}`;
       } else {
-        finalUrl = buildSearchUrl('google', finalUrl);
+        // Build search URL - ensure it's properly encoded
+        const searchQuery = encodeURIComponent(finalUrl.trim());
+        finalUrl = buildSearchUrl('google', finalUrl.trim());
       }
     }
 

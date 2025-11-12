@@ -779,7 +779,17 @@ export const ipc = {
   history: {
     list: () => ipcCall<unknown, any[]>('history:list', {}),
     clear: () => ipcCall('history:clear', {}),
-    search: (query: string) => ipcCall<{ query: string }, any[]>('history:search', { query }),
+    search: async (query: string) => {
+      try {
+        return await ipcCall<{ query: string }, any[]>('history:search', { query });
+      } catch (error) {
+        // Return empty array on error instead of throwing
+        if (IS_DEV) {
+          console.warn('History search failed:', error);
+        }
+        return [];
+      }
+    },
     deleteUrl: (url: string) => ipcCall<{ url: string }, { success: boolean }>('history:deleteUrl', { url }),
   },
   storage: {

@@ -22,10 +22,21 @@ export const isElectronRuntime = (): boolean => {
     return false;
   }
 
+  // Check for IPC bridge (most reliable indicator)
   const maybeIpc = (window as any).ipc;
   if (maybeIpc && typeof maybeIpc.invoke === 'function') {
     return true;
   }
 
-  return Boolean((window as any).electron);
+  // Check for legacy electron API
+  if ((window as any).electron) {
+    return true;
+  }
+
+  // Check for user agent (fallback)
+  if (typeof navigator !== 'undefined' && navigator.userAgent) {
+    return navigator.userAgent.includes('Electron');
+  }
+
+  return false;
 };
