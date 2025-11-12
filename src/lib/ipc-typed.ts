@@ -592,6 +592,11 @@ export const ipc = {
         }
       >('profiles:getPolicy', profileId ? { profileId } : {}),
   },
+  telemetry: {
+    setOptIn: (optIn: boolean) => ipcCall<{ optIn: boolean }, { success: boolean }>('telemetry:setOptIn', { optIn }),
+    trackPerf: (metric: string, value: number, unit?: 'ms' | 'MB' | '%') => ipcCall<{ metric: string; value: number; unit?: 'ms' | 'MB' | '%' }, { success: boolean }>('telemetry:trackPerf', { metric, value, unit }),
+    trackFeature: (feature: string, action?: string) => ipcCall<{ feature: string; action?: string }, { success: boolean }>('telemetry:trackFeature', { feature, action }),
+  },
   settings: {
     get: () => ipcCall<unknown, unknown>('settings:get', {}),
     set: (path: string[], value: unknown) => ipcCall('settings:set', { path, value }),

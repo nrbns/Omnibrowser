@@ -425,6 +425,9 @@ app.whenReady().then(async () => {
       console.warn('[Dev] Privacy Sentinel disabled to improve stability on this platform');
     }
     registerTrustWeaverIpc();
+    const { registerTelemetryIpc } = await import('./services/telemetry');
+    registerTelemetryIpc();
+    console.log('[Main] Telemetry IPC registered');
     
     // Signal renderer that IPC is ready
     mainWindow.webContents.once('did-finish-load', () => {

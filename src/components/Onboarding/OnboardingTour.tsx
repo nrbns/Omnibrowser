@@ -18,6 +18,7 @@ import {
 import { useAppStore } from '../../state/appStore';
 import { useOnboardingStore } from '../../state/onboardingStore';
 import { useTabGraphStore } from '../../state/tabGraphStore';
+import { ipc } from '../../lib/ipc-typed';
 
 type StepTipAction = 'focus-omnibox' | 'open-graph';
 
@@ -208,6 +209,19 @@ const STEPS: OnboardingStep[] = [
       },
     ],
   },
+  {
+    id: 'telemetry',
+    title: 'Help improve OmniBrowser',
+    description:
+      'Opt-in to privacy-safe telemetry to help us improve performance and fix bugs. We never collect personal information, URLs, or browsing history.',
+    tips: [
+      {
+        icon: Shield,
+        title: 'Privacy-first',
+        description: 'All data is anonymized. No PII, no URLs, no browsing history. You can change this anytime in Settings.',
+      },
+    ],
+  },
 ];
 const TOTAL_STEPS = STEPS.length;
 interface Spotlight {
@@ -220,6 +234,7 @@ interface Spotlight {
 export function OnboardingTour({ onClose }: { onClose: () => void }) {
   const { mode, setMode } = useAppStore();
   const finishOnboarding = useOnboardingStore((state) => state.finish);
+  const [telemetryOptIn, setTelemetryOptIn] = useState(false);
   const [spotlight, setSpotlight] = useState<Spotlight | null>(null);
   const [stepIndex, setStepIndex] = useState(0);
   const personaFromMode = useMemo<PersonaOption['id']>(() => {
@@ -416,19 +431,25 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
         }
       }
 
-      if (current >= TOTAL_STEPS - 1) {
+      const nextIndex = current >= TOTAL_STEPS - 1 ? TOTAL_STEPS - 1 : Math.min(current + 1, TOTAL_STEPS - 1);
+      
+      // If we're finishing (on telemetry step), save opt-in preference
+      if (currentStep?.id === 'telemetry' && nextIndex >= TOTAL_STEPS - 1) {
+        // Save telemetry opt-in preference asynchronously
+        ipc.telemetry.setOptIn(telemetryOptIn).catch((error) => {
+          console.warn('Failed to save telemetry opt-in', error);
+        });
         finishOnboarding();
         onClose();
-        return TOTAL_STEPS - 1;
       }
 
       if (process.env.NODE_ENV === 'development') {
         console.debug('[Onboarding] Next from step', current);
       }
 
-      return Math.min(current + 1, TOTAL_STEPS - 1);
+      return nextIndex;
     });
-  }, [selectedPersona, mode, setMode, finishOnboarding, onClose]);
+  }, [selectedPersona, mode, setMode, finishOnboarding, onClose, telemetryOptIn]);
 
   const goBack = useCallback(() => {
     setStepIndex((current) => {
@@ -571,6 +592,33 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
                   </motion.button>
                 );
               })}
+            </div>
+          ) : step.id === 'telemetry' ? (
+            <div className="mt-4">
+              <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-slate-700/60 bg-slate-900/70 p-4 hover:border-slate-500/80">
+                <input
+                  type="checkbox"
+                  checked={telemetryOptIn}
+                  onChange={(e) => setTelemetryOptIn(e.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-2 focus:ring-emerald-500/50"
+                />
+                <div className="flex-1 text-sm">
+                  <div className="font-semibold text-slate-100">Enable privacy-safe telemetry</div>
+                  <p className="mt-1 text-xs leading-relaxed text-slate-400">
+                    Help us improve OmniBrowser by sharing anonymized performance data and crash reports. No personal information is collected.
+                  </p>
+                  <a
+                    href="#"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      // Open privacy policy or settings
+                    }}
+                    className="mt-2 inline-block text-xs text-emerald-400 hover:text-emerald-300"
+                  >
+                    Learn more about our privacy policy →
+                  </a>
+                </div>
+              </label>
             </div>
           ) : null}
 

@@ -1360,7 +1360,15 @@ export default function Settings() {
                       type="checkbox"
                       className="sr-only peer"
                       checked={settings.diagnostics.telemetryOptIn}
-                      onChange={(e) => updateSetting(['diagnostics', 'telemetryOptIn'], e.target.checked)}
+                      onChange={async (e) => {
+                        updateSetting(['diagnostics', 'telemetryOptIn'], e.target.checked);
+                        // Also update telemetry service
+                        try {
+                          await ipc.telemetry.setOptIn(e.target.checked);
+                        } catch (error) {
+                          console.warn('Failed to update telemetry service', error);
+                        }
+                      }}
                     />
                     <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:bg-blue-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:absolute after:top-[2px] after:left-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all" />
                   </label>
