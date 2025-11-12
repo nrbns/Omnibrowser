@@ -154,6 +154,76 @@ export function registerResearchPipelineIpc() {
       }
     });
 
+    if (process.env.PLAYWRIGHT === '1') {
+      const emit = (step: ResearchStep, delay = 25) => {
+        setTimeout(() => {
+          pipeline.emitStep(job.id, step);
+        }, delay);
+      };
+
+      const now = Date.now();
+      const publishedAt = new Date(now - 1000 * 60 * 42).toISOString();
+      emit({ type: 'status', value: 'Gathering sources' }, 25);
+      emit(
+        {
+          type: 'sources',
+          entries: {
+            'cite-1': [
+              {
+                id: 'cite-1',
+                title: 'Example Research Source',
+                url: 'https://example.com/research',
+                snippet: 'Quantum advances reported by leading labs.',
+                publishedAt,
+              },
+            ],
+          },
+        },
+        75,
+      );
+      emit({ type: 'status', value: 'Drafting summary' }, 110);
+      emit(
+        {
+          type: 'chunk',
+          chunkId: `${job.id}-chunk-1`,
+          content: 'Quantum computing is trending rapidly across academia.',
+          citations: ['cite-1'],
+        },
+        140,
+      );
+      emit(
+        {
+          type: 'status',
+          value: 'Verifying citations',
+        },
+        170,
+      );
+      emit(
+        {
+          type: 'issues',
+          entries: [
+            {
+              type: 'uncited',
+              sentenceIdx: 0,
+              detail: 'Ensure claims reference primary sources.',
+            },
+          ],
+        },
+        200,
+      );
+      emit({ type: 'complete' }, 240);
+      setTimeout(() => {
+        try {
+          unsubscribe();
+        } catch {}
+        try {
+          (pipeline as any)?.jobs?.delete?.(job.id);
+        } catch {}
+      }, 400);
+
+      return { jobId: job.id, channel };
+    }
+
     pipeline.run(job.id).catch((error) => {
       if (process.env.NODE_ENV === 'development') {
         console.error('[ResearchPipeline] run error:', error);
