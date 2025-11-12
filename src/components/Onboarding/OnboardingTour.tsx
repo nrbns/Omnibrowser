@@ -420,14 +420,12 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
   );
 
   const goNext = useCallback((e?: React.MouseEvent) => {
+    console.log('[Onboarding] goNext called - START, current stepIndex:', stepIndex);
     if (e) {
       e.preventDefault();
       e.stopPropagation();
     }
     try {
-      if (process.env.NODE_ENV === 'development') {
-        console.debug('[Onboarding] goNext called, current stepIndex:', stepIndex);
-      }
 
       // Get current step
       const currentStep = STEPS[stepIndex];
@@ -448,22 +446,17 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
 
       // If we're on the last step (telemetry), finish and close
       if (isTelemetryStep || isLastStep) {
-        if (process.env.NODE_ENV === 'development') {
-          console.debug('[Onboarding] Finishing tour from step', stepIndex);
-        }
+        console.log('[Onboarding] Finishing tour from step', stepIndex);
         
         // Finish onboarding (this updates the store and marks as completed)
-        if (process.env.NODE_ENV === 'development') {
-          console.debug('[Onboarding] Calling finishOnboarding()');
-        }
+        console.log('[Onboarding] Calling finishOnboarding()');
         finishOnboarding();
         
-        if (process.env.NODE_ENV === 'development') {
-          console.debug('[Onboarding] finishOnboarding() called, calling onClose()');
-        }
+        console.log('[Onboarding] finishOnboarding() called, calling onClose()');
         
         // Call onClose for any cleanup
         onClose();
+        console.log('[Onboarding] goNext - onClose() called - END');
         
         return;
       }
@@ -507,23 +500,22 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
   }, []);
 
   const handleSkip = useCallback((e?: React.MouseEvent) => {
+    console.log('[Onboarding] handleSkip called - START');
     if (e) {
       e.preventDefault();
       e.stopPropagation();
     }
     try {
-      if (process.env.NODE_ENV === 'development') {
-        console.debug('[Onboarding] Skip pressed at step', stepIndex);
-      }
+      console.log('[Onboarding] Skip pressed at step', stepIndex);
       // Finish onboarding (this updates the store and marks as completed)
+      console.log('[Onboarding] Skip - calling finishOnboarding()');
       finishOnboarding();
       
-      if (process.env.NODE_ENV === 'development') {
-        console.debug('[Onboarding] Skip: finishOnboarding() called, calling onClose()');
-      }
+      console.log('[Onboarding] Skip - finishOnboarding() called, calling onClose()');
       
       // Call onClose for any cleanup
       onClose();
+      console.log('[Onboarding] Skip - onClose() called - END');
     } catch (error) {
       console.error('[Onboarding] Error in handleSkip:', error);
     }
@@ -574,20 +566,18 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
             type="button"
             className="absolute right-5 top-5 z-10 rounded-full border border-slate-700/60 bg-slate-900/70 p-1.5 text-gray-400 hover:text-gray-200"
             onClick={(e) => {
+              console.log('[Onboarding] X button clicked - START');
               e.preventDefault();
               e.stopPropagation();
               try {
-                if (process.env.NODE_ENV === 'development') {
-                  console.debug('[Onboarding] X button clicked');
-                }
+                console.log('[Onboarding] X button - calling finishOnboarding()');
                 // Finish onboarding (this updates the store and marks as completed)
                 finishOnboarding();
                 
-                if (process.env.NODE_ENV === 'development') {
-                  console.debug('[Onboarding] X: finishOnboarding() called, calling onClose()');
-                }
+                console.log('[Onboarding] X button - finishOnboarding() called, calling onClose()');
                 
                 onClose();
+                console.log('[Onboarding] X button - onClose() called - END');
               } catch (error) {
                 console.error('[Onboarding] Error in X button handler:', error);
               }
