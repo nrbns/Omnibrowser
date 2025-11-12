@@ -169,9 +169,25 @@ const typedApi = {
 
 contextBridge.exposeInMainWorld('ipc', typedApi);
 
-// Ensure window.ipc is available for legacy code
-if (!window.ipc) {
-  window.ipc = typedApi;
+// Listen for IPC ready signal from main process
+ipcRenderer.on('ipc:ready', () => {
+  window.dispatchEvent(new CustomEvent('ipc:ready'));
+});
+
+// Immediately dispatch ready event if IPC is already set up
+// This handles cases where the preload script loads after the ready signal
+if (window.ipc && typeof window.ipc.invoke === 'function') {
+  // Use setTimeout to ensure event listeners are registered
+  setTimeout(() => {
+    window.dispatchEvent(new CustomEvent('ipc:ready'));
+  }, 0);
+} else {
+  // Also dispatch after a short delay to ensure renderer has registered listeners
+  setTimeout(() => {
+    if (window.ipc && typeof window.ipc.invoke === 'function') {
+      window.dispatchEvent(new CustomEvent('ipc:ready'));
+    }
+  }, 100);
 }
 
 
