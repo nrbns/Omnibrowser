@@ -13,31 +13,32 @@ const ISSUE_DESCRIPTIONS: Record<string, string> = {
 };
 
 function CitationChip({
-  index,
+  citeNumber,
   onHover,
   onLeave,
   onClick,
   active,
 }: {
-  index: number;
+  citeNumber: number;
   onHover?: () => void;
   onLeave?: () => void;
   onClick?: () => void;
   active?: boolean;
 }) {
+  const label = citeNumber > 0 ? citeNumber : '…';
   return (
     <button
       onMouseEnter={onHover}
       onMouseLeave={onLeave}
       onClick={onClick}
-      className={`inline-flex items-center gap-1 rounded-full border text-xs px-2 py-0.5 transition-colors ${
+      className={`ml-1 inline-flex items-center justify-center rounded-full border px-1.5 py-[1px] align-text-top text-[11px] transition-colors ${
         active
-          ? 'bg-blue-500/30 text-blue-50 border-blue-400 shadow shadow-blue-500/20'
-          : 'bg-blue-500/10 text-blue-200 border-blue-500/40 hover:bg-blue-500/20'
+          ? 'bg-blue-500/40 text-blue-50 border-blue-400 shadow shadow-blue-500/30'
+          : 'bg-blue-500/15 text-blue-100 border-blue-500/40 hover:bg-blue-500/25'
       }`}
     >
-      <span className="text-[10px]">[{index + 1}]</span>
-      <span className="uppercase tracking-wide text-[9px]">cite</span>
+      <span aria-hidden className="leading-none">[{label}]</span>
+      <span className="sr-only">Citation {label}</span>
     </button>
   );
 }
@@ -55,12 +56,12 @@ function IssueBadge({ issue }: { issue: { type: 'uncited' | 'contradiction'; det
 
 function SourceCard({
   cite,
-  index,
+  citeNumber,
   active,
   onPreview,
 }: {
-  cite: { id: string; title: string; url: string; snippet?: string; publishedAt?: string };
-  index: number;
+  cite: { id: string; title: string; url: string; snippet?: string; publishedAt?: string; fragmentUrl?: string };
+  citeNumber: number;
   active?: boolean;
   onPreview?: () => void;
 }) {
@@ -73,11 +74,11 @@ function SourceCard({
     >
       <div className="flex items-center gap-2">
         <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-blue-500/20 text-blue-200 text-xs font-semibold">
-          {index + 1}
+          {citeNumber}
         </span>
         <div className="flex-1">
           <button
-            onClick={() => window.open(cite.url, '_blank', 'noopener')}
+            onClick={() => window.open(cite.fragmentUrl || cite.url, '_blank', 'noopener')}
             className="text-sm font-semibold text-blue-200 hover:text-blue-100 transition-colors"
           >
             {cite.title}
@@ -99,7 +100,7 @@ function SourceCard({
       {cite.snippet && (
         <p className="text-xs text-gray-400 leading-relaxed">{cite.snippet}</p>
       )}
-      <p className="text-[10px] text-gray-500 break-all">{cite.url}</p>
+      <p className="text-[10px] text-gray-500 break-all">{cite.fragmentUrl || cite.url}</p>
     </motion.li>
   );
 }
@@ -128,14 +129,33 @@ export function Research() {
   const [lastCompletedAt, setLastCompletedAt] = useState<number | null>(null);
   const researcherListenerRef = useRef<((event: any, payload: any) => void) | null>(null);
 
-  const sourcesAsFlat = useMemo(() => {
-    const entries: Array<{ cite: any; idx: number }> = [];
-    const citeKeys = Object.keys(sources);
-    citeKeys.forEach((key) => {
-      const list = sources[key];
-      list.forEach((entry, index) => entries.push({ cite: entry, idx: index }));
+  const { sourcesList, citationOrder } = useMemo(() => {
+    const entries: Array<{ cite: any; citeId: string; citeNumber: number }> = [];
+    const orderMap = new Map<string, number>();
+
+    const citeKeys = Object.keys(sources).sort((a, b) => {
+      const aNum = Number.parseInt(a.replace(/\D+/g, ''), 10) || Number.MAX_SAFE_INTEGER;
+      const bNum = Number.parseInt(b.replace(/\D+/g, ''), 10) || Number.MAX_SAFE_INTEGER;
+      if (aNum === bNum) {
+        return a.localeCompare(b);
+      }
+      return aNum - bNum;
     });
-    return entries;
+
+    citeKeys.forEach((key, idx) => {
+      const list = sources[key];
+      const citeNumber = idx + 1;
+      orderMap.set(key, citeNumber);
+      list.forEach((entry) => {
+        entries.push({
+          cite: entry,
+          citeId: key,
+          citeNumber,
+        });
+      });
+    });
+
+    return { sourcesList: entries, citationOrder: orderMap };
   }, [sources]);
 
   const previewEntries = useMemo(() => {
@@ -328,20 +348,25 @@ export function Research() {
                       <div key={`${chunkIndex}-${sentenceIdx}`} className="space-y-2">
                         <p className="text-sm leading-relaxed text-slate-200">
                           {sentence.text}
+                          {sentence.citations.map((citeId) => {
+                            const number = citationOrder.get(citeId) ?? 0;
+                            return (
+                              <CitationChip
+                                key={`${chunkIndex}-${sentenceIdx}-cite-${citeId}`}
+                                citeNumber={number}
+                                active={previewCiteId === citeId}
+                                onClick={() => setPreviewCite(previewCiteId === citeId ? null : citeId)}
+                              />
+                            );
+                          })}
                         </p>
-                        <div className="flex flex-wrap gap-2">
-                          {sentence.badges.map((issue, idx) => (
-                            <IssueBadge key={`${chunkIndex}-${sentenceIdx}-${idx}`} issue={issue} />
-                          ))}
-                          {sentence.citations.map((citeId, idx) => (
-                            <CitationChip
-                              key={`${chunkIndex}-${sentenceIdx}-cite-${citeId}-${idx}`}
-                              index={idx}
-                              active={previewCiteId === citeId}
-                              onClick={() => setPreviewCite(previewCiteId === citeId ? null : citeId)}
-                            />
-                          ))}
-                        </div>
+                        {sentence.badges.length > 0 && (
+                          <div className="flex flex-wrap gap-2">
+                            {sentence.badges.map((issue, idx) => (
+                              <IssueBadge key={`${chunkIndex}-${sentenceIdx}-${idx}`} issue={issue} />
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </motion.article>
@@ -354,17 +379,17 @@ export function Research() {
           <aside className="space-y-4">
             <div className="rounded-xl border border-slate-800/60 bg-slate-900/60 p-5">
               <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
-                <BookOpen size={16} /> Sources ({sourcesAsFlat.length})
+                <BookOpen size={16} /> Sources ({sourcesList.length})
               </h3>
               <ul className="mt-4 space-y-3">
                 <AnimatePresence initial={false}>
-                  {sourcesAsFlat.map(({ cite, idx }) => (
+                  {sourcesList.map(({ cite, citeId, citeNumber }) => (
                     <SourceCard
-                      key={`${cite.id}-${idx}`}
+                      key={`${cite.id}-${citeNumber}`}
                       cite={cite}
-                      index={idx}
-                      active={previewCiteId === cite.id}
-                      onPreview={() => setPreviewCite(cite.id)}
+                      citeNumber={citeNumber}
+                      active={previewCiteId === citeId}
+                      onPreview={() => setPreviewCite(citeId)}
                     />
                   ))}
                 </AnimatePresence>
@@ -402,13 +427,13 @@ export function Research() {
                 <div>
                   <p className="text-xs uppercase tracking-widest text-blue-300">Evidence Preview</p>
                   <h2 className="text-lg font-semibold text-blue-100">{previewEntries[0]?.title}</h2>
-                  <p className="text-xs text-slate-400 break-all">{previewEntries[0]?.url}</p>
+                  <p className="text-xs text-slate-400 break-all">{previewEntries[0]?.fragmentUrl || previewEntries[0]?.url}</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => {
-                      const target = previewEntries[0]?.url;
+                      const target = previewEntries[0]?.fragmentUrl || previewEntries[0]?.url;
                       if (target) {
                         window.open(target, '_blank', 'noopener');
                       }
@@ -440,7 +465,7 @@ export function Research() {
                       </div>
                       <button
                         type="button"
-                        onClick={() => window.open(entry.url, '_blank', 'noopener')}
+                        onClick={() => window.open(entry.fragmentUrl || entry.url, '_blank', 'noopener')}
                         className="text-[11px] text-blue-300 underline-offset-2 hover:underline"
                       >
                         Open in new tab

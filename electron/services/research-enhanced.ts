@@ -61,6 +61,7 @@ export interface CiteEntry {
   domain?: string;
   relevanceScore?: number;
   sourceType?: ResearchSource['sourceType'];
+  fragmentUrl?: string;
 }
 
 export interface ResearchIssue {
@@ -811,6 +812,10 @@ export async function fetchSources(
     const publishedAt =
       typeof source.timestamp === 'number' ? new Date(source.timestamp).toISOString() : undefined;
 
+    const evidenceSnippets = extractSnippets(source.text, query, 1);
+    const snippetCandidate = evidenceSnippets[0] || source.snippet || source.text.slice(0, 160);
+    const fragment = snippetCandidate ? createTextFragment(snippetCandidate) : '';
+
     citeMap[citeId] = [
       {
         id: citeId,
@@ -822,6 +827,7 @@ export async function fetchSources(
         domain: source.domain,
         relevanceScore: source.relevanceScore,
         sourceType: source.sourceType,
+        fragmentUrl: fragment ? `${source.url}${fragment}` : source.url,
       },
     ];
   });

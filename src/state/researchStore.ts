@@ -6,6 +6,10 @@ export type Cite = {
   url: string;
   publishedAt?: string;
   snippet?: string;
+  fragmentUrl?: string;
+  text?: string;
+  domain?: string;
+  relevanceScore?: number;
 };
 
 export type ResearchIssue = {
