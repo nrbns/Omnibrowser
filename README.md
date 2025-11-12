@@ -15,6 +15,8 @@ Electron + React + TypeScript + Vite multi-mode desktop browser with:
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 > **Note**: Currently in Phase 4 (Pre-Launch Hardening). See [PROJECT_STATUS.md](./PROJECT_STATUS.md) for detailed status.
+> 
+> **Project Board**: See [GitHub Projects](https://github.com/nrbns/Omnibrowser/projects) for roadmap and issue tracking. Setup guide: [docs/project-board-setup.md](./docs/project-board-setup.md)
 
 ## Quick Start
 
