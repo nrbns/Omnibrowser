@@ -65,17 +65,23 @@ async function ensureLoaded(): Promise<void> {
 
   loadingPromise = (async () => {
     try {
-      const content = await fs.readFile(getStoragePath(), 'utf-8');
+      const storagePath = getStoragePath();
+      // Ensure directory exists
+      await fs.mkdir(path.dirname(storagePath), { recursive: true });
+      
+      const content = await fs.readFile(storagePath, 'utf-8');
       const parsed = JSON.parse(content) as TrustSnapshot;
       if (parsed && typeof parsed === 'object' && parsed.records) {
         cache = parsed;
         return;
       }
-    } catch (error) {
-      if (process.env.NODE_ENV === 'development') {
+    } catch (error: any) {
+      // ENOENT is expected on first run - don't log it as an error
+      if (error?.code !== 'ENOENT' && process.env.NODE_ENV === 'development') {
         console.warn('[trust-weaver] failed to load cache', error);
       }
     }
+    // Initialize empty cache if file doesn't exist or is invalid
     cache = { records: {}, updatedAt: Date.now() };
   })();
 
