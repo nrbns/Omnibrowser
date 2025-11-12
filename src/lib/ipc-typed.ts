@@ -73,6 +73,10 @@ const FALLBACK_CHANNELS: Record<string, () => unknown> = {
   'vpn:check': () => ({ connected: false, stub: true }),
   'dns:status': () => ({ enabled: false, provider: 'system', stub: true }),
   'tabs:predictiveGroups': () => ({ groups: [], prefetch: [], summary: undefined }),
+  'tabs:create': () => {
+    // Return a temporary tab ID for fallback
+    return { id: `temp-${Date.now()}`, title: 'New Tab', url: 'about:blank', active: true };
+  },
   'tabs:list': () => {
     try {
       const state = useTabsStore.getState?.();
@@ -282,12 +286,20 @@ export async function ipcCall<TRequest, TResponse = unknown>(
  
   // Check if we're in Electron - be lenient, check multiple indicators
   const hasUserAgent = typeof navigator !== 'undefined' && navigator.userAgent;
-  const userAgentHasElectron = hasUserAgent && navigator.userAgent.includes('Electron');
+  const userAgent = hasUserAgent ? navigator.userAgent : '';
+  const userAgentHasElectron = userAgent.includes('Electron');
   const hasElectronRuntime = isElectronRuntime();
   const hasWindowIpc = typeof window !== 'undefined' && window.ipc && typeof window.ipc.invoke === 'function';
   
+  // Check if we're in a regular web browser (Chrome, Firefox, Safari, Edge)
+  const isRegularBrowser = userAgent.includes('Chrome') || 
+                          userAgent.includes('Firefox') || 
+                          userAgent.includes('Safari') || 
+                          userAgent.includes('Edg');
+  
   // If we have window.ipc, we're definitely in Electron (even if other checks fail)
-  const isElectron = hasElectronRuntime || userAgentHasElectron || hasWindowIpc;
+  // Also, if we're NOT in a regular browser, assume Electron (more aggressive detection)
+  const isElectron = hasElectronRuntime || userAgentHasElectron || hasWindowIpc || !isRegularBrowser;
 
   // Wait for IPC to be ready (with longer timeout for first call)
   const isReady = await waitForIPC(8000);
