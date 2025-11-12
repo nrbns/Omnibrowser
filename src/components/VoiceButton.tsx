@@ -36,8 +36,21 @@ export default function VoiceButton({ onResult, small }: Props) {
   };
 
   return (
-    <button type="button" className={`${small ? 'text-[11px] px-2 py-1' : 'text-xs px-2 py-1'} ml-2 rounded ${active ? 'bg-red-600 text-white' : 'bg-neutral-800'}`} onClick={start} title="Voice search">
-      {active ? 'Listening…' : '🎤'}
+    <button
+      type="button"
+      className={`${small ? 'text-[11px] px-2 py-1' : 'text-xs px-2 py-1'} ml-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-400/50 ${active ? 'bg-red-600 text-white' : 'bg-neutral-800'}`}
+      onClick={start}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          start();
+        }
+      }}
+      aria-label={active ? 'Stop voice recognition' : 'Start voice search'}
+      aria-pressed={active}
+      title="Voice search"
+    >
+      <span aria-hidden="true">{active ? 'Listening…' : '🎤'}</span>
     </button>
   );
 }

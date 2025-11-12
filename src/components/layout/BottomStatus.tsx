@@ -363,15 +363,29 @@ export function BottomStatus() {
       <Component
         type={onClick ? 'button' : undefined}
         onClick={onClick}
+        onKeyDown={onClick ? (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onClick();
+          }
+        } : undefined}
         title={title}
+        aria-label={title || label}
+        aria-busy={loading}
         className={`${palette[variant]} ${className ?? ''} flex items-center gap-1.5 rounded-full px-2 py-1 text-xs ${
           onClick ? 'cursor-pointer transition-colors hover:border-gray-500/70 focus:outline-none focus:ring-1 focus:ring-blue-400/30' : ''
         }`}
       >
-        <Icon size={12} className="opacity-80" />
+        <Icon size={12} className="opacity-80" aria-hidden="true" />
         <span className="font-medium">{label}</span>
         {description && <span className="text-[11px] opacity-75">{description}</span>}
-        {loading && <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />}
+        {loading && (
+          <span
+            className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent"
+            aria-label="Loading"
+            role="status"
+          />
+        )}
         {pulse && (
           <motion.span
             className="inline-flex h-1.5 w-1.5 rounded-full bg-current"
@@ -380,6 +394,7 @@ export function BottomStatus() {
               scale: [1, 1.2, 1]
             }}
             transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+            aria-hidden="true"
           />
         )}
       </Component>

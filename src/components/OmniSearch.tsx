@@ -25,8 +25,9 @@ export default function OmniSearch() {
     }
   };
   return (
-    <form onSubmit={onSubmit} className="flex-1 flex items-center">
+    <form onSubmit={onSubmit} className="flex-1 flex items-center" role="search" aria-label="Omnibox search">
       <input
+        type="text"
         className="w-full bg-neutral-800 rounded px-3 py-2 text-sm outline-none focus:ring-2 ring-indigo-500"
         placeholder="Type a URL or query"
         value={q}
@@ -44,7 +45,10 @@ export default function OmniSearch() {
             openWithAccount(url, accountId);
           }
         }}
+        aria-label="Search or enter URL"
+        aria-describedby="search-hint"
       />
+      <span id="search-hint" className="sr-only">Press Ctrl+Enter or Cmd+Enter to open in new tab</span>
       <VoiceButton onResult={(text)=>{ setQ(text); setTimeout(()=> onSubmit(new Event('submit') as any), 0); }} small />
     </form>
   );

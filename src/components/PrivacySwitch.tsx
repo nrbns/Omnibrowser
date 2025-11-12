@@ -62,17 +62,28 @@ export function PrivacySwitch() {
   };
 
   return (
-    <div className="flex items-center gap-1 bg-gray-800/50 rounded-lg p-1 border border-gray-700/50">
+    <div
+      className="flex items-center gap-1 bg-gray-800/50 rounded-lg p-1 border border-gray-700/50"
+      role="group"
+      aria-label="Privacy mode selector"
+    >
       {modes.map((m) => {
         const Icon = m.icon;
         const isActive = mode === m.value;
         return (
           <motion.button
             key={m.value}
+            type="button"
             onClick={() => handleModeChange(m.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                handleModeChange(m.value);
+              }
+            }}
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400/50 ${
               isActive
                 ? `${m.color.replace('text-', 'bg-')} bg-opacity-20 text-white`
                 : m.disabled
@@ -80,19 +91,23 @@ export function PrivacySwitch() {
                 : 'text-gray-400 hover:text-gray-300'
             }`}
             disabled={m.disabled}
+            aria-label={`Switch to ${m.label} privacy mode`}
+            aria-pressed={isActive}
+            aria-disabled={m.disabled}
             title={
               m.disabled
                 ? `${m.label} disabled by profile policy`
                 : `Switch to ${m.label}`
             }
           >
-            <Icon size={14} />
+            <Icon size={14} aria-hidden="true" />
             <span>{m.label}</span>
           </motion.button>
         );
       })}
       <motion.button
         key="Shadow"
+        type="button"
         whileHover={{ scale: shadowLoading || shadowDisabled ? 1 : 1.05 }}
         whileTap={{ scale: shadowLoading || shadowDisabled ? 1 : 0.95 }}
         disabled={shadowDisabled || shadowLoading}
@@ -108,13 +123,26 @@ export function PrivacySwitch() {
             console.error('Shadow session error:', error);
           }
         }}
-        className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${
+        onKeyDown={(e) => {
+          if ((e.key === 'Enter' || e.key === ' ') && !shadowDisabled && !shadowLoading) {
+            e.preventDefault();
+            if (shadowSessionId) {
+              void endShadowSession();
+            } else {
+              void startShadowSession({ summary: true });
+            }
+          }
+        }}
+        className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-purple-400/50 ${
           shadowSessionId
             ? 'bg-purple-500/20 text-purple-200 border border-purple-400/30'
             : shadowDisabled
             ? 'text-gray-600 cursor-not-allowed'
             : 'text-gray-400 hover:text-gray-300'
         }`}
+        aria-label={shadowSessionId ? 'End Shadow Mode session' : 'Start Shadow Mode'}
+        aria-pressed={!!shadowSessionId}
+        aria-disabled={shadowDisabled || shadowLoading}
         title={
           shadowDisabled
             ? 'Shadow Mode disabled by profile policy'
@@ -123,7 +151,7 @@ export function PrivacySwitch() {
             : 'Start Shadow Mode (simulated private browsing)'
         }
       >
-        <MoonStar size={14} />
+        <MoonStar size={14} aria-hidden="true" />
         <span>{shadowSessionId ? 'Shadow On' : 'Shadow'}</span>
       </motion.button>
     </div>
