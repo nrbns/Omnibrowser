@@ -536,10 +536,12 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
       });
 
       const handleNextClick = (e: Event) => {
-        console.log('[Onboarding] ✅ Native click detected on Next button!', e);
+        console.log('[Onboarding] ✅ Native click detected on Next button!', e, { isNextDisabled, stepIndex, selectedPersona });
         e.preventDefault();
         e.stopImmediatePropagation();
         try {
+          // Always call goNext - it will handle validation internally
+          console.log('[Onboarding] Calling goNext() from native listener...');
           goNext();
         } catch (err) {
           console.error('[Onboarding] Error in goNext from native listener:', err);
@@ -581,10 +583,35 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
       };
 
       if (nextButton) {
+        // Check if button is disabled
+        const isDisabled = nextButton.hasAttribute('disabled') || (nextButton as HTMLButtonElement).disabled;
+        console.log('[Onboarding] Next button disabled state:', isDisabled, 'isNextDisabled:', isNextDisabled);
+        
+        // Force enable the button for testing (remove disabled attribute)
+        if (isDisabled) {
+          console.warn('[Onboarding] ⚠️ Next button is disabled! Force enabling for testing...');
+          nextButton.removeAttribute('disabled');
+          (nextButton as HTMLButtonElement).disabled = false;
+          nextButton.style.pointerEvents = 'auto';
+          nextButton.style.cursor = 'pointer';
+          nextButton.style.opacity = '1';
+        }
+        
         nextButton.addEventListener('click', handleNextClick, true);
         nextButton.addEventListener('mousedown', handleNextClick, true);
         nextButton.addEventListener('pointerdown', handleNextClick, true);
+        nextButton.addEventListener('touchstart', handleNextClick, true);
         console.log('[Onboarding] ✅ Native listeners attached to Next button');
+        
+        // Test if button is actually clickable
+        const computedStyle = window.getComputedStyle(nextButton);
+        console.log('[Onboarding] Next button computed styles:', {
+          pointerEvents: computedStyle.pointerEvents,
+          cursor: computedStyle.cursor,
+          zIndex: computedStyle.zIndex,
+          position: computedStyle.position,
+          opacity: computedStyle.opacity,
+        });
       } else {
         console.warn('[Onboarding] ⚠️ Next button not found!');
       }
