@@ -305,10 +305,10 @@ app.whenReady().then(async () => {
   
   // Register stub handlers FIRST, before window creation, to ensure they're ready
   // This prevents "No handler registered" errors when renderer makes early IPC calls
-  if (disableHeavyServices) {
-    console.log('[Main] Registering stub handlers for disabled services');
-    try {
-      // Register shields stub handler
+  console.log('[Main] Registering stub handlers for disabled services (early)');
+  try {
+    // Register shields stub handler if shields service is disabled
+    if (disableHeavyServices) {
       const shieldsSchema = z.object({});
       registerHandler('shields:getStatus', shieldsSchema, async () => ({
         adsBlocked: 0,
@@ -319,8 +319,10 @@ app.whenReady().then(async () => {
         fingerprinting: false,
       }));
       console.log('[Main] Shields stub handler registered (early)');
-      
-      // Register privacy sentinel stub handler
+    }
+    
+    // Register privacy sentinel stub handler if privacy sentinel is disabled
+    if (!enablePrivacySentinel) {
       const PrivacyAuditSchema = z.object({
         tabId: z.string().optional().nullable(),
       });
@@ -335,9 +337,9 @@ app.whenReady().then(async () => {
         ai: null,
       }));
       console.log('[Main] Privacy Sentinel stub handler registered (early)');
-    } catch (error) {
-      console.error('[Main] Failed to register stub handlers:', error);
     }
+  } catch (error) {
+    console.error('[Main] Failed to register stub handlers:', error);
   }
   
   // Start session persistence (auto-save every 2s)
