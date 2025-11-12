@@ -94,13 +94,17 @@ This document tracks the verification status of all immediate tasks from the roa
   - [ ] Test manual workflow_dispatch trigger
 
 ### 10. Telemetry Opt-In
-- **Status**: ⏳ Not implemented
-- **Implementation Needed**:
-  - [ ] Design telemetry schema
-  - [ ] Add opt-in toggle to onboarding
-  - [ ] Implement telemetry service
-  - [ ] Add privacy policy link
-  - [ ] Test opt-in/opt-out flow
+- **Status**: ✅ Complete
+- **Files**: 
+  - `electron/services/telemetry.ts`
+  - `src/components/Onboarding/OnboardingTour.tsx`
+  - `src/routes/Settings.tsx`
+- **Implementation**:
+  - Privacy-safe telemetry service (opt-in only)
+  - Onboarding step with checkbox UI
+  - Settings integration with sync
+  - IPC handlers for setOptIn, trackPerf, trackFeature
+- **AC Met**: Telemetry default OFF; user can opt-in from onboarding; privacy-safe (no PII)
 
 ## Verification Checklist
 
