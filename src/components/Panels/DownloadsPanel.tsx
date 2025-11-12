@@ -6,7 +6,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Download, CheckCircle2, XCircle, Loader2, FolderOpen, ExternalLink, ShieldCheck, Trash2, PlayCircle } from 'lucide-react';
+import { Download, CheckCircle2, XCircle, Loader2, FolderOpen, ExternalLink, ShieldCheck, Trash2, PlayCircle, Pause } from 'lucide-react';
 import { useIPCEvent } from '../../lib/use-ipc-event';
 import { ipc } from '../../lib/ipc-typed';
 import { DownloadUpdate } from '../../lib/ipc-events';
@@ -16,7 +16,7 @@ interface DownloadItem {
   id: string;
   url: string;
   filename: string;
-  status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled' | 'blocked' | 'in-progress';
+  status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled' | 'blocked' | 'paused' | 'verifying';
   progress?: number;
   receivedBytes?: number;
   totalBytes?: number;
@@ -122,6 +122,24 @@ export function DownloadsPanel() {
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
   };
 
+  const getStatusBadgeClass = (status: DownloadItem['status']) => {
+    switch (status) {
+      case 'completed':
+        return 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30';
+      case 'failed':
+      case 'blocked':
+        return 'bg-red-500/10 text-red-300 border border-red-500/30';
+      case 'cancelled':
+        return 'bg-slate-500/10 text-slate-300 border border-slate-500/30';
+      case 'paused':
+        return 'bg-amber-500/10 text-amber-300 border border-amber-500/30';
+      case 'verifying':
+        return 'bg-indigo-500/10 text-indigo-200 border border-indigo-500/30';
+      default:
+        return 'bg-blue-500/10 text-blue-300 border border-blue-500/30';
+    }
+  };
+
   const handleOpenFile = async (path: string) => {
     try {
       await ipc.downloads.openFile(path);
@@ -195,7 +213,9 @@ export function DownloadsPanel() {
   };
 
   const completed = downloads.filter(d => d.status === 'completed').length;
-  const active = downloads.filter(d => d.status === 'downloading' || d.status === 'pending' || d.status === 'in-progress').length;
+  const active = downloads.filter(d =>
+    d.status === 'downloading' || d.status === 'pending' || d.status === 'paused' || d.status === 'verifying'
+  ).length;
   const failed = downloads.filter(d => d.status === 'failed' || d.status === 'blocked').length;
 
   return (
@@ -249,8 +269,11 @@ export function DownloadsPanel() {
                     {download.status === 'blocked' && (
                       <XCircle size={18} className="text-red-500" />
                     )}
-                    {download.status === 'in-progress' && (
-                      <Loader2 size={18} className="text-amber-400" />
+                    {download.status === 'paused' && (
+                      <Pause size={18} className="text-amber-400" />
+                    )}
+                    {download.status === 'verifying' && (
+                      <Loader2 size={18} className="text-blue-300 animate-spin" />
                     )}
                     {(download.status === 'downloading' || download.status === 'pending') && (
                       <Loader2 size={18} className="text-blue-400 animate-spin" />
@@ -265,15 +288,7 @@ export function DownloadsPanel() {
                       </p>
                       <div className="flex items-center gap-1">
                         <span
-                          className={`text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full ${
-                            download.status === 'completed'
-                              ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30'
-                              : download.status === 'failed' || download.status === 'blocked'
-                              ? 'bg-red-500/10 text-red-300 border border-red-500/30'
-                              : download.status === 'in-progress'
-                              ? 'bg-amber-500/10 text-amber-300 border border-amber-500/30'
-                              : 'bg-blue-500/10 text-blue-300 border border-blue-500/30'
-                          }`}
+                          className={`text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full ${getStatusBadgeClass(download.status)}`}
                         >
                           {download.status.replace('-', ' ')}
                         </span>
@@ -328,7 +343,14 @@ export function DownloadsPanel() {
                       </div>
                     )}
 
-                    {(download.status === 'downloading' || download.status === 'in-progress') && (
+                    {download.status === 'verifying' && (
+                      <div className="flex items-center gap-2 text-xs text-blue-300 mb-2">
+                        <Loader2 size={14} className="animate-spin" />
+                        <span>Verifying file integrity…</span>
+                      </div>
+                    )}
+
+                    {(download.status === 'downloading' || download.status === 'paused') && (
                       <div className="flex flex-wrap items-center gap-3 text-[11px] text-gray-400 mb-2">
                         {formatSpeed(download.speedBytesPerSec) && (
                           <span>Speed: {formatSpeed(download.speedBytesPerSec)}</span>
@@ -434,7 +456,7 @@ export function DownloadsPanel() {
                       </motion.div>
                     )}
 
-                    {selectedId === download.id && (download.status === 'downloading' || download.status === 'in-progress') && (
+                    {selectedId === download.id && (download.status === 'downloading' || download.status === 'paused') && (
                       <motion.div
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: 'auto' }}

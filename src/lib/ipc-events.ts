@@ -108,7 +108,7 @@ export interface DownloadUpdate {
   id: string;
   url: string;
   filename: string;
-  status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled' | 'in-progress' | 'blocked';
+  status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled' | 'paused' | 'blocked' | 'verifying';
   progress?: number;
   receivedBytes?: number;
   totalBytes?: number;

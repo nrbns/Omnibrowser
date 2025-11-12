@@ -238,7 +238,9 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
       
       try {
         const list = await ipc.downloads.list();
-        const active = Array.isArray(list) ? list.filter((d: any) => d.status === 'in-progress').length : 0;
+        const active = Array.isArray(list)
+          ? list.filter((d: any) => ['downloading', 'verifying', 'paused'].includes(d.status)).length
+          : 0;
         setDownloadCount(active);
       } catch {
         // Silently handle - will retry if needed

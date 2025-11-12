@@ -7,7 +7,7 @@
  */
 
 import { BrowserWindow, DownloadItem, app, session, shell } from 'electron';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
@@ -17,31 +17,15 @@ import { addDownloadRecord, listDownloads, Download, DownloadSafety, getCurrentS
 import { getEnhancedThreatScanner } from './threats/enhanced-scanner';
 import { getMainWindow } from './windows';
 import { getActiveProfileForWindow, profileAllows } from './profiles';
+import { computeFileChecksum } from './downloads/checksum';
 
 const activeDownloads = new Map<string, DownloadItem>();
+const downloadSources = new Map<string, BrowserWindow | null | undefined>();
 const downloadMetrics = new Map<string, { bytes: number; timestamp: number }>();
 let downloadsInitialized = false;
 
 function getPrivateDownloadDir() {
   return path.join(tmpdir(), 'omnibrowser-private-downloads');
-}
-
-async function calculateChecksum(filePath: string): Promise<string> {
-  const hash = createHash('sha256');
-  const file = await fs.open(filePath, 'r');
-  const stream = file.createReadStream();
-
-  return new Promise((resolve, reject) => {
-    stream.on('data', (chunk) => hash.update(chunk));
-    stream.on('end', () => {
-      file.close();
-      resolve(hash.digest('hex'));
-    });
-    stream.on('error', async (error) => {
-      try { await file.close(); } catch {}
-      reject(error);
-    });
-  });
 }
 
 function mapThreatLevel(level: string | undefined): DownloadSafety['status'] {
@@ -152,8 +136,21 @@ async function handleDownloadDone(
 
   let checksum: string | undefined;
   if (finalStatus === 'completed' && settingsChecksum && finalPath) {
+    const verifyingRecord = buildDownloadRecord({
+      ...downloadRecord,
+      status: 'verifying',
+      path: finalPath,
+      progress: 1,
+      receivedBytes: item.getReceivedBytes(),
+      totalBytes: item.getTotalBytes(),
+    });
+    addDownloadRecord(verifyingRecord);
+    emitToWindow(sourceWin, 'downloads:progress', verifyingRecord);
+
     try {
-      checksum = await calculateChecksum(finalPath);
+      checksum = await computeFileChecksum(finalPath, () => {
+        // Future: emit checksum progress if desired
+      });
     } catch (error) {
       if (process.env.NODE_ENV === 'development') {
         console.warn('[Downloads] Failed to calculate checksum:', error);
@@ -180,6 +177,7 @@ async function handleDownloadDone(
   emitToWindow(sourceWin, 'downloads:done', finalRecord);
   activeDownloads.delete(downloadId);
   downloadMetrics.delete(downloadId);
+  downloadSources.delete(downloadId);
 }
 
 function registerDownloadSessionListener() {
@@ -231,6 +229,7 @@ function registerDownloadSessionListener() {
       safety: { status: 'pending' },
     });
 
+    downloadSources.set(downloadId, sourceWin);
     addDownloadRecord(initialRecord);
     emitToWindow(sourceWin, 'downloads:started', initialRecord);
     emitToWindow(sourceWin, 'downloads:progress', initialRecord);
@@ -311,14 +310,18 @@ export function registerDownloadsIpc() {
       if (!item.isPaused()) {
         item.pause();
       }
-      addDownloadRecord(buildDownloadRecord({
+      const record = buildDownloadRecord({
         id: request.id,
         url: item.getURL(),
         filename: item.getFilename(),
-        status: 'in-progress',
+        status: 'paused',
         path: item.getSavePath(),
-      }));
+      });
+      addDownloadRecord(record);
+      const source = downloadSources.get(request.id) ?? getMainWindow();
+      emitToWindow(source, 'downloads:progress', record);
       downloadMetrics.delete(request.id);
+      downloadSources.delete(request.id);
       return { success: true };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
@@ -334,13 +337,16 @@ export function registerDownloadsIpc() {
       if (item.isPaused()) {
         item.resume();
       }
-      addDownloadRecord(buildDownloadRecord({
+      const record = buildDownloadRecord({
         id: request.id,
         url: item.getURL(),
         filename: item.getFilename(),
         status: 'downloading',
         path: item.getSavePath(),
-      }));
+      });
+      addDownloadRecord(record);
+      const source = downloadSources.get(request.id) ?? getMainWindow();
+      emitToWindow(source, 'downloads:progress', record);
       downloadMetrics.set(request.id, { bytes: item.getReceivedBytes(), timestamp: Date.now() });
       return { success: true };
     } catch (error) {
@@ -356,13 +362,16 @@ export function registerDownloadsIpc() {
     try {
       item.cancel();
       activeDownloads.delete(request.id);
-      addDownloadRecord(buildDownloadRecord({
+      const record = buildDownloadRecord({
         id: request.id,
         url: item.getURL(),
         filename: item.getFilename(),
         status: 'cancelled',
         path: item.getSavePath(),
-      }));
+      });
+      addDownloadRecord(record);
+      const source = downloadSources.get(request.id) ?? getMainWindow();
+      emitToWindow(source, 'downloads:done', record);
       downloadMetrics.delete(request.id);
       return { success: true };
     } catch (error) {

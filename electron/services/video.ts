@@ -16,7 +16,7 @@ export function registerVideoIpc(_win: BrowserWindow) {
     if (!url) return { ok: false, error: 'Missing URL' };
     const outDir = args?.outDir || process.cwd();
     const id = Math.random().toString(36).slice(2);
-      addDownloadRecord({ id, url, status: 'in-progress', createdAt: Date.now() });
+    addDownloadRecord({ id, url, status: 'downloading', createdAt: Date.now() });
     const save = path.join(outDir, `%(title)s.%(ext)s`);
     const proc = spawn('yt-dlp', ['-o', save, url], { shell: true });
     proc.stdout.on('data', (d) => { win?.webContents.send('video:progress', String(d)); });

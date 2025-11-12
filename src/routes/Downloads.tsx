@@ -19,7 +19,7 @@ type DownloadItem = {
   id: string; 
   url: string; 
   filename?: string;
-  status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled' | 'in-progress' | 'blocked'; 
+  status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled' | 'blocked' | 'paused' | 'verifying'; 
   path?: string; 
   createdAt: number;
   progress?: number;
@@ -111,7 +111,7 @@ export default function DownloadsPage() {
     if (item.totalBytes && item.totalBytes > 0) {
       return Math.min(100, Math.round(((item.receivedBytes || 0) / item.totalBytes) * 100));
     }
-    if (item.status === 'completed') return 100;
+    if (item.status === 'completed' || item.status === 'verifying') return 100;
     return 0;
   };
 
@@ -149,7 +149,8 @@ export default function DownloadsPage() {
       case 'blocked':
         return <XCircle size={16} className="text-red-400" />;
       case 'downloading':
-      case 'in-progress':
+      case 'paused':
+      case 'verifying':
         return <Loader size={16} className="text-blue-400 animate-spin" />;
       case 'cancelled':
         return <XCircle size={16} className="text-gray-500" />;
@@ -262,7 +263,7 @@ export default function DownloadsPage() {
                     </div>
                     
                     {/* Progress bar for active downloads */}
-                    {d.status === 'downloading' || d.status === 'in-progress' ? (
+                    {d.status === 'downloading' || d.status === 'paused' ? (
                       <div className="mb-2">
                         <div className="flex items-center justify-between text-xs text-gray-400 mb-1">
                           <span>{formatBytes(d.receivedBytes)} / {formatBytes(d.totalBytes)}</span>
@@ -282,6 +283,13 @@ export default function DownloadsPage() {
                         </div>
                       </div>
                     ) : null}
+
+                    {d.status === 'verifying' && (
+                      <div className="mb-2 text-xs text-blue-300 flex items-center gap-2">
+                        <Loader className="h-4 w-4 animate-spin" />
+                        <span>Verifying download integrity…</span>
+                      </div>
+                    )}
 
                     <div className="text-xs text-gray-400 space-y-1">
                       <div className="flex items-center gap-2">
@@ -307,14 +315,14 @@ export default function DownloadsPage() {
 
                   {/* Action buttons */}
                   <div className="flex items-center gap-2">
-                    {(d.status === 'downloading' || d.status === 'in-progress') && (
+                    {d.status === 'downloading' && (
                       <>
                         <motion.button
                           onClick={async () => {
                             try {
                               await ipc.downloads.pause(d.id);
                               setItems(prev => prev.map(item => 
-                                item.id === d.id ? { ...item, status: 'in-progress' as const } : item
+                                item.id === d.id ? { ...item, status: 'paused' as const } : item
                               ));
                             } catch (error) {
                               console.error('Failed to pause download:', error);
@@ -347,7 +355,7 @@ export default function DownloadsPage() {
                         </motion.button>
                       </>
                     )}
-                    {d.status === 'in-progress' && (
+                    {d.status === 'paused' && (
                       <motion.button
                         onClick={async () => {
                           try {
@@ -365,6 +373,26 @@ export default function DownloadsPage() {
                         title="Resume download"
                       >
                         <Play size={18} />
+                      </motion.button>
+                    )}
+                    {d.status === 'paused' && (
+                      <motion.button
+                        onClick={async () => {
+                          try {
+                            await ipc.downloads.cancel(d.id);
+                            setItems(prev => prev.map(item => 
+                              item.id === d.id ? { ...item, status: 'cancelled' as const } : item
+                            ));
+                          } catch (error) {
+                            console.error('Failed to cancel download:', error);
+                          }
+                        }}
+                        whileHover={{ scale: 1.1 }}
+                        whileTap={{ scale: 0.9 }}
+                        className="p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800 border border-gray-700/50 text-gray-300 hover:text-red-400 transition-colors"
+                        title="Cancel download"
+                      >
+                        <X size={18} />
                       </motion.button>
                     )}
                     {(d.status === 'completed' || d.status === 'failed' || d.status === 'cancelled' || d.status === 'blocked') && d.path && (

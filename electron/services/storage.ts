@@ -31,7 +31,7 @@ export type Download = {
   id: string; 
   url: string; 
   filename?: string;
-  status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled' | 'in-progress' | 'blocked'; 
+  status: 'pending' | 'downloading' | 'completed' | 'failed' | 'cancelled' | 'paused' | 'blocked' | 'verifying'; 
   path?: string; 
   createdAt: number;
   progress?: number;
