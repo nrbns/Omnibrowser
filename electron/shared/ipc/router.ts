@@ -43,8 +43,8 @@ export function registerHandler<TRequest, TResponse>(
   
   handlers.set(fullChannel, { schema, handler: handler as IPCHandler['handler'] });
   
-  // Register with Electron IPC
-  ipcMain.handle(fullChannel, async (event, rawRequest: unknown) => {
+  // Register with Electron IPC - use a wrapper to ensure handler exists
+  const handlerWrapper = async (event: IpcMainInvokeEvent, rawRequest: unknown) => {
     try {
       // Get handler from map (might have been removed)
       const handlerEntry = handlers.get(fullChannel);
@@ -81,7 +81,10 @@ export function registerHandler<TRequest, TResponse>(
         error: message,
       } as IPCResponse;
     }
-  });
+  };
+  
+  // Register the handler with Electron
+  ipcMain.handle(fullChannel, handlerWrapper);
   
   if (process.env.NODE_ENV === 'development') {
     console.log(`[IPC Router] Registered handler for ${fullChannel}`);
