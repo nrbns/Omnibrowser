@@ -16,16 +16,46 @@
     <div id="root" class="app-shell"></div>
     <div id="portal-root"></div>
     <script>
-      try {
-        const t = localStorage.getItem('theme');
-        if (t === 'dark') document.documentElement.classList.add('dark');
-        // Respond to OS theme changes at runtime (if no explicit user choice)
-        const mq = window.matchMedia('(prefers-color-scheme: dark)');
-        mq.addEventListener?.('change', (e) => {
-          if (localStorage.getItem('theme')) return; // user override present
-          document.documentElement.classList.toggle('dark', !!e.matches);
-        });
-      } catch (e) {}
+      // Theme pre-init: prevent FOUC (Flash of Unstyled Content)
+      // This script runs before React loads to apply theme immediately
+      (function() {
+        try {
+          const themeKey = 'omnibrowser:theme-preference';
+          const saved = localStorage.getItem(themeKey);
+          const html = document.documentElement;
+          
+          if (saved === 'dark') {
+            html.classList.add('dark');
+            html.setAttribute('data-theme', 'dark');
+          } else if (saved === 'light') {
+            html.classList.remove('dark');
+            html.setAttribute('data-theme', 'light');
+          } else {
+            // System preference (default)
+            const mq = window.matchMedia('(prefers-color-scheme: dark)');
+            const isDark = mq.matches;
+            if (isDark) {
+              html.classList.add('dark');
+              html.setAttribute('data-theme', 'dark');
+            } else {
+              html.classList.remove('dark');
+              html.setAttribute('data-theme', 'light');
+            }
+          }
+          
+          // Also set body background immediately to prevent white flash
+          if (html.classList.contains('dark')) {
+            document.body.style.backgroundColor = '#0f172a';
+          } else {
+            document.body.style.backgroundColor = '#f8fafc';
+          }
+        } catch (e) {
+          // Fallback: default to dark if localStorage fails
+          document.documentElement.classList.add('dark');
+          document.documentElement.setAttribute('data-theme', 'dark');
+          document.body.style.backgroundColor = '#0f172a';
+        }
+      })();
     </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
