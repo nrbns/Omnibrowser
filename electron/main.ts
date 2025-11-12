@@ -303,6 +303,43 @@ app.whenReady().then(async () => {
     networkControls.disableIPv6();
   }
   
+  // Register stub handlers FIRST, before window creation, to ensure they're ready
+  // This prevents "No handler registered" errors when renderer makes early IPC calls
+  if (disableHeavyServices) {
+    console.log('[Main] Registering stub handlers for disabled services');
+    try {
+      // Register shields stub handler
+      const shieldsSchema = z.object({});
+      registerHandler('shields:getStatus', shieldsSchema, async () => ({
+        adsBlocked: 0,
+        trackersBlocked: 0,
+        httpsUpgrades: 0,
+        cookies3p: 'allow' as const,
+        webrtcBlocked: false,
+        fingerprinting: false,
+      }));
+      console.log('[Main] Shields stub handler registered (early)');
+      
+      // Register privacy sentinel stub handler
+      const PrivacyAuditSchema = z.object({
+        tabId: z.string().optional().nullable(),
+      });
+      registerHandler('privacy:sentinel:audit', PrivacyAuditSchema, async () => ({
+        score: 100,
+        grade: 'high' as const,
+        trackers: [],
+        thirdPartyHosts: [],
+        message: 'Privacy Sentinel is disabled',
+        suggestions: [],
+        timestamp: Date.now(),
+        ai: null,
+      }));
+      console.log('[Main] Privacy Sentinel stub handler registered (early)');
+    } catch (error) {
+      console.error('[Main] Failed to register stub handlers:', error);
+    }
+  }
+  
   // Start session persistence (auto-save every 2s)
   const { startSessionPersistence, loadSessionState, restoreWindowTabs, registerSessionStateIpc } = await import('./services/session-persistence');
   console.log('[Main] Session persistence module loaded');
@@ -399,24 +436,8 @@ app.whenReady().then(async () => {
       const { registerShieldsIpc } = await import('./services/shields-ipc');
       registerShieldsIpc();
     } else {
-      console.log('[Main] Shields IPC disabled - registering stub handler');
-      // Register stub handler to prevent "No handler registered" errors
-      try {
-        const schema = z.object({});
-        registerHandler('shields:getStatus', schema, async () => ({
-          adsBlocked: 0,
-          trackersBlocked: 0,
-          httpsUpgrades: 0,
-          cookies3p: 'allow' as const,
-          webrtcBlocked: false,
-          fingerprinting: false,
-        }));
-        const { isHandlerRegistered } = await import('./shared/ipc/router');
-        const isRegistered = isHandlerRegistered('shields:getStatus');
-        console.log('[Main] Shields stub handler registered successfully, verified:', isRegistered);
-      } catch (error) {
-        console.error('[Main] Failed to register Shields stub handler:', error);
-      }
+      // Stub handler already registered earlier, just log
+      console.log('[Main] Shields IPC disabled (stub handler already registered)');
     }
     registerVPNIpc();
     registerNetworkControlsIpc();
@@ -459,28 +480,8 @@ app.whenReady().then(async () => {
       if (process.env.NODE_ENV === 'development') {
         console.warn('[Dev] Privacy Sentinel disabled to improve stability on this platform');
       }
-      // Register stub handler to prevent "No handler registered" errors
-      // Use the same schema as the real handler
-      try {
-        const PrivacyAuditSchema = z.object({
-          tabId: z.string().optional().nullable(),
-        });
-        registerHandler('privacy:sentinel:audit', PrivacyAuditSchema, async () => ({
-          score: 100,
-          grade: 'high' as const,
-          trackers: [],
-          thirdPartyHosts: [],
-          message: 'Privacy Sentinel is disabled',
-          suggestions: [],
-          timestamp: Date.now(),
-          ai: null,
-        }));
-        const { isHandlerRegistered } = await import('./shared/ipc/router');
-        const isRegistered = isHandlerRegistered('privacy:sentinel:audit');
-        console.log('[Main] Privacy Sentinel stub handler registered successfully, verified:', isRegistered);
-      } catch (error) {
-        console.error('[Main] Failed to register Privacy Sentinel stub handler:', error);
-      }
+      // Stub handler already registered earlier, just log
+      console.log('[Main] Privacy Sentinel disabled (stub handler already registered)');
     }
     registerTrustWeaverIpc();
     try {
