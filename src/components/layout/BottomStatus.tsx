@@ -503,7 +503,7 @@ export function BottomStatus() {
       className="px-4 py-2 bg-gray-900/90 backdrop-blur-sm border-t border-gray-700/50 flex flex-col gap-2"
       data-onboarding="status-bar"
     >
-      <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs text-gray-300">
+      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 md:gap-3 text-xs text-gray-300">
         <PrivacySwitch />
 
         <StatusMeter

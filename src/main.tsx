@@ -115,6 +115,7 @@ const HistoryPage = React.lazy(() => import('./routes/History'));
 const DownloadsPage = React.lazy(() => import('./routes/Downloads'));
 const WatchersPage = React.lazy(() => import('./routes/Watchers'));
 const VideoPage = React.lazy(() => import('./routes/Video'));
+const ConsentTimelinePage = React.lazy(() => import('./routes/ConsentTimeline'));
 
 // Loading component
 function LoadingFallback() {
@@ -233,6 +234,14 @@ const router = createBrowserRouter(
           element: (
             <Suspense fallback={<LoadingFallback />}>
               <VideoPage />
+            </Suspense>
+          ) 
+        },
+        { 
+          path: 'consent-timeline', 
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <ConsentTimelinePage />
             </Suspense>
           ) 
         },
