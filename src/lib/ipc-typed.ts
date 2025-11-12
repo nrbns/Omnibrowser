@@ -296,15 +296,20 @@ export async function ipcCall<TRequest, TResponse = unknown>(
   const userAgent = hasUserAgent ? navigator.userAgent : '';
   const userAgentHasElectron = userAgent.includes('Electron');
   const hasElectronRuntime = isElectronRuntime();
-  const hasWindowIpc = typeof window !== 'undefined' && window.ipc && typeof window.ipc.invoke === 'function';
+  // Check for window.ipc OR window.api (legacy API) - both indicate Electron
+  const hasWindowIpc = typeof window !== 'undefined' && (
+    (window.ipc && typeof window.ipc.invoke === 'function') ||
+    (window.api && typeof window.api.ping === 'function')
+  );
   
   // Check if we're in a regular web browser (Chrome, Firefox, Safari, Edge)
-  const isRegularBrowser = userAgent.includes('Chrome') || 
-                          userAgent.includes('Firefox') || 
-                          userAgent.includes('Safari') || 
+  // But exclude Electron's Chrome user agent
+  const isRegularBrowser = userAgent.includes('Chrome') && !userAgent.includes('Electron') ||
+                          userAgent.includes('Firefox') ||
+                          (userAgent.includes('Safari') && !userAgent.includes('Chrome')) ||
                           userAgent.includes('Edg');
   
-  // If we have window.ipc, we're definitely in Electron (even if other checks fail)
+  // If we have window.ipc or window.api, we're definitely in Electron (even if other checks fail)
   // Also, if we're NOT in a regular browser, assume Electron (more aggressive detection)
   const isElectron = hasElectronRuntime || userAgentHasElectron || hasWindowIpc || !isRegularBrowser;
 
