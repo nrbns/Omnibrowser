@@ -130,6 +130,11 @@ const FALLBACK_CHANNELS: Record<string, () => unknown> = {
   'identity:add': () => ({ id: 'demo', domain: 'example.com', username: 'demo', createdAt: Date.now(), updatedAt: Date.now() } satisfies IdentityCredential),
   'identity:remove': () => ({ success: false }),
   'identity:reveal': () => ({ id: 'demo', secret: 'demo' } satisfies IdentityRevealPayload),
+  'consent:list': () => [],
+  'shields:getStatus': () => ({ adsBlocked: 0, trackersBlocked: 0, httpsUpgrades: 0, cookies3p: 'allow', webrtcBlocked: false, fingerprinting: false }),
+  'history:search': () => [],
+  'performance:battery:update': () => ({ success: true }),
+  'session:lastSnapshotSummary': () => null,
 };
 
 const reportedMissingChannels = new Set<string>();
