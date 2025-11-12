@@ -8,6 +8,7 @@ import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { z } from 'zod';
+import { registerHandler } from './shared/ipc/router';
 
 import { applySecurityPolicies } from './security';
 import { randomUUID } from 'node:crypto';
@@ -400,7 +401,6 @@ app.whenReady().then(async () => {
     } else {
       console.log('[Main] Shields IPC disabled - registering stub handler');
       // Register stub handler to prevent "No handler registered" errors
-      const { registerHandler } = await import('./shared/ipc/router');
       registerHandler('shields:getStatus', z.object({}), async () => ({
         adsBlocked: 0,
         trackersBlocked: 0,
@@ -409,6 +409,7 @@ app.whenReady().then(async () => {
         webrtcBlocked: false,
         fingerprinting: false,
       }));
+      console.log('[Main] Shields stub handler registered');
     }
     registerVPNIpc();
     registerNetworkControlsIpc();
@@ -452,7 +453,6 @@ app.whenReady().then(async () => {
         console.warn('[Dev] Privacy Sentinel disabled to improve stability on this platform');
       }
       // Register stub handler to prevent "No handler registered" errors
-      const { registerHandler } = await import('./shared/ipc/router');
       // Use the same schema as the real handler
       const PrivacyAuditSchema = z.object({
         tabId: z.string().optional().nullable(),
