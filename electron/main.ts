@@ -7,6 +7,7 @@ import 'source-map-support/register.js';
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { z } from 'zod';
 
 import { applySecurityPolicies } from './security';
 import { randomUUID } from 'node:crypto';
@@ -400,7 +401,6 @@ app.whenReady().then(async () => {
       console.log('[Main] Shields IPC disabled - registering stub handler');
       // Register stub handler to prevent "No handler registered" errors
       const { registerHandler } = await import('./shared/ipc/router');
-      const { z } = await import('zod');
       registerHandler('shields:getStatus', z.object({}), async () => ({
         adsBlocked: 0,
         trackersBlocked: 0,
@@ -453,7 +453,6 @@ app.whenReady().then(async () => {
       }
       // Register stub handler to prevent "No handler registered" errors
       const { registerHandler } = await import('./shared/ipc/router');
-      const { z } = await import('zod');
       // Use the same schema as the real handler
       const PrivacyAuditSchema = z.object({
         tabId: z.string().optional().nullable(),
