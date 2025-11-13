@@ -58,7 +58,8 @@ export default defineConfig({
     }
   },
   optimizeDeps: {
-    exclude: ['electron']
+    exclude: ['electron'],
+    include: ['lightweight-charts']
   },
   server: {
     port: 5173,

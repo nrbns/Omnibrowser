@@ -511,6 +511,7 @@ export function registerTabIpc(win: BrowserWindow) {
     view.webContents.on('page-title-updated', () => emit());
     view.webContents.on('did-navigate', async (_e2, navUrl) => {
       emit();
+      markSessionDirty(); // Mark session as dirty when tab navigates
       sendNavigationState();
 
       try {
@@ -604,6 +605,7 @@ export function registerTabIpc(win: BrowserWindow) {
     }
 
     emit();
+    markSessionDirty(); // Mark session as dirty when tab is created
     setTimeout(sendNavigationState, 150);
 
     const optimizer = getVideoCallOptimizer();
@@ -766,6 +768,7 @@ export function registerTabIpc(win: BrowserWindow) {
       emit();
     }
 
+    markSessionDirty(); // Mark session as dirty when container is set
     return { success: true };
   });
 
@@ -818,11 +821,14 @@ export function registerTabIpc(win: BrowserWindow) {
     }
 
     emit();
+    markSessionDirty(); // Mark session as dirty when tab is moved
     return { success: true };
   };
 
   registerHandler('tabs:close', TabCloseRequest, async (_event, request) => {
-    return closeTabInternal(request.id);
+    const result = await closeTabInternal(request.id);
+    markSessionDirty(); // Mark session as dirty when tab is closed
+    return result;
   });
 
   registerHandler(
@@ -1020,6 +1026,7 @@ export function registerTabIpc(win: BrowserWindow) {
     
     // Tab exists and is valid - activate it
     setActiveTab(win, request.id);
+    markSessionDirty(); // Mark session as dirty when tab is activated
     
     // Wake tab if sleeping
     try {
@@ -1177,6 +1184,7 @@ export function registerTabIpc(win: BrowserWindow) {
       
       try {
         await rec.view.webContents.loadURL(finalUrl);
+        markSessionDirty(); // Mark session as dirty when tab navigates
       } catch (err: any) {
         // ERR_ABORTED (-3) is common and often harmless - it occurs when:
         // 1. A page redirects quickly (e.g., Google redirects)

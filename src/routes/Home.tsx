@@ -16,8 +16,23 @@ export default function Home() {
   const mode = useAppStore(s=>s.mode);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Listen for fullscreen changes
+  // Initialize fullscreen state on mount - ensure it starts as false
   useEffect(() => {
+    // Force initial state to false (window should not start in fullscreen)
+    setIsFullscreen(false);
+    
+    // Check initial fullscreen state after a brief delay
+    const checkFullscreen = () => {
+      const isCurrentlyFullscreen = !!(document.fullscreenElement || (window as any).webkitFullscreenElement || (window as any).mozFullScreenElement);
+      if (isCurrentlyFullscreen !== isFullscreen) {
+        setIsFullscreen(isCurrentlyFullscreen);
+      }
+    };
+    
+    // Check after a brief delay to ensure window is ready
+    const timeoutId = setTimeout(checkFullscreen, 100);
+    
+    // Listen for fullscreen changes from Electron
     const handleFullscreen = (data: { fullscreen: boolean }) => {
       setIsFullscreen(data.fullscreen);
     };
@@ -25,7 +40,18 @@ export default function Home() {
     // Use the IPC event bus
     const unsubscribe = ipcEvents.on<{ fullscreen: boolean }>('app:fullscreen-changed', handleFullscreen);
     
-    return unsubscribe;
+    // Also listen for browser fullscreen changes
+    document.addEventListener('fullscreenchange', checkFullscreen);
+    document.addEventListener('webkitfullscreenchange', checkFullscreen);
+    document.addEventListener('mozfullscreenchange', checkFullscreen);
+    
+    return () => {
+      clearTimeout(timeoutId);
+      unsubscribe();
+      document.removeEventListener('fullscreenchange', checkFullscreen);
+      document.removeEventListener('webkitfullscreenchange', checkFullscreen);
+      document.removeEventListener('mozfullscreenchange', checkFullscreen);
+    };
   }, []);
   
   return (

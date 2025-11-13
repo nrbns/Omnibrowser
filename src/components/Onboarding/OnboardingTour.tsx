@@ -583,9 +583,8 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
         e.stopImmediatePropagation();
         e.stopPropagation();
         try {
-          setTimeout(() => {
-            handleSkip();
-          }, 0);
+          // Call immediately, don't wait
+          handleSkip();
         } catch (err) {
           console.error('[Onboarding] Error in handleSkip from native listener:', err);
         }
@@ -669,9 +668,11 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
       }
 
       if (skipButton) {
-        skipButton.addEventListener('click', handleSkipClick, true);
-        skipButton.addEventListener('mousedown', handleSkipClick, true);
-        skipButton.addEventListener('pointerdown', handleSkipClick, true);
+        // Use capture phase to catch events early
+        skipButton.addEventListener('click', handleSkipClick, { capture: true, passive: false });
+        skipButton.addEventListener('mousedown', handleSkipClick, { capture: true, passive: false });
+        skipButton.addEventListener('pointerdown', handleSkipClick, { capture: true, passive: false });
+        skipButton.addEventListener('touchstart', handleSkipClick, { capture: true, passive: false });
         console.log('[Onboarding] ✅ Native listeners attached to Skip button');
       } else {
         console.warn('[Onboarding] ⚠️ Skip button not found!');
@@ -708,9 +709,10 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
           (nextButton as any).onmousedown = null;
         }
         if (skipButton) {
-          skipButton.removeEventListener('click', handleSkipClick, true);
-          skipButton.removeEventListener('mousedown', handleSkipClick, true);
-          skipButton.removeEventListener('pointerdown', handleSkipClick, true);
+          skipButton.removeEventListener('click', handleSkipClick, { capture: true } as any);
+          skipButton.removeEventListener('mousedown', handleSkipClick, { capture: true } as any);
+          skipButton.removeEventListener('pointerdown', handleSkipClick, { capture: true } as any);
+          skipButton.removeEventListener('touchstart', handleSkipClick, { capture: true } as any);
         }
         if (backButton) {
           backButton.removeEventListener('click', handleBackClick, true);
@@ -781,7 +783,8 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
         e.preventDefault();
         e.stopImmediatePropagation();
         e.stopPropagation();
-        setTimeout(() => handleSkip(), 0);
+        // Call immediately
+        handleSkip();
         return false;
       }
       if (isBackButton) {
@@ -824,6 +827,83 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
     };
   }, [onboardingVisible, goNext, handleSkip, goBack, finishOnboarding, onClose, stepIndex, isNextDisabled, canGoBack]);
 
+  // Keyboard navigation
+  useEffect(() => {
+    if (!onboardingVisible) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't handle if user is typing in an input field
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+        return;
+      }
+
+      console.log('[Onboarding] Keyboard event:', e.key);
+
+      switch (e.key) {
+        case 'Enter':
+          // Enter key - go to next step or finish
+          e.preventDefault();
+          e.stopPropagation();
+          if (!isNextDisabled) {
+            console.log('[Onboarding] Enter pressed - calling goNext()');
+            goNext();
+          } else {
+            console.log('[Onboarding] Enter pressed but Next is disabled');
+          }
+          break;
+
+        case 'ArrowRight':
+          // Right arrow - go to next step or finish
+          e.preventDefault();
+          e.stopPropagation();
+          if (!isNextDisabled) {
+            console.log('[Onboarding] ArrowRight pressed - calling goNext()');
+            goNext();
+          } else {
+            console.log('[Onboarding] ArrowRight pressed but Next is disabled');
+          }
+          break;
+
+        case 'ArrowLeft':
+          // Left arrow - go back
+          e.preventDefault();
+          e.stopPropagation();
+          if (canGoBack) {
+            console.log('[Onboarding] ArrowLeft pressed - calling goBack()');
+            goBack();
+          } else {
+            console.log('[Onboarding] ArrowLeft pressed but cannot go back');
+          }
+          break;
+
+        case 'Escape':
+          // Escape key - skip onboarding
+          e.preventDefault();
+          e.stopPropagation();
+          console.log('[Onboarding] Escape pressed - calling handleSkip()');
+          handleSkip();
+          break;
+
+        default:
+          // Other keys - do nothing
+          break;
+      }
+    };
+
+    // Add keyboard listener
+    window.addEventListener('keydown', handleKeyDown, true);
+    document.addEventListener('keydown', handleKeyDown, true);
+
+    console.log('[Onboarding] Keyboard listeners attached');
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+      document.removeEventListener('keydown', handleKeyDown, true);
+      console.log('[Onboarding] Keyboard listeners removed');
+    };
+  }, [onboardingVisible, goNext, handleSkip, goBack, isNextDisabled, canGoBack]);
+
   return (
     <AnimatePresence mode="wait">
       {onboardingVisible && (
@@ -835,7 +915,17 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
         transition={{ duration: 0.2 }}
         className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70 backdrop-blur-sm"
         style={{ pointerEvents: 'auto' }}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="onboarding-title"
         onMouseDown={(e) => {
+          // Prevent backdrop from capturing clicks on buttons
+          const target = e.target as HTMLElement;
+          if (target.closest('[data-onboarding-skip]') || target.closest('[data-onboarding-next]') || target.closest('[data-onboarding-back]') || target.closest('[data-onboarding-close]')) {
+            // Let button handle the event
+            return;
+          }
           // Prevent backdrop from capturing clicks
           if (e.target === e.currentTarget) {
             console.log('[Onboarding] Backdrop clicked - preventing default');
@@ -844,6 +934,12 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
           }
         }}
         onClick={(e) => {
+          // Prevent backdrop from capturing clicks on buttons
+          const target = e.target as HTMLElement;
+          if (target.closest('[data-onboarding-skip]') || target.closest('[data-onboarding-next]') || target.closest('[data-onboarding-back]') || target.closest('[data-onboarding-close]')) {
+            // Let button handle the event
+            return;
+          }
           // Only stop propagation if clicking directly on backdrop (not children)
           if (e.target === e.currentTarget) {
             console.log('[Onboarding] Backdrop clicked - stopping propagation');
@@ -874,6 +970,12 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
             className="relative w-[min(520px,90vw)] rounded-3xl border border-slate-700/70 bg-slate-950/95 p-6 text-gray-100 shadow-2xl z-[1001]"
             style={{ pointerEvents: 'auto', position: 'relative' }}
             onClick={(e) => {
+              // Only stop propagation if clicking directly on modal container (not buttons)
+              const target = e.target as HTMLElement;
+              if (target === e.currentTarget || target.closest('[data-onboarding-skip]') || target.closest('[data-onboarding-next]') || target.closest('[data-onboarding-back]') || target.closest('[data-onboarding-close]')) {
+                // Don't stop propagation for buttons - let them handle their own events
+                return;
+              }
               // Prevent clicks on modal from bubbling to backdrop
               e.stopPropagation();
             }}
@@ -899,7 +1001,7 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
             Step {stepIndex + 1} of {TOTAL_STEPS}
           </div>
           <div className="mt-2" aria-live="polite">
-            <h2 className="text-xl font-semibold text-white">{step.title}</h2>
+            <h2 id="onboarding-title" className="text-xl font-semibold text-white">{step.title}</h2>
             {step.description && (
               <p className="mt-3 text-sm leading-relaxed text-gray-300">{step.description}</p>
             )}
@@ -1030,7 +1132,14 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
             >
               Back
             </button>
-            <div className="flex items-center gap-2" style={{ pointerEvents: 'auto', position: 'relative', zIndex: 1003 }}>
+            <div 
+              className="flex items-center gap-2" 
+              style={{ pointerEvents: 'auto', position: 'relative', zIndex: 1004 }}
+              onClick={(e) => {
+                // Prevent clicks on container from interfering
+                e.stopPropagation();
+              }}
+            >
               <button
                 type="button"
                 data-onboarding-skip
@@ -1040,8 +1149,32 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
                   e.stopPropagation();
                   handleSkip();
                 }}
-                className="rounded-lg border border-slate-700/60 px-3 py-2 text-gray-400 transition hover:border-slate-500/80 hover:text-gray-200 cursor-pointer"
-                style={{ pointerEvents: 'auto', position: 'relative', zIndex: 1003, touchAction: 'manipulation' }}
+                onMouseDown={(e) => {
+                  console.log('[Onboarding] Skip button mousedown via React');
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleSkip();
+                }}
+                onPointerDown={(e) => {
+                  console.log('[Onboarding] Skip button pointerdown via React');
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleSkip();
+                }}
+                className="rounded-lg border border-slate-700/60 px-3 py-2 text-gray-400 transition hover:border-slate-500/80 hover:text-gray-200 hover:bg-slate-800/50 cursor-pointer active:scale-95 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                style={{ 
+                  pointerEvents: 'auto', 
+                  position: 'relative', 
+                  zIndex: 1005, 
+                  touchAction: 'manipulation', 
+                  userSelect: 'none',
+                  WebkitUserSelect: 'none',
+                  MozUserSelect: 'none',
+                  msUserSelect: 'none',
+                  isolation: 'isolate'
+                }}
+                tabIndex={0}
+                aria-label="Skip onboarding"
               >
                 Skip
               </button>

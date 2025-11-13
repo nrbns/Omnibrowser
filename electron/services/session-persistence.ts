@@ -640,3 +640,14 @@ export function forceSaveSessionState(): Promise<void> {
   return saveSessionState();
 }
 
+/**
+ * Notify that session state has changed and should be saved
+ * This is called from tabs.ts when tabs are created/modified/deleted
+ */
+export function notifySessionDirty(): void {
+  // Trigger a save (but don't block if it fails)
+  saveSessionState().catch(() => {
+    // Silent fail - will retry on next interval
+  });
+}
+

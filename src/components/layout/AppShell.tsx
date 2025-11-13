@@ -210,6 +210,35 @@ export function AppShell() {
   const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
   const [consentRequest, setConsentRequest] = useState<ConsentRequest | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  
+  // Initialize fullscreen state on mount - ensure it starts as false
+  useEffect(() => {
+    // Force initial state to false (window should not start in fullscreen)
+    setIsFullscreen(false);
+    
+    // Check initial fullscreen state after a brief delay to ensure window is ready
+    const checkFullscreen = () => {
+      const isCurrentlyFullscreen = !!(document.fullscreenElement || (window as any).webkitFullscreenElement || (window as any).mozFullScreenElement);
+      if (isCurrentlyFullscreen !== isFullscreen) {
+        setIsFullscreen(isCurrentlyFullscreen);
+      }
+    };
+    
+    // Check after a brief delay to ensure window is ready
+    const timeoutId = setTimeout(checkFullscreen, 100);
+    
+    // Listen for fullscreen changes
+    document.addEventListener('fullscreenchange', checkFullscreen);
+    document.addEventListener('webkitfullscreenchange', checkFullscreen);
+    document.addEventListener('mozfullscreenchange', checkFullscreen);
+    
+    return () => {
+      clearTimeout(timeoutId);
+      document.removeEventListener('fullscreenchange', checkFullscreen);
+      document.removeEventListener('webkitfullscreenchange', checkFullscreen);
+      document.removeEventListener('mozfullscreenchange', checkFullscreen);
+    };
+  }, []);
   const [clipperActive, setClipperActive] = useState(false);
   const [readerActive, setReaderActive] = useState(false);
   const onboardingVisible = useOnboardingStore((state) => state.visible);
@@ -439,7 +468,7 @@ export function AppShell() {
     [],
   );
 
-  // Listen for fullscreen changes
+  // Listen for fullscreen changes from Electron IPC
   useEffect(() => {
     const handleFullscreen = (data: { fullscreen: boolean }) => {
       setIsFullscreen(data.fullscreen);

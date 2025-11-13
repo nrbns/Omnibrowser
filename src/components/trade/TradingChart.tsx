@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { createChart, IChartApi, ISeriesApi, ColorType, UTCTimestamp } from 'lightweight-charts';
+import * as LightweightCharts from 'lightweight-charts';
+import type { IChartApi, ISeriesApi, UTCTimestamp } from 'lightweight-charts';
 
 export interface CandleData {
   time: number;
@@ -37,9 +38,9 @@ export default function TradingChart({ symbol, timeframe, data, onTimeframeChang
     if (!chartContainerRef.current) return;
 
     // Create chart
-    const chart = createChart(chartContainerRef.current, {
+    const chart = LightweightCharts.createChart(chartContainerRef.current, {
       layout: {
-        background: { type: ColorType.Solid, color: '#171717' },
+        background: { type: LightweightCharts.ColorType.Solid, color: '#171717' },
         textColor: '#d4d4d4',
       },
       grid: {
@@ -61,7 +62,16 @@ export default function TradingChart({ symbol, timeframe, data, onTimeframeChang
     chartRef.current = chart;
 
     // Create candlestick series
-    const candlestickSeries = chart.addCandlestickSeries({
+    const addSeries = chart.addCandlestickSeries ?? (chart as any).addCandlestickSeries;
+
+    if (typeof addSeries !== 'function') {
+      console.error('[TradingChart] addCandlestickSeries is not available on chart instance', chart);
+      return () => {
+        chart.remove();
+      };
+    }
+
+    const candlestickSeries = addSeries({
       upColor: '#22c55e',
       downColor: '#ef4444',
       borderVisible: false,

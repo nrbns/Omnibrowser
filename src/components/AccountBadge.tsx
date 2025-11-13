@@ -15,8 +15,32 @@ export default function AccountBadge() {
 }
 
 export async function openWithAccount(targetUrl: string, accountId: string) {
-  if (accountId && accountId !== 'default') await (window as any).api?.tabs?.createWithProfile?.(accountId, targetUrl);
-  else await (window as any).api?.tabs?.create?.(targetUrl);
+  try {
+    if (!targetUrl || !targetUrl.trim()) {
+      console.warn('[AccountBadge] Empty URL provided');
+      return;
+    }
+    
+    // Ensure URL is properly formatted
+    const url = targetUrl.trim();
+    
+    if (accountId && accountId !== 'default') {
+      const result = await (window as any).api?.tabs?.createWithProfile?.(accountId, url);
+      if (!result || result.error) {
+        console.error('[AccountBadge] Failed to create tab with profile:', result?.error);
+        throw new Error(result?.error || 'Failed to create tab');
+      }
+    } else {
+      const result = await (window as any).api?.tabs?.create?.(url);
+      if (!result || result.error) {
+        console.error('[AccountBadge] Failed to create tab:', result?.error);
+        throw new Error(result?.error || 'Failed to create tab');
+      }
+    }
+  } catch (error) {
+    console.error('[AccountBadge] Error opening URL:', error);
+    throw error;
+  }
 }
 
 
