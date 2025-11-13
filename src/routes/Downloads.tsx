@@ -267,22 +267,29 @@ export default function DownloadsPage() {
                     
                     {/* Progress bar for active downloads */}
                     {d.status === 'downloading' || d.status === 'paused' ? (
-                      <div className="mb-2">
-                        <div className="flex items-center justify-between text-xs text-gray-400 mb-1">
-                          <span>{formatBytes(d.receivedBytes)} / {formatBytes(d.totalBytes)}</span>
-                          <span>{calcPercent(d)}%</span>
+                      <div className="mb-3">
+                        <div className="flex items-center justify-between text-xs text-gray-300 mb-1.5">
+                          <span className="font-medium">{formatBytes(d.receivedBytes)} / {formatBytes(d.totalBytes)}</span>
+                          <span className="font-semibold text-blue-400">{calcPercent(d)}%</span>
                         </div>
-                        <div className="w-full bg-gray-800 rounded-full h-2 overflow-hidden">
+                        <div className="w-full bg-gray-800 rounded-full h-2.5 overflow-hidden mb-2">
                           <motion.div
-                            className="h-full bg-blue-500"
+                            className="h-full bg-gradient-to-r from-blue-500 to-cyan-500"
                             initial={{ width: 0 }}
                             animate={{ width: `${calcPercent(d)}%` }}
                             transition={{ duration: 0.3 }}
                           />
                         </div>
-                        <div className="flex items-center justify-between text-xs text-gray-500 mt-1">
-                          <span>Speed: {formatSpeed(d.speedBytesPerSec)}</span>
-                          <span>ETA: {formatEta(d.etaSeconds)}</span>
+                        <div className="flex items-center gap-4 text-xs font-medium">
+                          <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-blue-500/10 border border-blue-500/30">
+                            <span className="text-blue-300">Speed:</span>
+                            <span className="text-blue-200 font-semibold">{formatSpeed(d.speedBytesPerSec)}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-purple-500/10 border border-purple-500/30">
+                            <Clock size={12} className="text-purple-300" />
+                            <span className="text-purple-300">ETA:</span>
+                            <span className="text-purple-200 font-semibold">{formatEta(d.etaSeconds)}</span>
+                          </div>
                         </div>
                       </div>
                     ) : null}
@@ -331,12 +338,13 @@ export default function DownloadsPage() {
                               console.error('Failed to pause download:', error);
                             }
                           }}
-                          whileHover={{ scale: 1.1 }}
-                          whileTap={{ scale: 0.9 }}
-                          className="p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800 border border-gray-700/50 text-gray-300 hover:text-yellow-400 transition-colors"
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-medium text-xs transition-colors"
                           title="Pause download"
                         >
-                          <Pause size={18} />
+                          <Pause size={16} />
+                          <span>Pause</span>
                         </motion.button>
                         <motion.button
                           onClick={async () => {
@@ -346,57 +354,60 @@ export default function DownloadsPage() {
                                 item.id === d.id ? { ...item, status: 'cancelled' as const } : item
                               ));
                             } catch (error) {
-                              console.error('Failed to cancel download:', error);
+                              console.error('Failed to stop download:', error);
                             }
                           }}
-                          whileHover={{ scale: 1.1 }}
-                          whileTap={{ scale: 0.9 }}
-                          className="p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800 border border-gray-700/50 text-gray-300 hover:text-red-400 transition-colors"
-                          title="Cancel download"
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-200 font-medium text-xs transition-colors"
+                          title="Stop download"
                         >
-                          <X size={18} />
+                          <X size={16} />
+                          <span>Stop</span>
                         </motion.button>
                       </>
                     )}
                     {d.status === 'paused' && (
-                      <motion.button
-                        onClick={async () => {
-                          try {
-                            await ipc.downloads.resume(d.id);
-                            setItems(prev => prev.map(item => 
-                              item.id === d.id ? { ...item, status: 'downloading' as const } : item
-                            ));
-                          } catch (error) {
-                            console.error('Failed to resume download:', error);
-                          }
-                        }}
-                        whileHover={{ scale: 1.1 }}
-                        whileTap={{ scale: 0.9 }}
-                        className="p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800 border border-gray-700/50 text-gray-300 hover:text-green-400 transition-colors"
-                        title="Resume download"
-                      >
-                        <Play size={18} />
-                      </motion.button>
-                    )}
-                    {d.status === 'paused' && (
-                      <motion.button
-                        onClick={async () => {
-                          try {
-                            await ipc.downloads.cancel(d.id);
-                            setItems(prev => prev.map(item => 
-                              item.id === d.id ? { ...item, status: 'cancelled' as const } : item
-                            ));
-                          } catch (error) {
-                            console.error('Failed to cancel download:', error);
-                          }
-                        }}
-                        whileHover={{ scale: 1.1 }}
-                        whileTap={{ scale: 0.9 }}
-                        className="p-2 rounded-lg bg-gray-800/60 hover:bg-gray-800 border border-gray-700/50 text-gray-300 hover:text-red-400 transition-colors"
-                        title="Cancel download"
-                      >
-                        <X size={18} />
-                      </motion.button>
+                      <>
+                        <motion.button
+                          onClick={async () => {
+                            try {
+                              await ipc.downloads.resume(d.id);
+                              setItems(prev => prev.map(item => 
+                                item.id === d.id ? { ...item, status: 'downloading' as const } : item
+                              ));
+                            } catch (error) {
+                              console.error('Failed to resume download:', error);
+                            }
+                          }}
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-500/20 hover:bg-green-500/30 border border-green-500/40 text-green-200 font-medium text-xs transition-colors"
+                          title="Resume download"
+                        >
+                          <Play size={16} />
+                          <span>Resume</span>
+                        </motion.button>
+                        <motion.button
+                          onClick={async () => {
+                            try {
+                              await ipc.downloads.cancel(d.id);
+                              setItems(prev => prev.map(item => 
+                                item.id === d.id ? { ...item, status: 'cancelled' as const } : item
+                              ));
+                            } catch (error) {
+                              console.error('Failed to stop download:', error);
+                            }
+                          }}
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-200 font-medium text-xs transition-colors"
+                          title="Stop download"
+                        >
+                          <X size={16} />
+                          <span>Stop</span>
+                        </motion.button>
+                      </>
                     )}
                     {(d.status === 'completed' || d.status === 'failed' || d.status === 'cancelled' || d.status === 'blocked') && d.path && (
                       <>

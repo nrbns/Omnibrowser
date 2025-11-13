@@ -59,11 +59,16 @@ export default function Home() {
       {(mode === 'Browse' || !mode || mode === 'Research') && (
         <div className="flex-1 w-full relative">
           <MainView />
-          {/* Show OmniDesk when no tabs */}
-          <OmniDesk />
+          {/* Show OmniDesk when no tabs or active tab is about:blank (search page) */}
+          {/* OmniDesk will handle its own visibility logic */}
+          <div className="absolute inset-0 z-20 pointer-events-none">
+            <div className="pointer-events-auto h-full w-full">
+              <OmniDesk variant="overlay" />
+            </div>
+          </div>
           {/* Show Research panel overlay when in Research mode and not fullscreen */}
           {mode === 'Research' && !isFullscreen && (
-            <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute inset-0 pointer-events-none z-30">
               <div className="pointer-events-auto h-full w-full">
                 <ResearchSplit />
               </div>

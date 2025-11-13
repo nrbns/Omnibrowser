@@ -26,15 +26,18 @@ import {
   ClipboardCopy,
   FileSearch,
   Sparkle,
+  Loader2,
 } from 'lucide-react';
 import { useTabsStore } from '../state/tabsStore';
 import { useAppStore } from '../state/appStore';
 import { ipc } from '../lib/ipc-typed';
 import { useNavigate } from 'react-router-dom';
 import { ipcEvents } from '../lib/ipc-events';
+import { AIResponsePane } from './AIResponsePane';
 import { useEfficiencyStore } from '../state/efficiencyStore';
 import { useWorkspaceEventsStore } from '../state/workspaceEventsStore';
 import { useAgentStreamStore, type StreamStatus } from '../state/agentStreamStore';
+import { createFallbackTab } from '../lib/tabFallback';
 // import { CardSkeleton, ListSkeleton } from './common/Skeleton'; // Reserved for future use
 
 type OmniDeskVariant = 'overlay' | 'split';
@@ -61,8 +64,9 @@ type Workspace = {
 const SEARCH_ENDPOINT = 'https://duckduckgo.com/?q=';
 
 const suggestedPrompts = [
+  '@live explain quantum computing basics',
   'graph the AI ethics landscape',
-  'summarize today’s markets',
+  "summarize today's markets",
   'compare battery life of M-series laptops',
   'find regenerative design principles',
 ];
@@ -192,6 +196,9 @@ export function OmniDesk({ variant = 'overlay', forceShow = false }: OmniDeskPro
   const { recentWorkspaces, continueSessions, reload, loadingWorkspaces, loadingSessions } = useDashboardData();
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [aiResponseOpen, setAiResponseOpen] = useState(false);
+  const [aiQuery, setAiQuery] = useState('');
   const efficiencyLabel = useEfficiencyStore((state) => state.label);
   const efficiencyBadge = useEfficiencyStore((state) => state.badge);
   const efficiencySnapshot = useEfficiencyStore((state) => state.snapshot);
@@ -552,40 +559,114 @@ export function OmniDesk({ variant = 'overlay', forceShow = false }: OmniDeskPro
   const handleSearchLaunch = useCallback(
     async (value: string) => {
       const query = value.trim();
-      if (!query) return;
+      if (!query) {
+        console.warn('[OmniDesk] Empty search query, ignoring');
+        return;
+      }
 
+      if (searchLoading) {
+        console.warn('[OmniDesk] Search already in progress, ignoring');
+        return;
+      }
+
+      setSearchLoading(true);
+      console.log('[OmniDesk] Launching search:', query);
+
+      // Check if query starts with @live or @ask for AI streaming
+      const isAIQuery = query.trim().startsWith('@live') || query.trim().startsWith('@ask');
+      
+      if (isAIQuery) {
+        // Show AI response pane for streaming queries
+        setAiQuery(query);
+        setAiResponseOpen(true);
+        setSearchLoading(false);
+        return;
+      }
+
+      // Use the active tab if it's about:blank, otherwise create a new tab
+      const activeTab = tabs.find((tab) => tab.id === activeId);
+      const isAboutBlank = activeTab?.url === 'about:blank' || !activeTab?.url || activeTab?.url?.startsWith('about:');
+      
       const targetUrl = buildSearchUrl(query);
       setMode('Research');
 
       try {
-        await ipc.tabs.create(targetUrl);
+        if (isAboutBlank && activeTab) {
+          // Navigate the existing tab instead of creating a new one
+          try {
+            console.log('[OmniDesk] Navigating existing tab:', activeTab.id, 'to:', targetUrl);
+            await ipc.tabs.navigate(activeTab.id, targetUrl);
+            setSearchQuery('');
+            console.log('[OmniDesk] Navigation successful');
+            return;
+          } catch (navError) {
+            // If navigation fails, fall through to create new tab
+            console.warn('[OmniDesk] Failed to navigate existing tab, creating new one:', navError);
+          }
+        }
+        
+        // Create a new tab with the search URL
+        console.log('[OmniDesk] Creating new tab with URL:', targetUrl);
+        const result = await ipc.tabs.create(targetUrl);
+        const success = result && typeof result === 'object' && 'success' in result ? result.success !== false : Boolean(result);
+        if (!success) {
+          console.warn('[OmniDesk] Tab creation failed, using fallback');
+          createFallbackTab({ url: targetUrl, title: `Search: ${query}` });
+          pushWorkspaceEvent({
+            type: 'workspace:launch-fallback',
+            message: 'IPC unavailable, opened search in fallback tab.',
+          });
+          if (typeof window !== 'undefined') {
+            window.open(targetUrl, '_blank', 'noopener,noreferrer');
+          }
+        } else {
+          console.log('[OmniDesk] Tab created successfully:', result);
+        }
         setSearchQuery('');
       } catch (error) {
-        console.warn('Search launch fallback:', error);
+        console.error('[OmniDesk] Search launch error:', error);
+        createFallbackTab({ url: targetUrl, title: `Search: ${query}` });
+        pushWorkspaceEvent({
+          type: 'workspace:launch-error',
+          message: 'Encountered an error launching the flow. Using fallback tab.',
+          payload: { error: error instanceof Error ? error.message : String(error) },
+        });
         if (typeof window !== 'undefined') {
           window.open(targetUrl, '_blank', 'noopener,noreferrer');
         }
+      } finally {
+        setSearchLoading(false);
       }
     },
-    [setMode]
+    [pushWorkspaceEvent, setMode, tabs, activeId, searchLoading]
   );
 
-  const activeTab = tabs.find((tab) => tab.id === activeId);
-  const shouldShowDashboard = forceShow
-    ? true
-    : tabs.length === 0 ||
-      !activeTab ||
-      !activeTab.url ||
-      activeTab.url === 'about:blank' ||
-      activeTab.url.startsWith('ob://newtab') ||
-      activeTab.url.startsWith('ob://home');
+  // Show dashboard if forced, no tabs, or active tab is about:blank (search page)
+  const activeTabForDisplay = tabs.find((tab) => tab.id === activeId);
+  const isAboutBlankDisplay = activeTabForDisplay?.url === 'about:blank' || 
+                       !activeTabForDisplay?.url || 
+                       activeTabForDisplay?.url?.startsWith('about:') ||
+                       activeTabForDisplay?.url?.startsWith('ob://newtab') ||
+                       activeTabForDisplay?.url?.startsWith('ob://home');
+  const shouldShowDashboard = forceShow || tabs.length === 0 || !activeTabForDisplay || isAboutBlankDisplay;
 
   if (!shouldShowDashboard) return null;
 
   const containerClass =
     variant === 'overlay'
-      ? 'absolute inset-0 z-10 flex h-full w-full overflow-auto bg-gradient-to-br from-[#131722] via-[#171B2A] to-[#10131C] px-6 py-8'
+      ? 'absolute inset-0 z-20 flex h-full w-full overflow-auto bg-gradient-to-br from-[#131722] via-[#171B2A] to-[#10131C] px-6 py-8'
+      : variant === 'split'
+      ? 'flex h-full w-full overflow-auto bg-gradient-to-br from-[#131722] via-[#171B2A] to-[#10131C] px-6 py-8'
       : 'flex h-full w-full overflow-auto bg-gradient-to-br from-[#0F121C] via-[#131827] to-[#0F121C] px-6 py-8';
+  
+  // Ensure container is properly sized and visible
+  const containerStyle = {
+    minHeight: '100%',
+    width: '100%',
+    position: variant === 'overlay' ? ('absolute' as const) : ('relative' as const),
+    zIndex: variant === 'overlay' ? 20 : 1,
+    pointerEvents: 'auto' as const,
+  };
 
   const handleManualRefresh = async () => {
     setRefreshing(true);
@@ -600,9 +681,27 @@ export function OmniDesk({ variant = 'overlay', forceShow = false }: OmniDeskPro
   const sessionSkeletons = useMemo(() => Array.from({ length: 2 }), []);
   const workspaceSkeletons = useMemo(() => Array.from({ length: 3 }), []);
 
+  // Debug: Log when dashboard should show (only in dev)
+  useEffect(() => {
+    if (typeof window !== 'undefined' && (window as any).IS_DEV !== undefined) {
+      console.log('[OmniDesk] Rendering dashboard:', {
+        shouldShowDashboard,
+        forceShow,
+        tabsLength: tabs.length,
+        activeTab: activeTabForDisplay,
+        isAboutBlank: isAboutBlankDisplay,
+        variant,
+      });
+    }
+  }, [shouldShowDashboard, forceShow, tabs.length, activeTabForDisplay, isAboutBlankDisplay, variant]);
+
   return (
-    <div className={containerClass} data-onboarding="dashboard">
-      <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-6 xl:flex-row">
+    <div 
+      className={containerClass} 
+      data-onboarding="dashboard"
+      style={containerStyle}
+    >
+      <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-6 xl:flex-row" style={{ minHeight: '100%' }}>
         <div className="flex-1 space-y-6">
           <motion.div
             initial={{ opacity: 0, y: -10 }}
@@ -631,15 +730,41 @@ export function OmniDesk({ variant = 'overlay', forceShow = false }: OmniDeskPro
                   <input
                     value={searchQuery}
                     onChange={(event) => setSearchQuery(event.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        void handleSearchLaunch(searchQuery);
+                      }
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                    }}
                     placeholder="Search the open web, knowledge base, or ask Redix…"
                     className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-500"
+                    style={{ pointerEvents: 'auto', zIndex: 10 }}
+                    autoFocus={false}
+                    tabIndex={0}
                   />
                 </div>
                 <button
                   type="submit"
-                  className="inline-flex items-center justify-center rounded-2xl border border-blue-500/60 bg-blue-500/20 px-5 py-3 text-sm font-semibold text-blue-100 shadow-[0_10px_40px_-20px_rgba(59,130,246,0.8)] transition hover:border-blue-400 hover:bg-blue-500/30"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    void handleSearchLaunch(searchQuery);
+                  }}
+                  disabled={searchLoading || !searchQuery.trim()}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-blue-500/60 bg-blue-500/20 px-5 py-3 text-sm font-semibold text-blue-100 shadow-[0_10px_40px_-20px_rgba(59,130,246,0.8)] transition hover:border-blue-400 hover:bg-blue-500/30 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/50 disabled:opacity-60 disabled:cursor-not-allowed"
+                  style={{ pointerEvents: 'auto', zIndex: 10 }}
                 >
-                  Launch Flow
+                  {searchLoading ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      <span>Launching...</span>
+                    </>
+                  ) : (
+                    'Launch Flow'
+                  )}
                 </button>
               </div>
               <div className="flex flex-wrap gap-2 text-xs text-slate-400">
@@ -647,11 +772,24 @@ export function OmniDesk({ variant = 'overlay', forceShow = false }: OmniDeskPro
                   <button
                     key={prompt}
                     type="button"
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (searchLoading) return;
                       setSearchQuery(prompt);
                       void handleSearchLaunch(prompt);
                     }}
-                    className="rounded-full border border-slate-700/60 bg-slate-800/60 px-3 py-1.5 transition hover:border-blue-500/50 hover:text-blue-200"
+                    disabled={searchLoading}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setSearchQuery(prompt);
+                        void handleSearchLaunch(prompt);
+                      }
+                    }}
+                    className="rounded-full border border-slate-700/60 bg-slate-800/60 px-3 py-1.5 transition hover:border-blue-500/50 hover:bg-slate-800/80 hover:text-blue-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{ pointerEvents: 'auto', zIndex: 10 }}
                   >
                     {prompt}
                   </button>
@@ -671,11 +809,26 @@ export function OmniDesk({ variant = 'overlay', forceShow = false }: OmniDeskPro
               return (
                 <motion.button
                   key={action.label}
-                  onClick={action.action}
-                  whileHover={{ y: -4, scale: 1.02 }}
-                  whileTap={{ scale: 0.96 }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (searchLoading) return;
+                    void action.action();
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (searchLoading) return;
+                      void action.action();
+                    }
+                  }}
+                  disabled={searchLoading}
+                  whileHover={searchLoading ? {} : { y: -4, scale: 1.02 }}
+                  whileTap={searchLoading ? {} : { scale: 0.96 }}
                   transition={{ type: 'spring', stiffness: 400, damping: 17 }}
-                  className="group flex h-full flex-col justify-between gap-4 rounded-2xl border border-slate-800/70 bg-slate-900/60 px-5 py-6 text-left shadow-[0_12px_40px_-24px_rgba(15,23,42,0.9)] transition hover:border-slate-700/70 hover:bg-slate-900/80"
+                  className={`group flex h-full flex-col justify-between gap-4 rounded-2xl border border-slate-800/70 bg-slate-900/60 px-5 py-6 text-left shadow-[0_12px_40px_-24px_rgba(15,23,42,0.9)] transition hover:border-slate-700/70 hover:bg-slate-900/80 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/50 ${searchLoading ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  style={{ pointerEvents: 'auto', zIndex: 10 }}
                 >
                   <span
                     className={`inline-flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br ${action.color} text-white shadow-[0_15px_30px_-20px_currentColor]`}
@@ -890,8 +1043,20 @@ export function OmniDesk({ variant = 'overlay', forceShow = false }: OmniDeskPro
                 ? continueSessions.map((session, idx) => (
                     <button
                       key={idx}
-                      onClick={() => handleContinueSession(session)}
-                      className="group w-full rounded-xl border border-slate-800/60 bg-slate-900/60 px-4 py-3 text-left transition hover:border-slate-600/60 hover:bg-slate-900"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        void handleContinueSession(session);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          void handleContinueSession(session);
+                        }
+                      }}
+                      className="group w-full rounded-xl border border-slate-800/60 bg-slate-900/60 px-4 py-3 text-left transition hover:border-slate-600/60 hover:bg-slate-900 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                      style={{ pointerEvents: 'auto', zIndex: 10 }}
                     >
                       <div className="flex items-center gap-2 text-xs text-slate-400">
                         <span
@@ -949,8 +1114,20 @@ export function OmniDesk({ variant = 'overlay', forceShow = false }: OmniDeskPro
                 ? recentWorkspaces.map((workspace) => (
                     <button
                       key={workspace.id}
-                      onClick={() => navigate(`/w/${workspace.id}`)}
-                      className="flex w-full items-center justify-between rounded-xl border border-slate-800/60 bg-slate-900/60 px-4 py-3 text-left text-sm text-slate-200 transition hover:border-slate-600/70 hover:text-white"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        navigate(`/w/${workspace.id}`);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          navigate(`/w/${workspace.id}`);
+                        }
+                      }}
+                      className="flex w-full items-center justify-between rounded-xl border border-slate-800/60 bg-slate-900/60 px-4 py-3 text-left text-sm text-slate-200 transition hover:border-slate-600/70 hover:text-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                      style={{ pointerEvents: 'auto', zIndex: 10 }}
                     >
                       <span className="truncate">{workspace.name}</span>
                       <span className="text-xs text-slate-500">Open</span>
@@ -1163,6 +1340,17 @@ export function OmniDesk({ variant = 'overlay', forceShow = false }: OmniDeskPro
           </motion.div>
         </aside>
       </div>
+
+      {/* AI Response Pane */}
+      <AIResponsePane
+        query={aiQuery}
+        isOpen={aiResponseOpen}
+        onClose={() => {
+          setAiResponseOpen(false);
+          setAiQuery('');
+        }}
+      />
     </div>
   );
 }
+

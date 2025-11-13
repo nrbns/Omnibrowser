@@ -68,6 +68,14 @@ export const findTabByWebContents = (wc: Electron.WebContents): TabRecord | unde
   return undefined;
 };
 
+export const findTabById = (tabId: string): TabRecord | undefined => {
+  for (const tabs of windowIdToTabs.values()) {
+    const found = tabs.find(tab => tab.id === tabId);
+    if (found) return found;
+  }
+  return undefined;
+};
+
 let notifySessionDirtyFn: (() => void) | null = null;
 
 const markSessionDirty = () => {
@@ -513,6 +521,19 @@ export function registerTabIpc(win: BrowserWindow) {
       emit();
       markSessionDirty(); // Mark session as dirty when tab navigates
       sendNavigationState();
+      
+      // Update BrowserView visibility based on URL
+      const isAboutBlankNav = !navUrl || navUrl === 'about:blank' || navUrl.startsWith('about:');
+      const isActive = activeTabIdByWindow.get(win.id) === id;
+      if (isActive && view) {
+        try {
+          if (typeof view.setVisible === 'function') {
+            view.setVisible(!isAboutBlankNav);
+          }
+        } catch {
+          // Ignore errors
+        }
+      }
 
       try {
         const urlObj = new URL(navUrl);
@@ -809,7 +830,13 @@ export function registerTabIpc(win: BrowserWindow) {
 
     if (wasActive) {
       if (tabs.length > 0) {
-        const nextTab = tabs[Math.min(idx, tabs.length - 1)];
+        // After removing tab at idx, prefer the tab at the same position
+        // If that doesn't exist (we closed the last tab), use the previous one
+        let nextIndex = idx;
+        if (nextIndex >= tabs.length) {
+          nextIndex = tabs.length - 1;
+        }
+        const nextTab = tabs[nextIndex];
         if (nextTab) {
           setActiveTab(win, nextTab.id);
         } else {
@@ -1123,30 +1150,43 @@ export function registerTabIpc(win: BrowserWindow) {
     const rec = tabs.find(t => t.id === request.id);
     if (rec) {
       await burnTab(win, request.id);
-      // After burning, close the tab
+      // After burning, close the tab using the same logic as closeTabInternal
       const idx = tabs.findIndex(t => t.id === request.id);
       if (idx >= 0) {
+        const wasActive = activeTabIdByWindow.get(win.id) === request.id;
         tabs.splice(idx, 1);
+        clearPendingBoundsTimerForTab(win.id, request.id);
         unregisterTab(request.id);
         unregisterTabMemory(request.id);
-        win.removeBrowserView(rec.view);
-        rec.view.webContents.close();
-        if (activeTabIdByWindow.get(win.id) === request.id) activeTabIdByWindow.set(win.id, null);
+        try {
+          win.removeBrowserView(rec.view);
+          rec.view.webContents.close();
+        } catch (e) {
+          console.error('Error closing burned tab BrowserView:', e);
+        }
         
-        // Emit tab update
-        const active = activeTabIdByWindow.get(win.id);
-        const tabList = tabs.map(t => {
-          const title = t.view.webContents.getTitle() || 'New Tab';
-          const url = t.view.webContents.getURL() || 'about:blank';
-          return { 
-            id: t.id, 
-            title, 
-            url,
-            active: t.id === active,
-            mode: t.mode,
-          };
-        });
-        win.webContents.send('tabs:updated', tabList);
+        // If closing active tab, activate the next one
+        if (wasActive) {
+          if (tabs.length > 0) {
+            // After removing tab at idx, prefer the tab at the same position
+            // If that doesn't exist (we closed the last tab), use the previous one
+            let nextIndex = idx;
+            if (nextIndex >= tabs.length) {
+              nextIndex = tabs.length - 1;
+            }
+            const nextTab = tabs[nextIndex];
+            if (nextTab) {
+              setActiveTab(win, nextTab.id);
+            } else {
+              activeTabIdByWindow.set(win.id, null);
+            }
+          } else {
+            activeTabIdByWindow.set(win.id, null);
+          }
+        }
+        
+        emit();
+        markSessionDirty();
       }
     }
     return { success: true };
@@ -1371,18 +1411,7 @@ export function registerTabIpc(win: BrowserWindow) {
 
   ipcMain.handle('tabs:close', async (_e, id: string) => {
     const request = TabCloseRequest.parse({ id });
-    const result = await (async () => {
-      const tabs = getTabs(win);
-      const idx = tabs.findIndex(t => t.id === request.id);
-      if (idx >= 0) {
-        const [rec] = tabs.splice(idx, 1);
-        clearPendingBoundsTimerForTab(win.id, request.id);
-        win.removeBrowserView(rec.view);
-        rec.view.webContents.close();
-        if (activeTabIdByWindow.get(win.id) === request.id) activeTabIdByWindow.set(win.id, null);
-        emit();
-      }
-    })();
+    const result = await closeTabInternal(request.id);
     return result;
   });
 
@@ -1548,8 +1577,33 @@ function setActiveTab(win: BrowserWindow, id: string) {
   activeTabIdByWindow.set(win.id, id);
   rec.lastActiveAt = Date.now();
   
+  // Check if this is an about:blank tab - if so, hide BrowserView (OmniDesk will show instead)
+  let currentUrl = 'about:blank';
+  try {
+    currentUrl = rec.view.webContents.getURL() || 'about:blank';
+  } catch {
+    currentUrl = 'about:blank';
+  }
+  
+  const isAboutBlank = !currentUrl || currentUrl === 'about:blank' || currentUrl.startsWith('about:');
+  
   // Add the active BrowserView
   win.addBrowserView(rec.view);
+  
+  // Hide BrowserView if it's about:blank (OmniDesk will show in renderer)
+  if (isAboutBlank) {
+    try {
+      rec.view.setVisible(false);
+    } catch {
+      // setVisible might not exist in all Electron versions, ignore
+    }
+  } else {
+    try {
+      rec.view.setVisible(true);
+    } catch {
+      // setVisible might not exist in all Electron versions, ignore
+    }
+  }
   
   // Update bounds immediately (guard if destroyed)
   if (!win.isDestroyed()) {

@@ -3,11 +3,14 @@
  */
 
 import { z } from 'zod';
+import os from 'node:os';
+import { BrowserWindow } from 'electron';
 import { registerHandler } from '../../shared/ipc/router';
 import { getGPUControls } from './gpu-controls';
 import { getCrashRecovery } from './crash-recovery';
-import { updateBatteryState } from './resource-monitor';
+import { updateBatteryState, getProcessRamMb } from './resource-monitor';
 import { forceHibernateTabs, setManualOverride } from './efficiency-manager';
+import { getTabs } from '../tabs';
 
 export function registerPerformanceIpc(): void {
   // GPU Controls
@@ -119,6 +122,38 @@ export function registerPerformanceIpc(): void {
   registerHandler('efficiency:hibernate', z.object({}), async () => {
     const count = forceHibernateTabs();
     return { success: true, count };
+  });
+
+  // Get current system metrics for real-time updates
+  registerHandler('performance:getMetrics', z.object({}), async () => {
+    const ramMb = await getProcessRamMb();
+    const cpuLoad1 = os.loadavg()[0] || 0;
+    const activeTabs = BrowserWindow.getAllWindows().reduce((acc, win) => {
+      try {
+        return acc + getTabs(win).length;
+      } catch {
+        return acc;
+      }
+    }, 0);
+    
+    // Calculate CPU percentage (loadavg[0] is 1-minute average, convert to percentage)
+    // On multi-core systems, divide by number of cores
+    const cpuCores = os.cpus().length;
+    const cpuPercent = Math.min(100, Math.round((cpuLoad1 / cpuCores) * 100));
+    
+    // Calculate RAM percentage (process memory vs total system memory)
+    const totalMemory = os.totalmem();
+    const usedMemory = process.memoryUsage().rss;
+    const ramPercent = Math.min(100, Math.round((usedMemory / totalMemory) * 100));
+    
+    return {
+      cpu: cpuPercent,
+      memory: ramPercent,
+      cpuLoad1,
+      ramMb,
+      activeTabs,
+      timestamp: Date.now(),
+    };
   });
 }
 

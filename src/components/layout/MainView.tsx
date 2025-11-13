@@ -23,12 +23,25 @@ export function MainView() {
 
   const canEmbedInIframe = useMemo(() => {
     if (!activeTabUrl) return false;
+    // Don't embed about:blank or internal URLs
+    if (activeTabUrl === 'about:blank' || activeTabUrl.startsWith('about:') || 
+        activeTabUrl.startsWith('ob://') || activeTabUrl.startsWith('chrome:')) {
+      return false;
+    }
     try {
       const url = new URL(activeTabUrl, activeTabUrl.startsWith('http') ? undefined : 'https://localhost');
       return url.protocol === 'http:' || url.protocol === 'https:';
     } catch {
       return false;
     }
+  }, [activeTabUrl]);
+  
+  const isAboutBlank = useMemo(() => {
+    return !activeTabUrl || 
+           activeTabUrl === 'about:blank' || 
+           activeTabUrl.startsWith('about:') ||
+           activeTabUrl.startsWith('ob://newtab') ||
+           activeTabUrl.startsWith('ob://home');
   }, [activeTabUrl]);
 
   // Update browser view bounds when container size changes
@@ -197,20 +210,23 @@ export function MainView() {
       {/* Browser Webview Container - Full Width */}
       {/* BrowserView is rendered by Electron main process and positioned by window coordinates */}
       {/* This container div is just for reference - BrowserView uses window coordinates, not DOM coordinates */}
-      <div
-        id="browser-view-container"
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          width: '100%',
-          height: '100%',
-          pointerEvents: 'none',
-          zIndex: 0,
-        }}
-      />
+      {/* Hide BrowserView container when showing about:blank (OmniDesk will show instead) */}
+      {!isAboutBlank && (
+        <div
+          id="browser-view-container"
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100%',
+            height: '100%',
+            pointerEvents: 'none',
+            zIndex: 0,
+          }}
+        />
+      )}
 
       {/* In non-Electron builds (e.g., web preview) render a safe iframe fallback */}
       {!isElectron && canEmbedInIframe && (

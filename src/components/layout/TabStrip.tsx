@@ -172,7 +172,16 @@ export function TabStrip() {
     }
     try {
       const tabList = await ipc.tabs.list();
-      if (!Array.isArray(tabList)) return;
+      if (!Array.isArray(tabList)) {
+        if (IS_DEV) {
+          console.warn('[TabStrip] refreshTabsFromMain: Invalid tab list', tabList);
+        }
+        return;
+      }
+
+      if (IS_DEV) {
+        console.log('[TabStrip] refreshTabsFromMain: Got', tabList.length, 'tabs');
+      }
 
       const mappedTabs = tabList.map((t: any) => ({
         id: t.id,
@@ -187,11 +196,13 @@ export function TabStrip() {
         lastActiveAt: t.lastActiveAt,
         sessionId: t.sessionId,
         profileId: t.profileId,
+        sleeping: Boolean(t.sleeping),
       }));
 
       const ids = mappedTabs.map(t => t.id).sort().join(',');
       previousTabIdsRef.current = ids;
 
+      // Force update - always set state even if IDs are the same
       setTabs(mappedTabs);
       tabsRef.current = mappedTabs;
       setAllTabs(mapTabsForStore(mappedTabs));
@@ -200,7 +211,20 @@ export function TabStrip() {
       if (activeTab) {
         setActiveTab(activeTab.id);
         currentActiveIdRef.current = activeTab.id;
-      } else if (mappedTabs.length === 0) {
+      } else if (mappedTabs.length > 0) {
+        // Tabs exist but none active - activate first one
+        const firstTab = mappedTabs[0];
+        if (firstTab) {
+          setActiveTab(firstTab.id);
+          currentActiveIdRef.current = firstTab.id;
+          // Also activate in main process
+          try {
+            await ipc.tabs.activate({ id: firstTab.id });
+          } catch {
+            // Silent fail
+          }
+        }
+      } else {
         setActiveTab(null);
         currentActiveIdRef.current = null;
       }
@@ -510,42 +534,49 @@ export function TabStrip() {
     // IPC events are the source of truth - always sync with them
     const handleTabUpdate = (tabList: any[]) => {
       // Don't process updates if component is unmounted or invalid data
-      if (!isMounted || !Array.isArray(tabList)) {
+      if (!isMounted) {
         if (IS_DEV) {
-          console.warn('[TabStrip] handleTabUpdate: Invalid data or unmounted', { isMounted, tabList });
+          console.warn('[TabStrip] handleTabUpdate: Component unmounted');
         }
         return;
       }
       
-      // Only log in development if there's a significant change or error
-      if (IS_DEV && false) { // Disabled to reduce console noise
-        console.log('[TabStrip] handleTabUpdate received:', tabList.map(t => ({ id: t.id, active: t.active })));
+      if (!Array.isArray(tabList)) {
+        if (IS_DEV) {
+          console.warn('[TabStrip] handleTabUpdate: Invalid data', { tabList });
+        }
+        return;
       }
       
-    const mappedTabs = tabList.map((t: any) => ({
-      id: t.id,
-      title: t.title || 'New Tab',
-      url: t.url || 'about:blank',
-      active: t.active || false,
-      containerId: t.containerId,
-      containerName: t.containerName,
-      containerColor: t.containerColor,
-      mode: t.mode,
-      createdAt: t.createdAt,
-      lastActiveAt: t.lastActiveAt,
-      sessionId: t.sessionId,
-      profileId: t.profileId,
-      sleeping: Boolean(t.sleeping),
-    }));
+      // Log in development to help debug
+      if (IS_DEV) {
+        console.log('[TabStrip] handleTabUpdate received:', tabList.length, 'tabs', tabList.map(t => ({ id: t.id, active: t.active, title: t.title })));
+      }
+      
+      const mappedTabs = tabList.map((t: any) => ({
+        id: t.id,
+        title: t.title || 'New Tab',
+        url: t.url || 'about:blank',
+        active: t.active || false,
+        containerId: t.containerId,
+        containerName: t.containerName,
+        containerColor: t.containerColor,
+        mode: t.mode,
+        createdAt: t.createdAt,
+        lastActiveAt: t.lastActiveAt,
+        sessionId: t.sessionId,
+        profileId: t.profileId,
+        sleeping: Boolean(t.sleeping),
+      }));
 
-    const peekState = usePeekPreviewStore.getState();
-    if (peekState.visible && peekState.tab) {
-      const updatedPeek = mappedTabs.find((t) => t.id === peekState.tab?.id);
-      if (updatedPeek) {
-        usePeekPreviewStore.getState().sync(updatedPeek);
+      const peekState = usePeekPreviewStore.getState();
+      if (peekState.visible && peekState.tab) {
+        const updatedPeek = mappedTabs.find((t) => t.id === peekState.tab?.id);
+        if (updatedPeek) {
+          usePeekPreviewStore.getState().sync(updatedPeek);
+        }
       }
-    }
-      
+        
       // Find the active tab from IPC (source of truth)
       const activeTabFromIPC = mappedTabs.find(t => t.active);
       const activeTabIdFromIPC = activeTabFromIPC?.id || null;
@@ -554,47 +585,41 @@ export function TabStrip() {
       const newTabIds = mappedTabs.map(t => t.id).sort().join(',');
       const currentTabIds = previousTabIdsRef.current;
       
-      // Always update tabs array to reflect current state from main process
+      // ALWAYS update tabs array - don't skip updates based on ID comparison
       // This ensures UI stays in sync even if optimistic updates were wrong
       setTabs(mappedTabs);
       tabsRef.current = mappedTabs;
       setAllTabs(mapTabsForStore(mappedTabs));
       
       // Update previousTabIdsRef to track changes
-      if (currentTabIds !== newTabIds) {
-        previousTabIdsRef.current = newTabIds;
-      }
+      previousTabIdsRef.current = newTabIds;
       
       // ALWAYS sync active tab with IPC (main process is source of truth)
       // This overrides any optimistic updates
       if (activeTabIdFromIPC) {
-        if (currentActiveIdRef.current !== activeTabIdFromIPC || activeId !== activeTabIdFromIPC) {
-          // Sync active tab from IPC (main process is source of truth)
-          setActiveTab(activeTabIdFromIPC);
-          currentActiveIdRef.current = activeTabIdFromIPC;
-        }
+        // Always update if different from current
+        setActiveTab(activeTabIdFromIPC);
+        currentActiveIdRef.current = activeTabIdFromIPC;
       } else if (mappedTabs.length > 0) {
         // No active tab in IPC, but tabs exist - activate first one
         const firstTabId = mappedTabs[0].id;
-        if (currentActiveIdRef.current !== firstTabId && activeId !== firstTabId) {
-          // Don't call IPC here - main process should handle this
-          // Just update UI to match
-          setActiveTab(firstTabId);
-          currentActiveIdRef.current = firstTabId;
+        setActiveTab(firstTabId);
+        currentActiveIdRef.current = firstTabId;
+        // Also tell main process to activate it
+        if (IS_ELECTRON) {
+          ipc.tabs.activate({ id: firstTabId }).catch(() => {});
         }
       } else {
         // No tabs at all
-        if (currentActiveIdRef.current !== null || activeId !== null) {
-          setActiveTab(null);
-          currentActiveIdRef.current = null;
-        }
+        setActiveTab(null);
+        currentActiveIdRef.current = null;
       }
     };
 
     // Subscribe to IPC events via the event bus (only once)
     const unsubscribe = ipcEvents.on('tabs:updated', handleTabUpdate);
       
-    // Fallback polling if events don't work (less frequent) - reduced frequency
+    // Fallback polling if events don't work - more frequent to catch updates
     // Only poll to sync state, don't auto-create tabs
     // Note: We can poll even when creating tabs - loadTabs won't create duplicate tabs
     const pollInterval = setInterval(() => {
@@ -604,7 +629,7 @@ export function TabStrip() {
           loadTabs(false).catch(() => {}); // Silent error handling
         }
       }
-    }, 10000); // Poll every 10 seconds as fallback (reduced frequency)
+    }, 2000); // Poll every 2 seconds as fallback to catch updates faster
       
     return () => {
       isMounted = false;
@@ -650,9 +675,21 @@ export function TabStrip() {
     
     isCreatingTabRef.current = true;
     try {
-      // Ensure IPC is ready
-      if (!window.ipc || typeof (window.ipc as any).invoke !== 'function') {
-        await new Promise(resolve => setTimeout(resolve, 500));
+      // Ensure IPC is ready - retry a few times
+      let ipcReady = false;
+      for (let i = 0; i < 3; i++) {
+        if (window.ipc && typeof (window.ipc as any).invoke === 'function') {
+          ipcReady = true;
+          break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+      
+      if (!ipcReady) {
+        if (IS_DEV) {
+          console.warn('[TabStrip] IPC not ready after retries, but attempting tab creation anyway');
+        }
+        // Don't abort - try to create anyway, might work
       }
       
       const result = await ipc.tabs.create('about:blank');
@@ -661,6 +698,14 @@ export function TabStrip() {
         if (IS_DEV) {
           console.log('[TabStrip] Tab created via addTab:', result.id);
         }
+        // Force a refresh to ensure UI updates even if IPC event is delayed
+        setTimeout(async () => {
+          try {
+            await refreshTabsFromMain();
+          } catch {
+            // Silent fail - IPC event should handle it
+          }
+        }, 100);
       } else {
         if (IS_DEV) {
           console.warn('[TabStrip] Tab creation returned no ID:', result);
@@ -675,7 +720,7 @@ export function TabStrip() {
       // Don't wait too long or we'll block legitimate updates
       setTimeout(() => {
         isCreatingTabRef.current = false;
-      }, 100); // Reduced from 500ms to 100ms
+      }, 200); // Increased slightly to prevent rapid-fire clicks
     }
   };
 
@@ -700,7 +745,12 @@ export function TabStrip() {
         };
         updated = [fallbackTab];
       } else if (wasActive) {
-        const nextIndex = Math.min(idx, remaining.length - 1);
+        // After removing tab at idx, prefer the tab at the same position
+        // If that doesn't exist (we closed the last tab), use the previous one
+        let nextIndex = idx;
+        if (nextIndex >= remaining.length) {
+          nextIndex = remaining.length - 1;
+        }
         updated = remaining.map((t, index) => ({
           ...t,
           active: index === nextIndex,
@@ -745,7 +795,12 @@ export function TabStrip() {
 
     // If closing active tab, activate the next one
     if (wasActive && remainingTabs.length > 0) {
-      const nextTabIndex = Math.min(tabIndex, remainingTabs.length - 1);
+      // After removing tab at tabIndex, prefer the tab at the same position
+      // If that doesn't exist (we closed the last tab), use the previous one
+      let nextTabIndex = tabIndex;
+      if (nextTabIndex >= remainingTabs.length) {
+        nextTabIndex = remainingTabs.length - 1;
+      }
       const nextTab = remainingTabs[nextTabIndex];
       if (nextTab) {
         setActiveTab(nextTab.id);
@@ -829,8 +884,13 @@ export function TabStrip() {
       return;
     }
 
-    // Prevent activating if already the active tab
-    if (activeId === tabId || activationInFlightRef.current === tabId) {
+    // Prevent activating if already the active tab (but allow if activeId is different from ref)
+    // This handles cases where the ref is out of sync with the store
+    if (activationInFlightRef.current === tabId) {
+      return;
+    }
+    // Only skip if both ref and store agree this is already active
+    if (currentActiveIdRef.current === tabId && activeId === tabId) {
       return;
     }
 
@@ -1099,7 +1159,7 @@ export function TabStrip() {
         <PredictiveClusterChip clusters={predictedClusters} onApply={handleApplyCluster} summary={predictionSummary} />
         <div className="flex items-center gap-2 min-w-0 flex-1" style={{ pointerEvents: 'auto' }}>
           <AnimatePresence mode="popLayout">
-            {tabs.length > 0 ? (
+            {tabs && Array.isArray(tabs) && tabs.length > 0 ? (
               tabs.map((tab) => {
                 const tabDomId = `tab-${tab.id}`;
                 const panelDomId = `tabpanel-${tab.id}`;

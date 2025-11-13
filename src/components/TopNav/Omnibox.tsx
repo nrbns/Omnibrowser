@@ -1091,10 +1091,11 @@ export const Omnibox = forwardRef<OmniboxHandle, { onCommandPalette: () => void 
             className={`
               w-full h-10 px-4 ${siteInfo && !focused ? 'pl-20' : 'pl-4'} pr-14
               bg-white/12 backdrop-blur-md border border-white/12 rounded-2xl
-              text-sm text-white placeholder-white/50
+              text-sm text-white font-medium placeholder-white/50
               focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/40
               hover:bg-white/16 transition-all
             `}
+            style={{ color: '#ffffff', WebkitTextFillColor: '#ffffff' }}
           />
 
           {/* Progress Bar */}

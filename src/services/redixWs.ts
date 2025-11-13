@@ -20,6 +20,8 @@ export class RedixWS {
   ws: WebSocket | null = null;
   listeners: Map<string, Listener> = new Map();
   backoff = 1000;
+  private errorLogged = false;
+  private isConnecting = false;
 
   constructor(url: string = DEFAULT_WS_URL) {
     this.url = url;
@@ -27,35 +29,62 @@ export class RedixWS {
   }
 
   connect(): void {
-    this.ws = new WebSocket(this.url);
+    if (this.isConnecting) return;
+    this.isConnecting = true;
+    
+    try {
+      this.ws = new WebSocket(this.url);
 
-    this.ws.onopen = () => {
-      this.backoff = 1000;
-    };
-
-    this.ws.onmessage = (event: MessageEvent<string>) => {
-      try {
-        const message: RedixMessage = JSON.parse(event.data);
-        if (message?.id && this.listeners.has(message.id)) {
-          const listener = this.listeners.get(message.id);
-          listener?.(message);
+      this.ws.onopen = () => {
+        this.backoff = 1000;
+        this.isConnecting = false;
+        this.errorLogged = false; // Reset error flag on successful connection
+        if (import.meta.env.DEV) {
+          console.log('[RedixWS] Connected to', this.url);
         }
-        window.dispatchEvent(new CustomEvent('redix:message', { detail: message }));
-      } catch (error) {
-        console.warn('[RedixWS] failed to parse message', error);
-      }
-    };
+      };
 
-    this.ws.onclose = () => {
-      window.setTimeout(() => this.connect(), this.backoff);
-      this.backoff = Math.min(this.backoff * 1.5, 30_000);
-    };
+      this.ws.onmessage = (event: MessageEvent<string>) => {
+        try {
+          const message: RedixMessage = JSON.parse(event.data);
+          if (message?.id && this.listeners.has(message.id)) {
+            const listener = this.listeners.get(message.id);
+            listener?.(message);
+          }
+          window.dispatchEvent(new CustomEvent('redix:message', { detail: message }));
+        } catch (error) {
+          console.warn('[RedixWS] failed to parse message', error);
+        }
+      };
 
-    this.ws.onerror = () => {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.close();
+      this.ws.onclose = () => {
+        this.isConnecting = false;
+        window.setTimeout(() => this.connect(), this.backoff);
+        this.backoff = Math.min(this.backoff * 1.5, 30_000);
+      };
+
+      this.ws.onerror = () => {
+        this.isConnecting = false;
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+          this.ws.close();
+        }
+        // Only log error once to avoid console spam
+        if (!this.errorLogged) {
+          this.errorLogged = true;
+          if (import.meta.env.DEV) {
+            console.warn('[RedixWS] Connection failed to', this.url, '- Redix server may not be running. This is expected if Redix is not configured.');
+          }
+        }
+      };
+    } catch (error) {
+      this.isConnecting = false;
+      if (!this.errorLogged) {
+        this.errorLogged = true;
+        if (import.meta.env.DEV) {
+          console.warn('[RedixWS] Failed to create WebSocket connection:', error);
+        }
       }
-    };
+    }
   }
 
   send(message: RedixMessage): void {

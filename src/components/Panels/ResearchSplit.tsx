@@ -5,8 +5,9 @@
 // @ts-nocheck
 
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { FileText, BookOpen, Save, X, PenLine, FileDown, Archive, Send } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { FileText, BookOpen, Save, X, PenLine, FileDown, Archive, Send, Loader2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Skeleton } from '../common/Skeleton';
 import { useTabsStore } from '../../state/tabsStore';
 import { ipc } from '../../lib/ipc-typed';
 import { debounce } from 'lodash-es';
@@ -20,6 +21,7 @@ export function ResearchSplit() {
   const [highlights, setHighlights] = useState<ResearchHighlight[]>([]);
   const [currentUrl, setCurrentUrl] = useState<string>('');
   const [exporting, setExporting] = useState<'markdown' | 'obsidian' | 'notion' | null>(null);
+  const [extracting, setExtracting] = useState(false);
   const readerRef = useRef<HTMLDivElement>(null);
 
   // Load content for current tab
@@ -75,21 +77,54 @@ export function ResearchSplit() {
           console.error('Failed to load notes:', error);
         }
 
-        // Extract readable content
-        setReaderContent('Extracting readable content...');
+        // Extract readable content - wait a bit for page to load
+        setExtracting(true);
+        setReaderContent(''); // Clear previous content while extracting
+        
+        // Wait a short delay to allow page to load (especially for navigation)
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
         try {
+          // Call with tabId parameter
           const result = await ipc.research.extractContent(activeId) as any;
+          
+          if (import.meta.env.DEV) {
+            console.log('[ResearchSplit] Extract result:', { 
+              hasHtml: !!result?.html, 
+              hasContent: !!result?.content, 
+              title: result?.title,
+              url 
+            });
+          }
+          
           if (result?.html) {
+            // Use the extracted HTML content
             setReaderContent(result.html);
           } else if (result?.content) {
-            // Fallback: show plain text if no HTML
-            setReaderContent(`<div class="prose prose-invert"><h1>${result.title || url}</h1><p>${result.content}</p></div>`);
+            // Fallback: show plain text formatted nicely
+            const formattedContent = result.content
+              .split('\n\n')
+              .filter(p => p.trim().length > 0)
+              .map(p => `<p>${p.trim()}</p>`)
+              .join('');
+            setReaderContent(`<div class="prose prose-invert max-w-none"><h1>${result.title || url}</h1>${formattedContent}</div>`);
           } else {
+            // No content extracted - this is normal for:
+            // - Pages that block iframe embedding (CSP/X-Frame-Options)
+            // - Pages that haven't loaded yet
+            // - Search engine results pages
             setReaderContent('');
+            if (import.meta.env.DEV && url && !url.includes('duckduckgo.com') && !url.includes('google.com')) {
+              console.log('[ResearchSplit] No content extracted for URL:', url, '- This may be normal for pages that block embedding');
+            }
           }
         } catch (error) {
-          console.error('Failed to extract content:', error);
+          if (import.meta.env.DEV) {
+            console.error('[ResearchSplit] Failed to extract content:', error);
+          }
           setReaderContent('');
+        } finally {
+          setExtracting(false);
         }
       } catch (error) {
         console.error('Failed to load research content:', error);
@@ -225,18 +260,52 @@ export function ResearchSplit() {
             color: '#e5e7eb',
           }}
         >
-          {readerContent ? (
-            <div
-              className="text-sm leading-relaxed"
-              dangerouslySetInnerHTML={{ __html: readerContent }}
-            />
-          ) : (
-            <div className="text-center text-gray-500 py-12">
-              <FileText size={48} className="mx-auto mb-4 opacity-50" />
-              <p>No readable content available</p>
-              <p className="text-xs mt-2">Navigate to a page to extract content</p>
-            </div>
-          )}
+          <AnimatePresence mode="wait">
+            {extracting ? (
+              <motion.div
+                key="loading"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="space-y-4"
+              >
+                <div className="flex items-center gap-3 text-gray-400">
+                  <Loader2 size={20} className="animate-spin text-blue-400" />
+                  <span className="text-sm">Extracting readable content...</span>
+                </div>
+                <div className="space-y-3">
+                  <Skeleton variant="text" width="100%" height={24} />
+                  <Skeleton variant="text" width="90%" height={16} />
+                  <Skeleton variant="text" width="95%" height={16} />
+                  <Skeleton variant="text" width="85%" height={16} />
+                  <Skeleton variant="text" width="100%" height={16} />
+                  <Skeleton variant="text" width="88%" height={16} />
+                </div>
+              </motion.div>
+            ) : readerContent ? (
+              <motion.div
+                key="content"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.3 }}
+                className="text-sm leading-relaxed"
+                dangerouslySetInnerHTML={{ __html: readerContent }}
+              />
+            ) : (
+              <motion.div
+                key="empty"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="text-center text-gray-500 py-12"
+              >
+                <FileText size={48} className="mx-auto mb-4 opacity-50" />
+                <p>No readable content available</p>
+                <p className="text-xs mt-2">Navigate to a page to extract content</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
 

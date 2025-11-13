@@ -289,17 +289,40 @@ export function registerResearchIpc() {
   // Extract readable content from active tab
   registerHandler('research:extractContent', z.object({
     tabId: z.string().optional(),
-  }), async (event, _request) => {
+  }), async (event, request) => {
     const win = BrowserWindow.fromWebContents(event.sender) || BrowserWindow.getAllWindows()[0];
     if (!win) {
+      console.warn('[Research] No window found for content extraction');
       return { content: '', title: '', html: '' };
     }
 
-    // Get active BrowserView from window (most recently added is typically active)
-    const views = win.getBrowserViews();
-    const view = views.length > 0 ? views[views.length - 1] : null;
+    // Try to find the specific tab's BrowserView if tabId is provided
+    let view = null;
+    if (request.tabId) {
+      // Import tabs service to find the view by tabId
+      try {
+        const tabsModule = await import('./tabs');
+        const findTabById = (tabsModule as any).findTabById;
+        if (typeof findTabById === 'function') {
+          const tabRecord = findTabById(request.tabId);
+          if (tabRecord?.view) {
+            view = tabRecord.view;
+            console.log('[Research] Found tab by ID:', request.tabId);
+          }
+        }
+      } catch (err) {
+        console.warn('[Research] Could not find tab by ID, using active view:', err);
+      }
+    }
+    
+    // Fallback: Get active BrowserView from window (most recently added is typically active)
+    if (!view) {
+      const views = win.getBrowserViews();
+      view = views.length > 0 ? views[views.length - 1] : null;
+    }
     
     if (!view) {
+      console.warn('[Research] No BrowserView found for content extraction');
       return { content: '', title: '', html: '' };
     }
 
@@ -329,6 +352,9 @@ export function registerResearchIpc() {
         });
       }
 
+      // Additional wait for DOM to be ready (some pages load content dynamically)
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
       // Get HTML and title
       const [html, title] = await Promise.all([
         webContents.executeJavaScript(`
@@ -342,7 +368,10 @@ export function registerResearchIpc() {
               return document.documentElement.outerHTML;
             }
           })()
-        `, true).catch(() => ''),
+        `, true).catch((err) => {
+          console.warn('[Research] Failed to extract HTML:', err);
+          return '';
+        }),
         webContents.executeJavaScript('document.title || document.querySelector("title")?.textContent || ""', true).catch(() => ''),
       ]);
 

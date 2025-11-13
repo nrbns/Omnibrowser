@@ -111,7 +111,7 @@ function buildNodes(records: ConsentRecord[]): Node<ConsentNodeData>[] {
         risk: record.action.risk,
       },
       draggable: status === 'pending',
-    } satisfies Node<ConsentNodeData>);
+    }) as Node<ConsentNodeData>);
   });
 }
 

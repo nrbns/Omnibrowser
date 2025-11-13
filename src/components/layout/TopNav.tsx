@@ -57,6 +57,7 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
+import { createFallbackTab } from '../../lib/tabFallback';
 
 type MenuKey = 'file' | 'ai' | 'tools';
 
@@ -317,9 +318,14 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
 
   const handleNewTab = useCallback(async () => {
     try {
-      await ipc.tabs.create('about:blank');
+      const result = await ipc.tabs.create('about:blank');
+      const success = result && typeof result === 'object' && 'success' in result ? result.success !== false : Boolean(result);
+      if (!success) {
+        createFallbackTab({ url: 'about:blank', title: 'New Tab' });
+      }
     } catch (error) {
       console.error('Failed to open a new tab:', error);
+      createFallbackTab({ url: 'about:blank', title: 'New Tab' });
     }
   }, []);
 
@@ -848,14 +854,72 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
         <div className="flex items-center gap-2 rounded-full border border-white/5 bg-white/5 px-3 py-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
           <ModeSwitch />
           <SessionSwitcher compact />
-          <div className="hidden xl:flex items-center gap-2">
+          <div className="hidden 2xl:flex items-center gap-2">
             <ProfileQuickSwitcher compact />
             <ContainerSwitcher compact />
           </div>
         </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0 rounded-full border border-white/5 bg-white/5 px-1.5 py-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
-
+          <motion.button
+            type="button"
+            onClick={handleBack}
+            disabled={!canGoBack}
+            whileHover={canGoBack ? { scale: 1.05 } : {}}
+            whileTap={canGoBack ? { scale: 0.95 } : {}}
+            className={`p-1.5 rounded-full transition-colors ${
+              canGoBack
+                ? 'text-primary hover:bg-white/10 cursor-pointer'
+                : 'text-muted/40 cursor-not-allowed opacity-50'
+            }`}
+            title="Back (Alt+←)"
+            aria-label="Go back"
+          >
+            <ArrowLeft size={16} />
+          </motion.button>
+          <motion.button
+            type="button"
+            onClick={handleForward}
+            disabled={!canGoForward}
+            whileHover={canGoForward ? { scale: 1.05 } : {}}
+            whileTap={canGoForward ? { scale: 0.95 } : {}}
+            className={`p-1.5 rounded-full transition-colors ${
+              canGoForward
+                ? 'text-primary hover:bg-white/10 cursor-pointer'
+                : 'text-muted/40 cursor-not-allowed opacity-50'
+            }`}
+            title="Forward (Alt+→)"
+            aria-label="Go forward"
+          >
+            <ArrowRight size={16} />
+          </motion.button>
+          <motion.button
+            type="button"
+            onClick={handleRefresh}
+            disabled={!activeId}
+            whileHover={activeId ? { scale: 1.05, rotate: isLoading ? 180 : 0 } : {}}
+            whileTap={activeId ? { scale: 0.95 } : {}}
+            className={`p-1.5 rounded-full transition-colors ${
+              activeId
+                ? 'text-primary hover:bg-white/10 cursor-pointer'
+                : 'text-muted/40 cursor-not-allowed opacity-50'
+            }`}
+            title="Reload (Ctrl+R)"
+            aria-label="Reload page"
+          >
+            <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
+          </motion.button>
+          <motion.button
+            type="button"
+            onClick={() => navigate('/')}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            className="hidden md:flex p-1.5 rounded-full text-primary hover:bg-white/10 transition-colors cursor-pointer"
+            title="Go home (Alt+1)"
+            aria-label="Go to home"
+          >
+            <Home size={16} />
+          </motion.button>
         </div>
 
         <div className="flex-1 min-w-[220px] basis-full sm:basis-auto" data-onboarding="omnibox">
@@ -865,8 +929,8 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
           </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap justify-end flex-1">
-          <div className="hidden lg:flex items-center gap-1.5">
+          <div className="flex items-center gap-2 flex-wrap justify-end flex-1">
+          <div className="hidden xl:flex items-center gap-1.5">
             {renderMenu('file', 'File', FileText, fileMenuEntries)}
             {renderMenu('ai', 'AI', Sparkles, aiMenuEntries)}
             {renderMenu('tools', 'Tools', Workflow, toolsMenuEntries)}
@@ -896,15 +960,17 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
                 />
               )}
             </motion.button>
-            <PrivacySentinelBadge />
-            <div className="hidden xl:flex items-center gap-1">
+            <div className="hidden lg:flex items-center gap-1">
+              <PrivacySentinelBadge />
+            </div>
+            <div className="hidden 2xl:flex items-center gap-1">
               <ShieldsButton />
               <NetworkButton />
             </div>
             <ThemeSwitcher />
           </div>
 
-          <div className="lg:hidden relative" ref={compactMenuRef}>
+          <div className="xl:hidden relative" ref={compactMenuRef}>
             <button
               type="button"
               onClick={() => setCompactMenuOpen((prev) => !prev)}

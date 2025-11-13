@@ -145,11 +145,13 @@ fastify.get('/api/ask', async (request, reply) => {
   const cleanup = async (shouldEnd = false) => {
     if (closed) return;
     closed = true;
-    clearInterval(heartbeatInterval);
+    globalClearInterval(heartbeatInterval);
     redisClient.off('message', onMessage);
     try {
       await redisClient.unsubscribe('redix_results');
-    } catch {}
+  } catch (error) {
+    fastify.log.warn({ error }, 'sse client unsubscribe failed');
+  }
     redisClient.disconnect();
     if (shouldEnd) {
       reply.raw.end();
@@ -215,7 +217,7 @@ fastify.get('/api/ask', async (request, reply) => {
 
   sendEvent('ack', { id: requestId, taskId });
 
-  heartbeatInterval = setInterval(() => {
+  heartbeatInterval = globalSetInterval(() => {
     if (closed) return;
     reply.raw.write(': ping\n\n');
     reply.raw.flush?.();
@@ -350,6 +352,35 @@ fastify.addHook('onClose', () => {
   globalClearInterval(metricsInterval);
   metricsClients.clear();
 });
+
+async function enqueueQueryTask({
+  id,
+  sessionId,
+  query,
+  options,
+}) {
+  const taskId = uuidv4();
+  const taskPayload = {
+    id,
+    taskId,
+    sessionId,
+    query,
+    options: options ?? {},
+    enqueuedAt: Date.now(),
+  };
+
+  await redisStore.hset(`session:${sessionId}`, {
+    lastQuery: query,
+    lastTaskId: taskId,
+    lastAt: Date.now(),
+  });
+
+  const published = await redisPub.publish('redix_tasks', JSON.stringify(taskPayload));
+  if (published <= 0) {
+    throw new Error('no-workers-available');
+  }
+  return taskId;
+}
 
 function makeMetricsSample() {
   const now = Date.now();

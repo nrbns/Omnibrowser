@@ -18,7 +18,47 @@ import { SymbioticVoiceCompanion } from '../voice';
 import { useMetricsStore, type MetricSample } from '../../state/metricsStore';
 import { getEnvVar, isElectronRuntime } from '../../lib/env';
 import { useTrustDashboardStore } from '../../state/trustDashboardStore';
-import { Badge } from '../Badge';
+
+type PrivacyEventEntry = {
+  id: string;
+  timestamp: number;
+  kind: 'tor' | 'vpn';
+  status: 'info' | 'success' | 'warning';
+  message: string;
+};
+
+const RELATIVE_TIME_FORMATTER = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+
+function createEventId(): string {
+  const cryptoRandom = (globalThis.crypto as Crypto | undefined)?.randomUUID?.();
+  if (cryptoRandom) {
+    return cryptoRandom;
+  }
+  return `privacy-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function formatRelativeTime(timestamp: number): string {
+  const now = Date.now();
+  let difference = timestamp - now;
+  const divisions: Array<[number, Intl.RelativeTimeFormatUnit]> = [
+    [1000, 'second'],
+    [60, 'minute'],
+    [60, 'hour'],
+    [24, 'day'],
+    [7, 'week'],
+    [4.34524, 'month'],
+    [12, 'year'],
+  ];
+
+  for (const [amount, unit] of divisions) {
+    if (Math.abs(difference) < amount) {
+      return RELATIVE_TIME_FORMATTER.format(Math.round(difference), unit);
+    }
+    difference /= amount;
+  }
+
+  return RELATIVE_TIME_FORMATTER.format(Math.round(difference), 'year');
+}
 
 export function BottomStatus() {
   const { activeId } = useTabsStore();
@@ -68,6 +108,9 @@ export function BottomStatus() {
   const [vpnActiveId, setVpnActiveId] = useState<string | null>(null);
   const [vpnBusy, setVpnBusy] = useState(false);
   const [vpnError, setVpnError] = useState<string | null>(null);
+  const [privacyEvents, setPrivacyEvents] = useState<PrivacyEventEntry[]>([]);
+  const [privacyToast, setPrivacyToast] = useState<PrivacyEventEntry | null>(null);
+  const [shieldsStats, setShieldsStats] = useState<{ trackersBlocked: number; adsBlocked: number }>({ trackersBlocked: 0, adsBlocked: 0 });
   const isElectron = useMemo(() => isElectronRuntime(), []);
   const apiBaseUrl = useMemo(() => {
     return (
@@ -86,6 +129,24 @@ export function BottomStatus() {
     blocked: state.blockedSummary.trackers,
     loading: state.loading,
   }));
+
+  const pushPrivacyEvent = useCallback(
+    (event: Omit<PrivacyEventEntry, 'id' | 'timestamp'> & { timestamp?: number }) => {
+      const entry: PrivacyEventEntry = {
+        id: createEventId(),
+        timestamp: event.timestamp ?? Date.now(),
+        kind: event.kind,
+        status: event.status,
+        message: event.message,
+      };
+      setPrivacyEvents((current) => [...current.slice(-29), entry]);
+      setPrivacyToast(entry);
+    },
+    [],
+  );
+
+  // Temporary alias for compatibility with new naming while keeping existing references working.
+  const addPrivacyEvent = pushPrivacyEvent;
 
   const prevVpnRef = useRef(vpnStatus);
   const prevTorRef = useRef(torStatus);
@@ -205,37 +266,78 @@ export function BottomStatus() {
   useEffect(() => {
     const previous = prevTorRef.current;
     if (!previous.running && torStatus.running) {
-      pushPrivacyEvent({ kind: 'tor', status: 'info', message: 'Tor daemon starting…' });
+      addPrivacyEvent({ kind: 'tor', status: 'info', message: 'Tor daemon starting…' });
     }
     if (!previous.bootstrapped && torStatus.bootstrapped) {
-      pushPrivacyEvent({ kind: 'tor', status: 'success', message: 'Tor circuit established' });
+      addPrivacyEvent({ kind: 'tor', status: 'success', message: 'Tor circuit established' });
     }
     if (previous.running && !torStatus.running) {
-      pushPrivacyEvent({ kind: 'tor', status: 'info', message: 'Tor stopped' });
+      addPrivacyEvent({ kind: 'tor', status: 'info', message: 'Tor stopped' });
     }
     if (!previous.stub && torStatus.stub) {
-      pushPrivacyEvent({ kind: 'tor', status: 'warning', message: 'Tor binary not found – running in stub mode' });
+      addPrivacyEvent({ kind: 'tor', status: 'warning', message: 'Tor binary not found – running in stub mode' });
     }
     if (torStatus.error && torStatus.error !== previous.error) {
-      pushPrivacyEvent({ kind: 'tor', status: 'warning', message: `Tor warning: ${torStatus.error}` });
+      addPrivacyEvent({ kind: 'tor', status: 'warning', message: `Tor warning: ${torStatus.error}` });
     }
     prevTorRef.current = torStatus;
-  }, [torStatus, pushPrivacyEvent]);
+  }, [torStatus, addPrivacyEvent]);
 
   useEffect(() => {
     const previous = prevVpnRef.current;
     if (!previous.connected && vpnStatus.connected) {
       const label = vpnStatus.name || vpnStatus.type || 'VPN';
-      pushPrivacyEvent({ kind: 'vpn', status: 'success', message: `VPN connected${label ? `: ${label}` : ''}` });
+      addPrivacyEvent({ kind: 'vpn', status: 'success', message: `VPN connected${label ? `: ${label}` : ''}` });
     }
     if (previous.connected && !vpnStatus.connected) {
-      pushPrivacyEvent({ kind: 'vpn', status: 'info', message: 'VPN disconnected' });
+      addPrivacyEvent({ kind: 'vpn', status: 'info', message: 'VPN disconnected' });
     }
     prevVpnRef.current = vpnStatus;
-  }, [vpnStatus, pushPrivacyEvent]);
+  }, [vpnStatus, addPrivacyEvent]);
 
+  // Real-time metrics polling for Electron
   useEffect(() => {
-    if (!isElectron) {
+    if (isElectron) {
+      let cancelled = false;
+      let pollInterval: NodeJS.Timeout | null = null;
+
+      const pollMetrics = async () => {
+        if (cancelled) return;
+        
+        try {
+          const metrics = await ipc.performance.getMetrics();
+          if (cancelled || !metrics) return;
+          
+          const sample = {
+            timestamp: metrics.timestamp || Date.now(),
+            cpu: metrics.cpu || 0,
+            memory: metrics.memory || 0,
+            carbonIntensity: undefined, // Can be added later if available
+          };
+          
+          pushMetricSample(sample);
+          
+          // Note: Efficiency store is updated via efficiency:mode events from the resource monitor
+          // We just update the metrics store here for real-time CPU/RAM display
+        } catch (error) {
+          if (!cancelled) {
+            console.warn('[metrics] Failed to poll metrics:', error);
+          }
+        }
+      };
+
+      // Start polling immediately, then every 1-2 seconds
+      pollMetrics();
+      pollInterval = setInterval(pollMetrics, 1500); // Poll every 1.5 seconds
+
+      return () => {
+        cancelled = true;
+        if (pollInterval) {
+          clearInterval(pollInterval);
+        }
+      };
+    } else {
+      // Non-Electron: Use WebSocket
       const socket = new WebSocket(`${apiBaseUrl.replace(/^http/, 'ws')}/ws/metrics`);
       metricsSocketRef.current = socket;
 
@@ -272,7 +374,44 @@ export function BottomStatus() {
         metricsSocketRef.current = null;
       };
     }
-  }, [isElectron, apiBaseUrl, pushMetricSample]);
+  }, [isElectron, apiBaseUrl, pushMetricSample, setEfficiencyEvent, efficiencySnapshot]);
+
+  // Poll shields stats for privacy scorecard
+  useEffect(() => {
+    if (!isElectron) return;
+    
+    let cancelled = false;
+    let pollInterval: NodeJS.Timeout | null = null;
+
+    const pollShieldsStats = async () => {
+      if (cancelled) return;
+      
+      try {
+        const status = await ipc.shields.getStatus();
+        if (cancelled || !status) return;
+        
+        setShieldsStats({
+          trackersBlocked: status.trackersBlocked || 0,
+          adsBlocked: status.adsBlocked || 0,
+        });
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('[BottomStatus] Failed to poll shields stats:', error);
+        }
+      }
+    };
+
+    // Start polling immediately, then every 2 seconds
+    pollShieldsStats();
+    pollInterval = setInterval(pollShieldsStats, 2000);
+
+    return () => {
+      cancelled = true;
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+    };
+  }, [isElectron]);
 
   useEffect(() => {
     let isMounted = true;
@@ -557,6 +696,14 @@ export function BottomStatus() {
     return () => clearTimeout(timer);
   }, [efficiencyAlert]);
 
+  useEffect(() => {
+    if (!privacyToast) return;
+    const timer = window.setTimeout(() => {
+      setPrivacyToast(null);
+    }, 8000);
+    return () => window.clearTimeout(timer);
+  }, [privacyToast]);
+
   const handleEfficiencyAction = async (action: EfficiencyAlertAction) => {
     try {
       if (action.type === 'mode' && action.mode) {
@@ -619,6 +766,62 @@ export function BottomStatus() {
       console.error('Failed to toggle DoH:', error);
     }
   };
+
+  const handleVpnConnect = useCallback(
+    async (profileId: string) => {
+      if (!profileId || vpnBusy) {
+        return;
+      }
+      setVpnError(null);
+      setVpnBusy(true);
+      try {
+        const result = await ipc.vpn.connect(profileId);
+        await checkVpn().catch(() => {});
+        if (result?.connected) {
+          setVpnActiveId(profileId);
+          const label = result.name || result.server || result.interface || 'VPN';
+          addPrivacyEvent({
+            kind: 'vpn',
+            status: 'success',
+            message: label ? `VPN connected: ${label}` : 'VPN connected',
+          });
+        } else {
+          addPrivacyEvent({
+            kind: 'vpn',
+            status: 'info',
+            message: 'VPN connect command sent',
+          });
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setVpnError(message);
+        addPrivacyEvent({ kind: 'vpn', status: 'warning', message: `VPN error: ${message}` });
+      } finally {
+        setVpnBusy(false);
+      }
+    },
+    [checkVpn, addPrivacyEvent, vpnBusy],
+  );
+
+  const handleVpnDisconnect = useCallback(async () => {
+    if (vpnBusy) {
+      return;
+    }
+    setVpnError(null);
+    setVpnBusy(true);
+    try {
+      await ipc.vpn.disconnect();
+      await checkVpn().catch(() => {});
+      setVpnActiveId(null);
+      addPrivacyEvent({ kind: 'vpn', status: 'info', message: 'VPN disconnect requested' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setVpnError(message);
+      addPrivacyEvent({ kind: 'vpn', status: 'warning', message: `VPN error: ${message}` });
+    } finally {
+      setVpnBusy(false);
+    }
+  }, [checkVpn, addPrivacyEvent, vpnBusy]);
 
   const efficiencyDetails = [
     efficiencyBadge || null,
@@ -687,7 +890,7 @@ export function BottomStatus() {
           </motion.div>
         )}
       </AnimatePresence>
-      <div className="flex flex-col gap-2 border-t border-slate-800/60 bg-slate-950/90 px-4 py-2 text-xs text-gray-300">
+      <div className="flex flex-col gap-2 border-t border-slate-800/60 bg-slate-950/90 px-4 py-2 text-xs text-gray-300" data-onboarding="status-bar">
         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 md:gap-3 text-xs text-gray-300">
           <PrivacySwitch />
 
@@ -744,6 +947,16 @@ export function BottomStatus() {
             title="Open trust & ethics dashboard"
             loading={trustBadgeData.loading}
           />
+
+          {shieldsStats.trackersBlocked > 0 && (
+            <StatusBadge
+              icon={Shield}
+              label="Blocked"
+              description={`${shieldsStats.trackersBlocked} tracker${shieldsStats.trackersBlocked === 1 ? '' : 's'}`}
+              variant="positive"
+              title={`Privacy shields blocked ${shieldsStats.trackersBlocked} tracker${shieldsStats.trackersBlocked === 1 ? '' : 's'} and ${shieldsStats.adsBlocked} ad${shieldsStats.adsBlocked === 1 ? '' : 's'}`}
+            />
+          )}
 
           <div className="ml-auto flex items-center gap-2">
             <StatusBadge
@@ -823,10 +1036,10 @@ export function BottomStatus() {
                         variant={torBadgeVariant}
                         onClick={!torStatus.loading ? () => {
                           if (torStatus.running) {
-                            pushPrivacyEvent({ kind: 'tor', status: 'info', message: 'Stopping Tor…' });
+                            addPrivacyEvent({ kind: 'tor', status: 'info', message: 'Stopping Tor…' });
                             void stopTor();
                           } else {
-                            pushPrivacyEvent({ kind: 'tor', status: 'info', message: 'Starting Tor…' });
+                            addPrivacyEvent({ kind: 'tor', status: 'info', message: 'Starting Tor…' });
                             void startTor();
                           }
                         } : undefined}
@@ -839,14 +1052,14 @@ export function BottomStatus() {
                           type="button"
                           onClick={() => {
                             if (torStatus.loading) return;
-                            pushPrivacyEvent({ kind: 'tor', status: 'info', message: 'Requesting new Tor identity…' });
+                            addPrivacyEvent({ kind: 'tor', status: 'info', message: 'Requesting new Tor identity…' });
                             void newTorIdentity()
                               .then(() => {
-                                pushPrivacyEvent({ kind: 'tor', status: 'success', message: 'Tor identity refreshed' });
+                                addPrivacyEvent({ kind: 'tor', status: 'success', message: 'Tor identity refreshed' });
                               })
                               .catch((error) => {
                                 const message = error instanceof Error ? error.message : String(error);
-                                pushPrivacyEvent({ kind: 'tor', status: 'warning', message: `Tor identity error: ${message}` });
+                                addPrivacyEvent({ kind: 'tor', status: 'warning', message: `Tor identity error: ${message}` });
                               });
                           }}
                           className="flex items-center gap-2 rounded-md border border-purple-500/40 bg-purple-500/10 px-3 py-1.5 text-[11px] text-purple-100 transition-colors hover:border-purple-400/60"

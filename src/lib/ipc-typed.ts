@@ -639,6 +639,17 @@ export const ipc = {
         return { stub: true };
       }
     },
+    async getProxy() {
+      try {
+        await waitForIPC(3000);
+        return await ipcCall<unknown, { proxy: string | null; stub?: boolean }>('tor:getProxy', {});
+      } catch (error) {
+        if (IS_DEV) {
+          console.warn('[IPC] tor.getProxy falling back to stub', error);
+        }
+        return { proxy: null, stub: true };
+      }
+    },
   },
   vpn: {
     async status() {
@@ -673,6 +684,18 @@ export const ipc = {
         };
       }
     },
+    listProfiles: () =>
+      ipcCall<unknown, Array<{ id: string; name: string; type: string; server?: string }>>('vpn:listProfiles', {}),
+    connect: (id: string) =>
+      ipcCall<{ id: string }, { connected: boolean; type?: string; name?: string; interface?: string; server?: string }>(
+        'vpn:connect',
+        { id },
+      ),
+    disconnect: () =>
+      ipcCall<unknown, { connected: boolean; type?: string; name?: string; interface?: string; server?: string }>(
+        'vpn:disconnect',
+        {},
+      ),
   },
   containers: {
     list: () =>
@@ -1012,40 +1035,12 @@ export const ipc = {
     saveWorkspace: (workspace: unknown) => ipcCall('storage:saveWorkspace', workspace),
     listWorkspaces: () => ipcCall<unknown, unknown[]>('storage:listWorkspaces', {}),
   },
-  tor: {
-    start: (config?: { port?: number; controlPort?: number; newnymInterval?: number }) =>
-      ipcCall<typeof config, { success: boolean; stub?: boolean; warning?: string }>('tor:start', config || {}),
-    stop: () => ipcCall<unknown, { success: boolean; stub?: boolean }>('tor:stop', {}),
-    status: () =>
-      ipcCall<
-        unknown,
-        { running: boolean; bootstrapped: boolean; progress: number; error?: string; circuitEstablished: boolean; stub?: boolean }
-      >('tor:status', {}),
-    newIdentity: () => ipcCall('tor:newIdentity', {}),
-    getProxy: () => ipcCall<unknown, { proxy: string | null; stub?: boolean }>('tor:getProxy', {}),
-  },
   shields: {
     get: (url: string) => ipcCall('shields:get', { url }),
     set: (hostname: string, config: unknown) => ipcCall('shields:set', { hostname, config }),
     updateDefault: (config: unknown) => ipcCall('shields:updateDefault', config),
     list: () => ipcCall<unknown, unknown[]>('shields:list', {}),
     getStatus: () => ipcCall<unknown, { adsBlocked: number; trackersBlocked: number; httpsUpgrades: number; cookies3p: 'block' | 'allow'; webrtcBlocked: boolean; fingerprinting: boolean }>('shields:getStatus', {}),
-  },
-  vpn: {
-    status: () => ipcCall<unknown, { connected: boolean; type?: string; name?: string; interface?: string; server?: string; stub?: boolean }>('vpn:status', {}),
-    check: () => ipcCall<unknown, { connected: boolean; type?: string; name?: string; interface?: string; server?: string; stub?: boolean }>('vpn:check', {}),
-    listProfiles: () =>
-      ipcCall<unknown, Array<{ id: string; name: string; type: string; server?: string }>>('vpn:listProfiles', {}),
-    connect: (id: string) =>
-      ipcCall<{ id: string }, { connected: boolean; type?: string; name?: string; interface?: string; server?: string }>(
-        'vpn:connect',
-        { id },
-      ),
-    disconnect: () =>
-      ipcCall<unknown, { connected: boolean; type?: string; name?: string; interface?: string; server?: string }>(
-        'vpn:disconnect',
-        {},
-      ),
   },
   network: {
     get: () => ipcCall<unknown, { quicEnabled: boolean; ipv6Enabled: boolean; ipv6LeakProtection: boolean }>('network:get', {}),
@@ -1190,6 +1185,7 @@ export const ipc = {
         regionCode?: string | null;
       }) => ipcCall('performance:battery:update', payload),
     },
+    getMetrics: () => ipcCall<unknown, { cpu: number; memory: number; cpuLoad1: number; ramMb: number; activeTabs: number; timestamp: number }>('performance:getMetrics', {}),
     gpu: {
       enableRaster: () => ipcCall<unknown, { success: boolean; config: any }>('performance:gpu:enableRaster', {}),
       disableRaster: () => ipcCall<unknown, { success: boolean; config: any }>('performance:gpu:disableRaster', {}),

@@ -31,10 +31,12 @@ export function TabContentSurface({ tab, overlayActive }: TabContentSurfaceProps
   const retryCountRef = useRef(0);
 
   const targetUrl = useMemo(() => {
-    if (isInternalUrl(tab?.url)) {
+    const url = tab?.url;
+    // For about:blank or empty URLs, show OmniDesk (search page) instead of webview
+    if (!url || url === 'about:blank' || isInternalUrl(url)) {
       return null;
     }
-    return tab?.url ?? 'about:blank';
+    return url;
   }, [tab?.url]);
 
   useEffect(() => {
@@ -227,6 +229,7 @@ export function TabContentSurface({ tab, overlayActive }: TabContentSurfaceProps
   const labelledById = tab?.id ? `tab-${tab.id}` : undefined;
   const isInactive = !tab || !tab.active;
 
+  // Show OmniDesk (search page) for about:blank or internal URLs
   if (!targetUrl) {
     return (
       <motion.div
@@ -234,10 +237,16 @@ export function TabContentSurface({ tab, overlayActive }: TabContentSurfaceProps
         role="tabpanel"
         aria-labelledby={labelledById}
         aria-hidden={isInactive}
-        className="h-full w-full overflow-hidden bg-slate-950/60"
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
+        className="h-full w-full overflow-hidden bg-[#1A1D28]"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.2 }}
+        style={{ 
+          position: 'absolute',
+          inset: 0,
+          zIndex: isInactive ? 0 : 1,
+          pointerEvents: 'auto',
+        }}
       >
         <OmniDesk variant="split" forceShow />
       </motion.div>
@@ -256,13 +265,18 @@ export function TabContentSurface({ tab, overlayActive }: TabContentSurfaceProps
       initial={{ opacity: 0.4 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.35, ease: 'easeOut' }}
+      style={{
+        position: 'absolute',
+        inset: 0,
+        zIndex: isInactive ? 0 : 1,
+      }}
     >
       {isElectron ? (
         <webview
           ref={webviewRef}
           className="h-full w-full"
-          style={{ width: '100%', height: '100%' }}
-          src={targetUrl ?? 'about:blank'}
+          style={{ width: '100%', height: '100%', display: isInactive ? 'none' : 'block' }}
+          src={targetUrl}
           allowpopups="true"
           autosize="on"
           disablewebsecurity="false"

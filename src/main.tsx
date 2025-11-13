@@ -8,6 +8,13 @@ import './lib/battery';
 import { isDevEnv } from './lib/env';
 import { setupClipperHandlers } from './lib/research/clipper-handler';
 
+// Import test utility in dev mode
+if (isDevEnv()) {
+  import('./utils/testOmniDesk').catch(() => {
+    // Silently fail if test file doesn't exist
+  });
+}
+
 // Error boundary with better UX
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },

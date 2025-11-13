@@ -54,7 +54,7 @@ function getActiveTabCount(): number {
   return BrowserWindow.getAllWindows().reduce((acc, win) => acc + getTabs(win).length, 0);
 }
 
-async function getProcessRamMb(): Promise<number> {
+export async function getProcessRamMb(): Promise<number> {
   if (typeof process.getProcessMemoryInfo === 'function') {
     try {
       const info = await process.getProcessMemoryInfo();
