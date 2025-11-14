@@ -77,11 +77,13 @@ export function RedixQuickDialog({ open, onClose, initialPrompt = '' }: RedixQui
         // Auto-submit if prompt is provided
         if (finalPrompt && finalPrompt.trim()) {
           setTimeout(() => {
+            // Call handleSubmit directly (defined above)
             handleSubmit();
           }, 300);
         }
       }, 100);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialPrompt]);
 
   useEffect(() => {
@@ -89,44 +91,6 @@ export function RedixQuickDialog({ open, onClose, initialPrompt = '' }: RedixQui
       responseRef.current.scrollTop = responseRef.current.scrollHeight;
     }
   }, [response]);
-
-  const handleSubmit = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!prompt.trim() || isLoading) return;
-
-    setIsLoading(true);
-    setError(null);
-    setResponse('');
-
-    try {
-      let accumulatedText = '';
-      
-      await ipc.redix.stream(
-        prompt.trim(),
-        {},
-        (chunk) => {
-          try {
-            if (chunk.type === 'token' && chunk.text) {
-              accumulatedText += chunk.text;
-              setResponse(accumulatedText);
-            } else if (chunk.type === 'error') {
-              setError(chunk.text || 'An error occurred');
-              setIsLoading(false);
-            } else if (chunk.done) {
-              setIsLoading(false);
-            }
-          } catch (error) {
-            console.error('[RedixQuickDialog] Error handling chunk:', error);
-            setError('Error processing response');
-            setIsLoading(false);
-          }
-        }
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to get response from Redix');
-      setIsLoading(false);
-    }
-  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
