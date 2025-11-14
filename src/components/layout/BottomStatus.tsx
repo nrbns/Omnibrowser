@@ -756,14 +756,20 @@ export function BottomStatus() {
         text,
         { sessionId },
         (chunk) => {
-          if (chunk.type === 'token' && chunk.text) {
-            setPromptResponse((prev) => prev + chunk.text);
-          }
-          if (chunk.type === 'error') {
-            setPromptError(chunk.text || 'Redix error');
-            setPromptLoading(false);
-          }
-          if (chunk.done) {
+          try {
+            if (chunk.type === 'token' && chunk.text) {
+              setPromptResponse((prev) => prev + chunk.text);
+            }
+            if (chunk.type === 'error') {
+              setPromptError(chunk.text || 'Redix error');
+              setPromptLoading(false);
+            }
+            if (chunk.done) {
+              setPromptLoading(false);
+            }
+          } catch (error) {
+            console.error('[BottomStatus] Error handling Redix chunk:', error);
+            setPromptError('Error processing response');
             setPromptLoading(false);
           }
         },

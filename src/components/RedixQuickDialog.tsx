@@ -52,13 +52,19 @@ export function RedixQuickDialog({ open, onClose, initialPrompt = '' }: RedixQui
         prompt.trim(),
         {},
         (chunk) => {
-          if (chunk.type === 'token' && chunk.text) {
-            accumulatedText += chunk.text;
-            setResponse(accumulatedText);
-          } else if (chunk.type === 'error') {
-            setError(chunk.text || 'An error occurred');
-            setIsLoading(false);
-          } else if (chunk.done) {
+          try {
+            if (chunk.type === 'token' && chunk.text) {
+              accumulatedText += chunk.text;
+              setResponse(accumulatedText);
+            } else if (chunk.type === 'error') {
+              setError(chunk.text || 'An error occurred');
+              setIsLoading(false);
+            } else if (chunk.done) {
+              setIsLoading(false);
+            }
+          } catch (error) {
+            console.error('[RedixQuickDialog] Error handling chunk:', error);
+            setError('Error processing response');
             setIsLoading(false);
           }
         }

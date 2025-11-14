@@ -1450,19 +1450,44 @@ export const ipc = {
       onChunk?: (chunk: { type: string; text?: string; tokens?: number; done?: boolean; error?: string }) => void
     ) => {
       // For streaming, we'll use events
-      if (onChunk && window.ipc) {
-        const handler = (_event: any, data: { type: string; text?: string; tokens?: number; done?: boolean; error?: string }) => {
-          onChunk(data);
-          if (data.done) {
-            window.ipc?.removeListener?.('redix:chunk', handler);
+      let handler: ((_event: any, data: any) => void) | null = null;
+      
+      if (onChunk && typeof window !== 'undefined' && window.ipc) {
+        handler = (_event: any, data: { type: string; text?: string; tokens?: number; done?: boolean; error?: string }) => {
+          try {
+            onChunk(data);
+            if (data.done || data.error) {
+              if (handler && window.ipc?.removeListener) {
+                window.ipc.removeListener('redix:chunk', handler);
+              }
+              handler = null;
+            }
+          } catch (error) {
+            console.error('[Redix] Error in stream handler:', error);
+            if (handler && window.ipc?.removeListener) {
+              window.ipc.removeListener('redix:chunk', handler);
+            }
+            handler = null;
           }
         };
-        window.ipc.on?.('redix:chunk', handler);
+        
+        try {
+          window.ipc.on?.('redix:chunk', handler);
+        } catch (error) {
+          console.error('[Redix] Failed to register stream handler:', error);
+        }
       }
+      
       return ipcCall<{ prompt: string; sessionId?: string; stream: boolean }, { success: boolean; error?: string }>(
         'redix:stream',
         { prompt, stream: true, ...options }
-      );
+      ).catch((error) => {
+        // Clean up handler on error
+        if (handler && typeof window !== 'undefined' && window.ipc?.removeListener) {
+          window.ipc.removeListener('redix:chunk', handler);
+        }
+        throw error;
+      });
     },
   },
 };
