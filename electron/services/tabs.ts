@@ -411,17 +411,53 @@ export function registerTabIpc(win: BrowserWindow) {
       sessionId = undefined;
     }
 
-    // Apply per-tab proxy if configured
+    // Apply per-tab proxy if configured, or Tor for ghost mode
     try {
-      const { tabProxies } = await import('./proxy');
-      const tabProxy = tabProxies.get(id);
-      if (tabProxy) {
-        const proxyStr = `${tabProxy.type}://${tabProxy.host}:${tabProxy.port}`;
-        await sess.setProxy({ proxyRules: proxyStr } as any);
-        console.log(`[Tabs] Applied per-tab proxy to tab ${id}:`, proxyStr);
+      if (mode === 'ghost') {
+        // Ghost mode: Apply Tor proxy directly
+        const { getTorService } = await import('./tor');
+        const torService = getTorService();
+        const torStatus = torService.getStatus();
+        if (torStatus.running && torStatus.circuitEstablished) {
+          const proxyStr = `socks5://127.0.0.1:9050`;
+          await sess.setProxy({ proxyRules: proxyStr } as any);
+          console.log(`[Tabs] Applied Tor proxy to ghost tab ${id}:`, proxyStr);
+        } else {
+          // Start Tor if not running
+          try {
+            await torService.start();
+            // Wait a bit for Tor to bootstrap
+            let attempts = 0;
+            const checkTor = setInterval(async () => {
+              attempts++;
+              const status = torService.getStatus();
+              if (status.circuitEstablished || attempts > 30) {
+                clearInterval(checkTor);
+                if (status.circuitEstablished) {
+                  const proxyStr = `socks5://127.0.0.1:9050`;
+                  await sess.setProxy({ proxyRules: proxyStr } as any);
+                  console.log(`[Tabs] Applied Tor proxy to ghost tab ${id} after startup:`, proxyStr);
+                } else {
+                  console.warn(`[Tabs] Tor failed to establish circuit for ghost tab ${id}`);
+                }
+              }
+            }, 1000);
+          } catch (torError) {
+            console.warn(`[Tabs] Failed to start Tor for ghost tab ${id}:`, torError);
+          }
+        }
+      } else {
+        // Normal mode: Apply per-tab proxy if configured
+        const { tabProxies } = await import('./proxy');
+        const tabProxy = tabProxies.get(id);
+        if (tabProxy) {
+          const proxyStr = `${tabProxy.type}://${tabProxy.host}:${tabProxy.port}`;
+          await sess.setProxy({ proxyRules: proxyStr } as any);
+          console.log(`[Tabs] Applied per-tab proxy to tab ${id}:`, proxyStr);
+        }
       }
     } catch (error) {
-      console.warn(`[Tabs] Failed to apply per-tab proxy for tab ${id}:`, error);
+      console.warn(`[Tabs] Failed to apply proxy for tab ${id}:`, error);
     }
 
     const view = new BrowserView({

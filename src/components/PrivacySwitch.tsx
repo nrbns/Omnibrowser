@@ -39,19 +39,35 @@ export function PrivacySwitch() {
     }
 
     if (newMode === 'Private') {
+      // Private = Incognito mode (separate session, no history)
       try {
-        if ((window as any).ipc?.invoke) {
-          await (window as any).ipc.invoke('ob://ipc/v1/private:createWindow', { url: 'about:blank' });
-        }
+        const { ipc } = await import('../lib/ipc-typed');
+        await ipc.private.createWindow({ url: 'about:blank' });
+        // Reset mode after creating window (don't keep it active)
+        setMode('Normal');
       } catch (error) {
         console.error('Failed to create private window:', error);
         return;
       }
     } else if (newMode === 'Ghost') {
+      // Ghost = Direct active with Tor
       try {
-        if ((window as any).ipc?.invoke) {
-          await (window as any).ipc.invoke('ob://ipc/v1/private:createGhostTab', { url: 'about:blank' });
+        const { ipc } = await import('../lib/ipc-typed');
+        // Ensure Tor is running
+        try {
+          const torStatus = await ipc.tor.status();
+          if (!torStatus.running || !torStatus.circuitEstablished) {
+            await ipc.tor.start();
+            // Wait a bit for Tor to bootstrap
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        } catch (torError) {
+          console.warn('Tor not available, ghost tab will work without proxy:', torError);
         }
+        // Create ghost tab (will apply Tor proxy automatically)
+        await ipc.private.createGhostTab({ url: 'about:blank' });
+        // Reset mode after creating tab (don't keep it active)
+        setMode('Normal');
       } catch (error) {
         console.error('Failed to create ghost tab:', error);
         return;
