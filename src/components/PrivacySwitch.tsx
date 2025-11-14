@@ -7,6 +7,7 @@ import { motion } from 'framer-motion';
 import { Lock, Eye, Network, MoonStar } from 'lucide-react';
 import { useProfileStore } from '../state/profileStore';
 import { useShadowStore } from '../state/shadowStore';
+import { useTabsStore } from '../state/tabsStore';
 
 type PrivacyMode = 'Normal' | 'Private' | 'Ghost';
 
@@ -50,26 +51,61 @@ export function PrivacySwitch() {
         return;
       }
     } else if (newMode === 'Ghost') {
-      // Ghost = Direct active with Tor
+      // Ghost = Direct active with Tor (enable Tor for current active tab)
       try {
         const { ipc } = await import('../lib/ipc-typed');
+        const { activeId } = useTabsStore.getState();
+        
         // Ensure Tor is running
         try {
           const torStatus = await ipc.tor.status();
           if (!torStatus.running || !torStatus.circuitEstablished) {
             await ipc.tor.start();
-            // Wait a bit for Tor to bootstrap
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            // Wait for Tor to bootstrap
+            let attempts = 0;
+            const maxAttempts = 30;
+            const checkTor = setInterval(async () => {
+              attempts++;
+              const status = await ipc.tor.status();
+              if (status.circuitEstablished || attempts >= maxAttempts) {
+                clearInterval(checkTor);
+                if (status.circuitEstablished) {
+                  // Tor is ready - create ghost tab (will have Tor proxy applied)
+                  try {
+                    await ipc.private.createGhostTab({ url: 'about:blank' });
+                    setMode('Normal');
+                  } catch (error) {
+                    console.error('Failed to create ghost tab:', error);
+                  }
+                } else {
+                  console.warn('Tor failed to establish circuit, creating ghost tab anyway');
+                  try {
+                    await ipc.private.createGhostTab({ url: 'about:blank' });
+                    setMode('Normal');
+                  } catch (error) {
+                    console.error('Failed to create ghost tab:', error);
+                  }
+                }
+              }
+            }, 500);
+          } else {
+            // Tor already running - create ghost tab immediately (Tor proxy will be applied)
+            await ipc.private.createGhostTab({ url: 'about:blank' });
+            setMode('Normal');
           }
         } catch (torError) {
-          console.warn('Tor not available, ghost tab will work without proxy:', torError);
+          console.warn('Tor not available, creating ghost tab without proxy:', torError);
+          // Still create ghost tab even if Tor fails
+          try {
+            await ipc.private.createGhostTab({ url: 'about:blank' });
+            setMode('Normal');
+          } catch (error) {
+            console.error('Failed to create ghost tab:', error);
+            return;
+          }
         }
-        // Create ghost tab (will apply Tor proxy automatically)
-        await ipc.private.createGhostTab({ url: 'about:blank' });
-        // Reset mode after creating tab (don't keep it active)
-        setMode('Normal');
       } catch (error) {
-        console.error('Failed to create ghost tab:', error);
+        console.error('Failed to enable Ghost mode:', error);
         return;
       }
     }
