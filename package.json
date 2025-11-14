@@ -5,6 +5,7 @@
   "description": "OmniBrowser: Electron + React + TypeScript + Vite multi-mode desktop browser",
   "main": "dist-electron/main.js",
   "scripts": {
+    "test:all": "node scripts/test-all-functionality.js",
     "dev": "cross-env JSDOM_NO_CANVAS=1 concurrently -k -n VITE,ELECTRON -c green,blue \"vite --mode development\" \"node scripts/start-electron-dev.cjs\"",
     "dev:all": "node scripts/start-dev-all.cjs",
     "dev:web": "cross-env JSDOM_NO_CANVAS=1 vite --mode development",
