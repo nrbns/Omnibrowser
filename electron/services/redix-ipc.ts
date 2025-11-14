@@ -226,6 +226,31 @@ export function registerRedixIpc() {
   // Redix stream (for SSE streaming via events)
   registerHandler('redix:stream', RedixAskRequest, async (event, request) => {
     try {
+      // First, check if backend is available
+      let backendAvailable = false;
+      try {
+        const statusResponse = await httpRequest<{ ready: boolean; backend: string }>('/redix/status');
+        backendAvailable = statusResponse.ready || false;
+      } catch {
+        // Backend unavailable - send error immediately
+        event.sender.send('redix:chunk', {
+          type: 'error',
+          text: 'AI backend is unavailable. Please check your connection or start Ollama for local AI.',
+          done: true,
+        });
+        return { success: false, error: 'Backend unavailable' };
+      }
+
+      if (!backendAvailable) {
+        // Backend not ready - send error
+        event.sender.send('redix:chunk', {
+          type: 'error',
+          text: 'AI services are not ready. Please start Ollama for local AI or check your connection.',
+          done: true,
+        });
+        return { success: false, error: 'Backend not ready' };
+      }
+
       // Get tab context for enhanced prompts
       let tabContext: { url?: string; title?: string; pageText?: string } | null = null;
       try {
@@ -281,18 +306,34 @@ export function registerRedixIpc() {
           event.sender.send('redix:chunk', chunk);
         }
       ).catch((error) => {
+        // Enhanced error handling for offline/connection issues
+        const errorMessage = error instanceof Error ? error.message : 'Stream error';
+        let userMessage = 'Failed to connect to AI backend.';
+        
+        if (errorMessage.includes('timeout') || errorMessage.includes('unavailable')) {
+          userMessage = 'AI backend is unavailable. Please check your connection or start Ollama for local AI.';
+        } else if (errorMessage.includes('fetch') || errorMessage.includes('ECONNREFUSED')) {
+          userMessage = 'Cannot connect to AI service. Please ensure the backend is running or use Ollama for offline AI.';
+        }
+        
         event.sender.send('redix:chunk', {
           type: 'error',
-          text: error instanceof Error ? error.message : 'Stream error',
+          text: userMessage,
           done: true,
         });
       });
 
       return { success: true };
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Stream error';
+      event.sender.send('redix:chunk', {
+        type: 'error',
+        text: `AI request failed: ${errorMessage}. Please check your connection or start Ollama.`,
+        done: true,
+      });
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Stream error',
+        error: errorMessage,
       };
     }
   });

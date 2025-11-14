@@ -55,7 +55,16 @@ export function RedixQuickDialog({ open, onClose, initialPrompt = '' }: RedixQui
         }
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to get response from Redix');
+      // Enhanced error handling for offline/backend unavailable scenarios
+      let errorMessage = 'Failed to get response from Redix';
+      if (err instanceof Error) {
+        if (err.message.includes('unavailable') || err.message.includes('timeout') || err.message.includes('connection')) {
+          errorMessage = 'AI backend is unavailable. Please check your connection or start Ollama for local AI.';
+        } else {
+          errorMessage = err.message;
+        }
+      }
+      setError(errorMessage);
       setIsLoading(false);
     }
   };
