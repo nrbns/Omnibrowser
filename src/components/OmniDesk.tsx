@@ -680,12 +680,13 @@ export function OmniDesk({ variant = 'overlay', forceShow = false }: OmniDeskPro
       : 'flex h-full w-full overflow-auto bg-gradient-to-br from-[#0F121C] via-[#131827] to-[#0F121C] px-6 py-8';
   
   // Ensure container is properly sized and visible
+  // Note: z-index 20 is below TabStrip (z-50) to ensure tabs are always clickable
   const containerStyle = {
     minHeight: '100%',
     width: '100%',
     position: variant === 'overlay' ? ('absolute' as const) : ('relative' as const),
     zIndex: variant === 'overlay' ? 20 : 1,
-    pointerEvents: 'auto' as const,
+    pointerEvents: shouldShowDashboard ? 'auto' as const : 'none' as const, // Only allow pointer events when visible
   };
 
   const handleManualRefresh = async () => {

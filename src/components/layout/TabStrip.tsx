@@ -1167,8 +1167,8 @@ export function TabStrip() {
         ref={stripRef} 
         role="tablist"
         aria-label="Browser tabs"
-        className="no-drag flex items-center gap-1 px-3 py-2 bg-[#1A1D28] border-b border-gray-700/30 overflow-x-auto scrollbar-hide"
-        style={{ pointerEvents: 'auto' }}
+        className="no-drag flex items-center gap-1 px-3 py-2 bg-[#1A1D28] border-b border-gray-700/30 overflow-x-auto scrollbar-hide relative z-50"
+        style={{ pointerEvents: 'auto', position: 'relative', zIndex: 50 }}
         onKeyDown={handleKeyNavigation}
         data-onboarding="tabstrip"
         onDragOver={(e) => {

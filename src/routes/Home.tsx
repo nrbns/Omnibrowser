@@ -61,6 +61,7 @@ export default function Home() {
           <MainView />
           {/* Show OmniDesk when no tabs or active tab is about:blank (search page) */}
           {/* OmniDesk will handle its own visibility logic */}
+          {/* z-20 is below TabStrip (z-50) to ensure tabs are always clickable */}
           <div className="absolute inset-0 z-20 pointer-events-none">
             <div className="pointer-events-auto h-full w-full">
               <OmniDesk variant="overlay" />

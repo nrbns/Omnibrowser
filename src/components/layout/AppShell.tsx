@@ -785,11 +785,13 @@ export function AppShell() {
               </div>
             </div>
           )}
-          {/* Tab Strip - Hidden in fullscreen */}
+          {/* Tab Strip - Always visible and above overlays */}
           {!isFullscreen && (
         <Suspense fallback={null}>
           <ErrorBoundary componentName="TabStrip">
-            <TabStrip />
+            <div className="relative z-50" style={{ pointerEvents: 'auto' }}>
+              <TabStrip />
+            </div>
           </ErrorBoundary>
         </Suspense>
           )}
