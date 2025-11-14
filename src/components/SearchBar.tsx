@@ -3,7 +3,7 @@
  * This is a minimal, working search that returns results immediately
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Search, Loader2, Globe, FileText, Sparkles } from 'lucide-react';
 import { fetchDuckDuckGoInstant, formatDuckDuckGoResults } from '../services/duckDuckGoSearch';
 import { searchLocal } from '../utils/lunrIndex';
@@ -26,6 +26,10 @@ export default function SearchBar() {
   const [duckResults, setDuckResults] = useState<SearchResult[]>([]);
   const [localResults, setLocalResults] = useState<SearchResult[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [aiResponse, setAiResponse] = useState<string>('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [showAiResponse, setShowAiResponse] = useState(false);
+  const aiSessionRef = useRef<string>(`search-${Date.now()}`);
   
   // SuperMemory suggestions
   const suggestions = useSuggestions(q, { types: ['search', 'visit', 'bookmark'], limit: 5 });
@@ -134,15 +138,68 @@ export default function SearchBar() {
     // Track search
     trackSearch(query).catch(console.error);
     
-    // Try to open as URL or search
+    // If it's a URL, open it directly
+    if (query.startsWith('http://') || query.startsWith('https://')) {
+      try {
+        await ipc.tabs.create(query);
+        setQ('');
+        return;
+      } catch (error) {
+        console.error('[SearchBar] Failed to open URL:', error);
+      }
+    }
+    
+    // For search queries, get AI response from Redix
+    setAiLoading(true);
+    setShowAiResponse(true);
+    setAiResponse('');
+    setError(null);
+    
     try {
-      const url = query.startsWith('http://') || query.startsWith('https://') 
-        ? query 
-        : `https://www.google.com/search?q=${encodeURIComponent(query)}`;
-      await ipc.tabs.create(url);
-      setQ('');
-    } catch (error) {
-      console.error('[SearchBar] Failed to open URL:', error);
+      const sessionId = aiSessionRef.current;
+      let accumulatedText = '';
+      
+      await ipc.redix.stream(
+        query,
+        { sessionId },
+        (chunk) => {
+          try {
+            if (chunk.type === 'token' && chunk.text) {
+              accumulatedText += chunk.text;
+              setAiResponse(accumulatedText);
+            } else if (chunk.type === 'error') {
+              setError(chunk.text || 'AI error');
+              setAiLoading(false);
+            } else if (chunk.done) {
+              setAiLoading(false);
+            }
+          } catch (error) {
+            console.error('[SearchBar] Error handling Redix chunk:', error);
+            setError('Error processing AI response');
+            setAiLoading(false);
+          }
+        }
+      );
+      
+      // Also open search results in a tab
+      try {
+        const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+        await ipc.tabs.create(searchUrl);
+      } catch (error) {
+        console.error('[SearchBar] Failed to open search URL:', error);
+      }
+    } catch (err) {
+      console.error('[SearchBar] Redix stream failed:', err);
+      setError(err instanceof Error ? err.message : 'Failed to get AI response');
+      setAiLoading(false);
+      
+      // Fallback: just open search results
+      try {
+        const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+        await ipc.tabs.create(searchUrl);
+      } catch (error) {
+        console.error('[SearchBar] Failed to open search URL:', error);
+      }
     }
   };
 
@@ -259,6 +316,37 @@ export default function SearchBar() {
           </div>
         )}
       </form>
+
+      {/* AI Response Pane */}
+      {showAiResponse && (
+        <div className="mt-4 rounded-xl border border-blue-700/50 bg-gray-900/95 backdrop-blur-xl shadow-2xl">
+          <div className="p-4 border-b border-gray-800/50">
+            <div className="flex items-center gap-2 mb-2">
+              <Sparkles size={16} className="text-blue-400" />
+              <h3 className="text-sm font-semibold text-gray-300">AI Response</h3>
+              {aiLoading && (
+                <Loader2 size={14} className="text-blue-400 animate-spin ml-auto" />
+              )}
+            </div>
+          </div>
+          <div className="p-4">
+            {aiLoading && !aiResponse && (
+              <div className="flex items-center gap-2 text-gray-400">
+                <Loader2 size={16} className="animate-spin" />
+                <span className="text-sm">Thinking...</span>
+              </div>
+            )}
+            {aiResponse && (
+              <div className="prose prose-invert prose-sm max-w-none">
+                <p className="text-gray-200 whitespace-pre-wrap leading-relaxed">{aiResponse}</p>
+              </div>
+            )}
+            {error && (
+              <div className="text-sm text-red-400 mt-2">{error}</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
