@@ -572,15 +572,26 @@ export function OmniDesk({ variant = 'overlay', forceShow = false }: OmniDeskPro
       setSearchLoading(true);
       console.log('[OmniDesk] Launching search:', query);
 
-      // Check if query starts with @live or @ask for AI streaming
-      const isAIQuery = query.trim().startsWith('@live') || query.trim().startsWith('@ask');
+      // Check if query starts with @live, @ask, or @redix for AI streaming
+      const isAIQuery = query.trim().startsWith('@live') || query.trim().startsWith('@ask') || query.trim().startsWith('@redix');
       
       if (isAIQuery) {
         // Show AI response pane for streaming queries
-        setAiQuery(query);
+        // Remove the @ prefix for the actual query
+        const cleanQuery = query.trim().replace(/^@(live|ask|redix)\s*/i, '');
+        setAiQuery(cleanQuery || query);
         setAiResponseOpen(true);
         setSearchLoading(false);
         return;
+      }
+      
+      // Also check if query is a general question (starts with question words)
+      const isQuestion = /^(what|why|how|when|where|who|explain|summarize|compare|find)/i.test(query.trim());
+      if (isQuestion && query.trim().length > 10) {
+        // Show AI response pane for question-like queries
+        setAiQuery(query);
+        setAiResponseOpen(true);
+        // Don't return - also open search results
       }
 
       // Use the active tab if it's about:blank, otherwise create a new tab

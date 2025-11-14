@@ -933,7 +933,17 @@ export function TopNav({ onAgentToggle, onCommandPalette, onClipperToggle, onRea
 
         <div className="flex-1 min-w-[220px] basis-full sm:basis-auto" data-onboarding="omnibox">
           <div className="relative">
-            <Omnibox ref={omniboxRef} onCommandPalette={onCommandPalette} />
+            <Omnibox 
+              ref={omniboxRef} 
+              onCommandPalette={onCommandPalette}
+              onRedixOpen={(prompt) => {
+                setRedixDialogOpen(true);
+                // Store prompt for RedixQuickDialog to use
+                if (typeof window !== 'undefined') {
+                  (window as any).__redixInitialPrompt = prompt;
+                }
+              }}
+            />
             <ProgressBar />
           </div>
         </div>

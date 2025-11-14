@@ -221,7 +221,7 @@ const buildSuggestionFromAction = (action: SuggestionAction, rawInput: string): 
 const RECENTS_STORAGE_KEY = 'omnibox:recent';
 const MAX_RECENTS = 20;
 
-export const Omnibox = forwardRef<OmniboxHandle, { onCommandPalette: () => void }>(({ onCommandPalette }, ref) => {
+export const Omnibox = forwardRef<OmniboxHandle, { onCommandPalette: () => void; onRedixOpen?: (prompt: string) => void }>(({ onCommandPalette, onRedixOpen }, ref) => {
   const { tabs, activeId } = useTabsStore();
   const activeContainerId = useContainerStore((state) => state.activeContainerId);
   const isElectron = isElectronRuntime();
@@ -928,16 +928,41 @@ export const Omnibox = forwardRef<OmniboxHandle, { onCommandPalette: () => void 
           onCommandPalette();
           return;
         }
+        // Use Redix streaming instead of old agent system
         try {
+          // Open Redix dialog for streaming response
+          if (onRedixOpen) {
+            onRedixOpen(prompt);
+            setFocused(false);
+            setSuggestions([]);
+            return;
+          }
+          // Fallback: try Redix IPC directly
           const tabUrl = activeTab?.url;
-          await ipc.agent.ask(prompt, tabUrl ? { url: tabUrl } : undefined);
+          const context = tabUrl ? await ipc.tabs.getContext(activeTab.id).catch(() => null) : null;
+          // Start Redix stream (will show in status bar or open dialog)
+          await ipc.redix.stream(
+            prompt,
+            { sessionId: `omnibox-${Date.now()}` },
+            (chunk) => {
+              // Stream handler - could emit event for UI to display
+              if (chunk.type === 'token' && chunk.text) {
+                // Emit event for Redix response display
+                ipcEvents.emit('redix:response', { prompt, text: chunk.text, done: chunk.done });
+              }
+            }
+          );
         } catch (error) {
-          console.error('Agent error:', error);
+          console.error('Redix agent error:', error);
+          // Fallback to search
+          await navigateToUrl(buildSearchUrl('google', prompt), {
+            ...options,
+            titleOverride: `Search: ${prompt}`,
+          });
+          return;
         }
-        await navigateToUrl(`ob://agent?q=${encodeURIComponent(prompt)}`, {
-          ...options,
-          titleOverride: `Agent: ${prompt}`,
-        });
+        setFocused(false);
+        setSuggestions([]);
         return;
       }
       case 'calc': {
