@@ -51,6 +51,56 @@ Main AI query interface (single model).
 }
 ```
 
+### `POST /workflow`
+**LangChain Agentic Workflows** - Autonomous agents with tools, ReAct loops, and multi-agent collaboration.
+
+**Request:**
+```json
+{
+  "query": "Research quantum computing ethics and generate code",
+  "context": "Research context here",
+  "workflowType": "research",
+  "tools": ["web_search", "calculator", "code_executor"],
+  "options": {
+    "maxIterations": 5,
+    "maxTokens": 2000,
+    "temperature": 0.7
+  }
+}
+```
+
+**Workflow Types:**
+- `research`: Search → Summarize → Ethics Check
+- `multi-agent`: Research → Code → Ethics (full pipeline)
+- `code`: Code generation with tools
+- `ethics`: Ethics-focused analysis
+
+**Response:**
+```json
+{
+  "result": "Research Summary:\n...\n\nEthics Check:\n...",
+  "steps": [
+    {
+      "step": 1,
+      "action": "search",
+      "tool": "web_search",
+      "observation": "Search results...",
+      "reasoning": "Searching for relevant information"
+    },
+    {
+      "step": 2,
+      "action": "summarize",
+      "observation": "Summary...",
+      "reasoning": "Summarizing search results"
+    }
+  ],
+  "greenScore": 88,
+  "latency": 4500,
+  "tokensUsed": 600,
+  "agentsUsed": ["gpt-4o-mini-search", "gpt-4o-mini-summarize", "claude-3-5-sonnet-ethics"]
+}
+```
+
 ### `POST /fuse`
 **LangChain Multi-LLM Fusion** - Advanced orchestration with sequential/router chains.
 
@@ -134,14 +184,22 @@ const response = await fetch('http://localhost:8001/ask', {
 const data = await response.json();
 ```
 
-## LangChain Fusion
+## LangChain Fusion & Agentic Workflows
 
-Redix includes **LangChain.js** integration for advanced multi-LLM orchestration:
+Redix includes **LangChain.js** integration for advanced multi-LLM orchestration and autonomous agents:
 
+### Fusion Features:
 - **Sequential Chains**: Multi-step workflows (reason → code → ethics)
 - **Router Chains**: Smart model selection (GPT for code, Claude for ethics)
 - **Eco-Scoring**: All chains wrapped with green score calculation
 - **Memory Support**: Conversation history across chains (coming soon)
+
+### Agentic Workflow Features:
+- **ReAct Agents**: Reason → Act → Observe loops with tool integration
+- **Tools**: Web search, calculator, code executor, knowledge graph
+- **Multi-Agent Collaboration**: Research Agent → Code Agent → Ethics Agent
+- **Step-by-Step Execution**: Detailed trace of agent actions and reasoning
+- **Eco-Scoring**: All agent actions calculate green score
 
 **Example Sequential Chain:**
 1. GPT reasons about the query
@@ -157,6 +215,8 @@ Redix includes **LangChain.js** integration for advanced multi-LLM orchestration
 ## Roadmap
 
 - [x] Model fusion with LangChain (sequential/router chains)
+- [x] Agentic workflows with ReAct agents and tools
+- [ ] Full LangGraph support (stateful multi-agent workflows)
 - [ ] SSE streaming for real-time responses
 - [ ] Redis caching for faster responses
 - [ ] JWT authentication

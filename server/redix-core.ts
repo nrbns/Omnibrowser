@@ -5,6 +5,7 @@
 
 import fastify, { FastifyInstance } from 'fastify';
 import { getLangChainFusion, FusionRequest } from './langchain-fusion';
+import { getAgenticWorkflowEngine, AgenticWorkflowRequest } from './langchain-agents';
 
 // Types
 interface AskRequest {
@@ -260,6 +261,34 @@ export class RedixServer {
         console.error('[Redix] /fuse error:', error);
         reply.code(500).send({
           error: error.message || 'Fusion failed',
+        });
+      }
+    });
+
+    // /workflow endpoint - LangChain agentic workflows
+    this.app.post<{ Body: AgenticWorkflowRequest }>('/workflow', async (request, reply) => {
+      try {
+        const { query, context, workflowType, tools, options } = request.body;
+        
+        if (!query?.trim()) {
+          reply.code(400).send({ error: 'Query is required' });
+          return;
+        }
+
+        const workflowEngine = getAgenticWorkflowEngine();
+        const result = await workflowEngine.runWorkflow({
+          query,
+          context,
+          workflowType,
+          tools,
+          options,
+        });
+
+        reply.code(200).send(result);
+      } catch (error: any) {
+        console.error('[Redix] /workflow error:', error);
+        reply.code(500).send({
+          error: error.message || 'Workflow failed',
         });
       }
     });

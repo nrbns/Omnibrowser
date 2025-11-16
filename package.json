@@ -80,7 +80,7 @@
     "ts-pattern": "^5.1.2",
     "utf-8-validate": "file:stubs/utf-8-validate-stub",
     "uuid": "^13.0.0",
-    "zod": "^3.23.8",
+    "zod": "^3.25.76",
     "zustand": "^4.5.2"
   },
   "optionalDependencies": {
