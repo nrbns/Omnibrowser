@@ -3,18 +3,18 @@
 **A privacy-first, agentic research browser with Arc-level UX**
 
 Electron + React + TypeScript + Vite multi-mode desktop browser with:
-- 🛡️ **Brave + Tor + VPN** unified privacy stack ✅
-- 🤖 **Agentic intelligence** with consent ledger ✅
-- 📚 **Knowledge graph** foundation ✅
-- 🧩 **Plugin runtime** ready ✅
-- ⚡ **Performance-first** with tab hibernation ✅
+- 🛡️ **Brave + Tor + VPN** unified privacy stack 🧪 *Experimental / in progress*
+- 🤖 **Agentic intelligence** with consent ledger 🧪 *Experimental / in progress*
+- 📚 **Knowledge graph** foundation 🧪 *Experimental / in progress*
+- 🧩 **Plugin runtime** ready 🧪 *Experimental / in progress*
+- ⚡ **Performance-first** with tab hibernation 🧪 *Experimental / in progress*
 
 **Status**: 🟡 **In Active Development (v0.1.0-alpha)**
 
 [![CI](https://github.com/nrbns/Omnibrowser/workflows/CI/badge.svg)](https://github.com/nrbns/Omnibrowser/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Note**: Currently in Phase 4 (Pre-Launch Hardening). See [PROJECT_STATUS.md](./PROJECT_STATUS.md) for detailed status.
+> **Note**: Currently in Phase 4 (Pre-Launch Hardening) but many systems are still experimental. See [PROJECT_STATUS.md](./PROJECT_STATUS.md) for detailed status.
 > 
 > **Project Board**: See [GitHub Projects](https://github.com/nrbns/Omnibrowser/projects) for roadmap and issue tracking. Setup guide: [docs/project-board-setup.md](./docs/project-board-setup.md)
 
