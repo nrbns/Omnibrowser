@@ -39,10 +39,21 @@ export function PrivacySwitch() {
       return;
     }
 
-    if (newMode === 'Private') {
+    const { ipc } = await import('../lib/ipc-typed');
+
+    if (newMode === 'Normal') {
+      // Normal mode: Clear any active proxy settings
+      try {
+        await ipc.proxy.set({ mode: 'direct' });
+        setMode('Normal');
+      } catch (error) {
+        console.error('Failed to clear proxy:', error);
+        // Still set mode even if proxy clear fails
+        setMode('Normal');
+      }
+    } else if (newMode === 'Private') {
       // Private = Incognito mode (separate session, no history)
       try {
-        const { ipc } = await import('../lib/ipc-typed');
         await ipc.private.createWindow({ url: 'about:blank' });
         // Reset mode after creating window (don't keep it active)
         setMode('Normal');

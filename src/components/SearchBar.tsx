@@ -597,10 +597,12 @@ export default function SearchBar() {
             </div>
           </div>
           <div className="p-4">
-            {aiLoading && !aiResponse && (
-              <div className="flex items-center gap-2 text-gray-400">
-                <Loader2 size={16} className="animate-spin" />
-                <span className="text-sm">Generating summary with citations...</span>
+            {/* Skeleton loader while loading */}
+            {(aiLoading || askingAboutPage) && !aiResponse && (
+              <div className="space-y-2 animate-pulse">
+                <div className="h-4 bg-gray-700/50 rounded w-3/4"></div>
+                <div className="h-4 bg-gray-700/50 rounded w-full"></div>
+                <div className="h-4 bg-gray-700/50 rounded w-5/6"></div>
               </div>
             )}
             {aiResponse && (
