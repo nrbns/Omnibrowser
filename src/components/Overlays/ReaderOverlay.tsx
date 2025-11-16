@@ -73,34 +73,50 @@ export function ReaderOverlay({ active, onClose, tabId, url }: ReaderOverlayProp
       setSummaryMode(null);
       setSummaryError(null);
       try {
-        // Try extraction with fallback to HTTP API
-        // Use new page extractor if available, fallback to existing extractContent
+        // Try extraction via IPC (Electron) first
         let result;
         try {
-          // Try new page extractor via Electron context (if available)
-          const { extractContent } = await import('../../lib/extract-content');
-          result = await extractContent(tabId || '');
-        } catch {
-          // Fallback: Try to use page extractor from document
-          if (typeof window !== 'undefined' && window.document) {
+          // Use research:extractContent IPC call if available
+          if (tabId && typeof window !== 'undefined' && (window as any).ipc) {
             try {
-              const { extractPageContent, formatForLLM } = await import('../../utils/pageExtractor');
-              const pageMeta = extractPageContent(window.document, activeTab?.url);
-              result = {
-                title: pageMeta.title,
-                content: pageMeta.mainContent,
-                html: `<h1>${pageMeta.title}</h1>\n<p>${pageMeta.mainContent}</p>`,
-              };
-            } catch {
-              // Continue with error handling below
+              result = await ipc.research.extractContent(tabId);
+            } catch (ipcError) {
+              console.warn('[ReaderOverlay] IPC extractContent failed, trying fallback:', ipcError);
             }
+          }
+        } catch {
+          // Continue to fallback
+        }
+        
+        // Fallback: Try to use page extractor from document
+        if (!result && typeof window !== 'undefined' && window.document) {
+          try {
+            const { extractPageContent } = await import('../../utils/pageExtractor');
+            const pageMeta = extractPageContent(window.document, activeTab?.url || url || undefined);
+            result = {
+              title: pageMeta.title,
+              content: pageMeta.mainContent,
+              html: `<h1>${pageMeta.title}</h1>\n<p>${pageMeta.mainContent}</p>`,
+            };
+          } catch (extractError) {
+            console.warn('[ReaderOverlay] Page extractor fallback failed:', extractError);
           }
         }
         
+        // Final fallback: Use tab title/URL if available
+        if (!result && activeTab) {
+          result = {
+            title: activeTab.title || 'Reader View',
+            content: `Content from: ${activeTab.url || 'Current page'}\n\nUnable to extract readable content. Please ensure the page has loaded completely.`,
+            html: `<h1>${activeTab.title || 'Reader View'}</h1>\n<p>Content from: <a href="${activeTab.url}">${activeTab.url}</a></p>\n<p>Unable to extract readable content. Please ensure the page has loaded completely.</p>`,
+          };
+        }
+        
         if (!result || (!result.content && !result.html)) {
-          setError('Unable to extract article content for this page.');
+          setError('Unable to extract article content for this page. The page may not have readable content, or it may still be loading.');
           return;
         }
+        
         setArticle({
           title: result.title || activeTab?.title || activeTab?.url || 'Reader View',
           html: result.html || `<p>${sanitizeText(result.content)}</p>`,
@@ -109,7 +125,7 @@ export function ReaderOverlay({ active, onClose, tabId, url }: ReaderOverlayProp
         });
       } catch (err) {
         console.error('Failed to load reader content:', err);
-        setError('Failed to load reader view for this page.');
+        setError('Failed to load reader view for this page. Please try again or ensure the page has loaded.');
       } finally {
         setLoading(false);
       }

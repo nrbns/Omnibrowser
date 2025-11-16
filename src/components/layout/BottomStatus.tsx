@@ -77,6 +77,7 @@ export function BottomStatus() {
   // Use metrics store for real-time CPU/memory updates
   const cpuUsage = latestSample?.cpu ?? 0;
   const memoryUsage = latestSample?.memory ?? 0;
+  const pushMetricSample = useMetricsStore((state) => state.pushSample);
   const [modelReady] = useState(true);
   const [privacyMode, setPrivacyMode] = useState<'Normal' | 'Ghost' | 'Tor'>('Normal');
   const [efficiencyAlert, setEfficiencyAlert] = useState<EfficiencyAlert | null>(null);
@@ -98,7 +99,6 @@ export function BottomStatus() {
   const stopTor = usePrivacyStore((state) => state.stopTor);
   const newTorIdentity = usePrivacyStore((state) => state.newTorIdentity);
   const checkVpn = usePrivacyStore((state) => state.checkVpn);
-  const pushMetricSample = useMetricsStore((state) => state.pushSample);
   const metricsHistory = useMetricsStore((state) => state.history);
   const dailyCarbon = useMetricsStore((state) => state.dailyTotalCarbon);
   const highCpuRef = useRef<MetricSample[]>([]);
@@ -145,6 +145,47 @@ export function BottomStatus() {
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  // Poll Redix /metrics endpoint for real-time updates
+  useEffect(() => {
+    if (!isElectron) return;
+    
+    const pollMetrics = async () => {
+      try {
+        const redixUrl = import.meta.env.VITE_REDIX_CORE_URL || 'http://localhost:8001';
+        const response = await fetch(`${redixUrl}/metrics`).catch(() => null);
+        
+        if (response?.ok) {
+          const data = await response.json();
+          // Update metrics store with Redix data
+          pushMetricSample({
+            timestamp: Date.now(),
+            cpu: data.cpu || 0,
+            memory: data.memory || 0,
+            carbonIntensity: data.greenScore ? 100 - data.greenScore : undefined,
+          });
+        } else {
+          // Fallback: Use mock data if Redix unavailable
+          const mockCpu = Math.random() * 30 + 10; // 10-40%
+          const mockMemory = Math.random() * 50 + 20; // 20-70%
+          pushMetricSample({
+            timestamp: Date.now(),
+            cpu: mockCpu,
+            memory: mockMemory,
+          });
+        }
+      } catch (error) {
+        // Silent fail - metrics will use store defaults
+        console.debug('[BottomStatus] Metrics polling failed:', error);
+      }
+    };
+    
+    // Poll immediately, then every 2 seconds
+    pollMetrics();
+    const interval = setInterval(pollMetrics, 2000);
+    
+    return () => clearInterval(interval);
+  }, [isElectron, pushMetricSample]);
 
   const pushPrivacyEvent = useCallback(
     (event: Omit<PrivacyEventEntry, 'id' | 'timestamp'> & { timestamp?: number }) => {

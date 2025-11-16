@@ -283,37 +283,62 @@ export default function SearchBar() {
         });
         setAiResponse(searchData.summary.text);
       } else {
-        // Fallback: try Redix /ask endpoint if summary not available
+        // Fallback: try Redix /workflow endpoint for agentic AI (preferred)
         try {
-          const redixResponse = await fetch(`${REDIX_CORE_URL}/ask`, {
+          const workflowResponse = await fetch(`${REDIX_CORE_URL}/workflow`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               query,
-              context: activeTab ? { url: activeTab.url, title: activeTab.title } : undefined,
-              options: { provider: 'auto', maxTokens: 500 },
+              context: activeTab ? `${activeTab.title}: ${activeTab.url}` : undefined,
+              workflowType: 'research', // Use research workflow for search queries
+              tools: ['web_search'],
+              options: { maxIterations: 3, maxTokens: 1000, temperature: 0.7 },
             }),
           });
 
-          if (redixResponse.ok) {
-            const redixData = await redixResponse.json();
-            setAiResponse(redixData.text || 'No response from Redix');
-            console.debug(`[SearchBar] Redix response (green score: ${redixData.greenScore}, latency: ${redixData.latency}ms)`);
+          if (workflowResponse.ok) {
+            const workflowData = await workflowResponse.json();
+            // Display the fused result from agentic workflow
+            setAiResponse(workflowData.result || 'No response from Redix workflow');
+            console.debug(`[SearchBar] Redix workflow (green score: ${workflowData.greenScore}, steps: ${workflowData.steps?.length || 0}, latency: ${workflowData.latency}ms)`);
           } else {
-            throw new Error(`Redix API error: ${redixResponse.statusText}`);
+            throw new Error(`Redix workflow API error: ${workflowResponse.statusText}`);
           }
-        } catch (redixError) {
-          console.warn('[SearchBar] Redix /ask fallback failed:', redixError);
-          // Final fallback: use LLM adapter directly
+        } catch (workflowError) {
+          console.warn('[SearchBar] Redix /workflow fallback failed:', workflowError);
+          // Fallback to /ask endpoint
           try {
-            const llmResponse = await sendPrompt(query, {
-              systemPrompt: 'You are a helpful search assistant. Provide a concise answer.',
-              maxTokens: 500,
+            const redixResponse = await fetch(`${REDIX_CORE_URL}/ask`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                query,
+                context: activeTab ? { url: activeTab.url, title: activeTab.title } : undefined,
+                options: { provider: 'auto', maxTokens: 500 },
+              }),
             });
-            setAiResponse(llmResponse.text || 'No response');
-          } catch (llmError) {
-            console.error('[SearchBar] LLM adapter fallback failed:', llmError);
-            setError('AI services unavailable. Please check your API keys.');
+
+            if (redixResponse.ok) {
+              const redixData = await redixResponse.json();
+              setAiResponse(redixData.text || 'No response from Redix');
+              console.debug(`[SearchBar] Redix /ask response (green score: ${redixData.greenScore}, latency: ${redixData.latency}ms)`);
+            } else {
+              throw new Error(`Redix API error: ${redixResponse.statusText}`);
+            }
+          } catch (redixError) {
+            console.warn('[SearchBar] Redix /ask fallback failed:', redixError);
+            // Final fallback: use LLM adapter directly
+            try {
+              const llmResponse = await sendPrompt(query, {
+                systemPrompt: 'You are a helpful search assistant. Provide a concise answer.',
+                maxTokens: 500,
+              });
+              setAiResponse(llmResponse.text || 'No response');
+            } catch (llmError) {
+              console.error('[SearchBar] LLM adapter fallback failed:', llmError);
+              setError('AI services unavailable. Please check your API keys.');
+            }
           }
         }
       }
