@@ -4,6 +4,7 @@
  */
 
 import fastify, { FastifyInstance } from 'fastify';
+import { getLangChainFusion, FusionRequest } from './langchain-fusion';
 
 // Types
 interface AskRequest {
@@ -234,6 +235,33 @@ export class RedixServer {
         greenScore,
         timestamp: Date.now(),
       };
+    });
+
+    // /fuse endpoint - LangChain multi-LLM fusion
+    this.app.post<{ Body: FusionRequest }>('/fuse', async (request, reply) => {
+      try {
+        const { query, context, chainType, options } = request.body;
+        
+        if (!query?.trim()) {
+          reply.code(400).send({ error: 'Query is required' });
+          return;
+        }
+
+        const fusion = getLangChainFusion();
+        const result = await fusion.fuse({
+          query,
+          context,
+          chainType,
+          options,
+        });
+
+        reply.code(200).send(result);
+      } catch (error: any) {
+        console.error('[Redix] /fuse error:', error);
+        reply.code(500).send({
+          error: error.message || 'Fusion failed',
+        });
+      }
     });
   }
 
