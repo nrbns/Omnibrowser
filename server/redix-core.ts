@@ -6,6 +6,7 @@
 import fastify, { FastifyInstance } from 'fastify';
 import { getLangChainFusion, FusionRequest } from './langchain-fusion';
 import { getAgenticWorkflowEngine, AgenticWorkflowRequest } from './langchain-agents';
+import { getVoiceProcessor, VoiceRequest } from './redix-voice';
 
 // Types
 interface AskRequest {
@@ -289,6 +290,35 @@ export class RedixServer {
         console.error('[Redix] /workflow error:', error);
         reply.code(500).send({
           error: error.message || 'Workflow failed',
+        });
+      }
+    });
+
+    // /voice endpoint - Voice Companion
+    this.app.post<{ Body: VoiceRequest }>('/voice', async (request, reply) => {
+      try {
+        const { transcript, url, title, selection, tabId, context } = request.body;
+        
+        if (!transcript?.trim()) {
+          reply.code(400).send({ error: 'Transcript is required' });
+          return;
+        }
+
+        const voiceProcessor = getVoiceProcessor();
+        const result = await voiceProcessor.processVoice({
+          transcript,
+          url,
+          title,
+          selection,
+          tabId,
+          context,
+        });
+
+        reply.code(200).send(result);
+      } catch (error: any) {
+        console.error('[Redix] /voice error:', error);
+        reply.code(500).send({
+          error: error.message || 'Voice processing failed',
         });
       }
     });

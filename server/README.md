@@ -51,6 +51,42 @@ Main AI query interface (single model).
 }
 ```
 
+### `POST /voice`
+**Voice Companion** - Hands-free AI assistant with context awareness and eco-checking.
+
+**Request:**
+```json
+{
+  "transcript": "Hey Regen, summarize this page",
+  "url": "https://example.com",
+  "title": "Example Page",
+  "selection": "Selected text here",
+  "tabId": "tab-123",
+  "context": {
+    "batteryLevel": 0.75,
+    "memoryUsage": 45.2
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "response": "This page discusses quantum computing...",
+  "action": "summarize",
+  "ecoScore": 92,
+  "latency": 1200,
+  "tokensUsed": 85
+}
+```
+
+**Actions:**
+- `speak`: Just speak the response
+- `search`: Trigger search action
+- `summarize`: Summarize current page
+- `note`: Save to Notes sidebar
+- `none`: No action (eco-constrained)
+
 ### `POST /workflow`
 **LangChain Agentic Workflows** - Autonomous agents with tools, ReAct loops, and multi-agent collaboration.
 
@@ -200,6 +236,15 @@ Redix includes **LangChain.js** integration for advanced multi-LLM orchestration
 - **Multi-Agent Collaboration**: Research Agent → Code Agent → Ethics Agent
 - **Step-by-Step Execution**: Detailed trace of agent actions and reasoning
 - **Eco-Scoring**: All agent actions calculate green score
+
+### Voice Companion Features:
+- **Always Listening**: Toggle button or wake word ("Hey Regen")
+- **Context-Aware**: Knows current tab, selected text, Redix state
+- **Proactive Suggestions**: "Want me to summarize this page?"
+- **Natural TTS**: Web Speech Synthesis with emotion
+- **Eco-Aware**: Pauses if battery <30% or memory >85%
+- **Privacy-First**: Local Ollama fallback, consent logging
+- **Floating Orb UI**: Pulsing purple/red when listening
 
 **Example Sequential Chain:**
 1. GPT reasons about the query

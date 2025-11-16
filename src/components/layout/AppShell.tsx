@@ -16,6 +16,7 @@ import { useTabGraphStore } from '../../state/tabGraphStore';
 import { isDevEnv } from '../../lib/env';
 import { TabContentSurface } from './TabContentSurface';
 import { VoiceTips } from '../voice/VoiceTips';
+import VoiceCompanion from '../voice/VoiceCompanion';
 import { initializeOptimizer } from '../../core/redix/optimizer';
 import { useRedix } from '../../core/redix/useRedix';
 import { updatePolicyMetrics, getPolicyRecommendations } from '../../core/redix/policies';
@@ -1068,6 +1069,11 @@ export function AppShell() {
       
       {/* Redix Debug Panel */}
       <RedixDebugPanel open={redixDebugOpen} onClose={() => setRedixDebugOpen(false)} />
+
+      {/* Voice Companion - Floating Orb */}
+      <ErrorBoundary componentName="VoiceCompanion">
+        <VoiceCompanion position="bottom-right" />
+      </ErrorBoundary>
 
       {restoreToast && (
         <Portal>
