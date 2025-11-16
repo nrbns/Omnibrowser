@@ -370,7 +370,8 @@ export function AppShell() {
   const consentVisible = useConsentOverlayStore((state) => state.visible);
   const trustDashboardVisible = useTrustDashboardStore((state) => state.visible);
   const tabsState = useTabsStore();
-  const activeTab = tabsState.tabs.find(tab => tab.id === tabsState.activeId);
+  const activeTab = useMemo(() => tabsState.tabs.find(tab => tab.id === tabsState.activeId), [tabsState.tabs, tabsState.activeId]);
+  const mode = useAppStore((state) => state.mode);
   const [contentSplit, setContentSplit] = useState(0.62);
   
   // Track visits when active tab URL changes
@@ -504,9 +505,11 @@ export function AppShell() {
 
     const checkAndToggle = async () => {
       try {
-        const result = await autoTogglePrivacy(activeTab.url, 'Normal');
+        const url = activeTab.url;
+        if (!url) return;
+        const result = await autoTogglePrivacy(url, 'Normal');
         if (result) {
-          console.debug(`[AppShell] Auto-enabled ${result} mode for sensitive site:`, activeTab.url);
+          console.debug(`[AppShell] Auto-enabled ${result} mode for sensitive site:`, url);
         }
       } catch (error) {
         console.debug('[AppShell] Privacy auto-toggle failed:', error);
