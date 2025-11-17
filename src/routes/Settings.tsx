@@ -1479,6 +1479,19 @@ export default function Settings() {
             </motion.div>
           )}
 
+          {activeSection === 'accessibility' && (
+            <motion.div
+              key="accessibility"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="p-8"
+            >
+              <h2 className="text-2xl font-bold mb-6">Accessibility</h2>
+              <AccessibilityAudit />
+            </motion.div>
+          )}
+
           {activeSection === 'notifications' && (
             <motion.div
               key="notifications"
