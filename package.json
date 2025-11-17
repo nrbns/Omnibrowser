@@ -26,6 +26,8 @@
     "test:smoke": "playwright test tests/e2e/electron-smoke.spec.ts --config=playwright.config.ts",
     "test:backend": "playwright test tests/e2e/backend-api.spec.ts --config=playwright.config.ts",
     "dev:redix": "tsx server/redix-core.ts",
+    "dev:redix-universal": "vite --config vite.config.redix.ts",
+    "build:redix": "vite build --config vite.config.redix.ts",
     "audit:lighthouse": "tsx scripts/lighthouse-audit.ts",
     "perf:test": "tsx scripts/perf/perf-audit.ts",
     "postinstall": "node ./scripts/postinstall.ts",
