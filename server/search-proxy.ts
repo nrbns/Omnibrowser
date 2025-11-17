@@ -88,8 +88,102 @@ async function sendPromptServer(
 
 const server = fastify({ logger: true });
 
-// CORS middleware with security headers
+// Rate limiting: Simple in-memory store (use Redis in production)
+interface RateLimitEntry {
+  count: number;
+  resetAt: number;
+}
+
+const rateLimitStore = new Map<string, RateLimitEntry>();
+
+// Rate limit configuration
+const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
+const RATE_LIMIT_MAX_REQUESTS = 100; // 100 requests per minute per IP
+
+/**
+ * Get client IP address (handles proxies)
+ */
+function getClientIp(request: any): string {
+  return (
+    request.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+    request.headers['x-real-ip'] ||
+    request.ip ||
+    'unknown'
+  );
+}
+
+/**
+ * Check rate limit for a client
+ * @returns true if allowed, false if rate limited
+ */
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = rateLimitStore.get(ip);
+
+  if (!entry || now > entry.resetAt) {
+    // New window or expired - reset
+    rateLimitStore.set(ip, {
+      count: 1,
+      resetAt: now + RATE_LIMIT_WINDOW_MS,
+    });
+    return true;
+  }
+
+  // Increment count
+  entry.count += 1;
+
+  // Check if exceeded
+  if (entry.count > RATE_LIMIT_MAX_REQUESTS) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Clean up old rate limit entries (run periodically)
+ */
+function cleanupRateLimitStore() {
+  const now = Date.now();
+  for (const [ip, entry] of rateLimitStore.entries()) {
+    if (now > entry.resetAt) {
+      rateLimitStore.delete(ip);
+    }
+  }
+}
+
+// Cleanup every 5 minutes
+setInterval(cleanupRateLimitStore, 5 * 60 * 1000);
+
+// CORS middleware with security headers and rate limiting
 server.addHook('onRequest', async (request, reply) => {
+  // Rate limiting (skip for health check)
+  if (request.url !== '/health') {
+    const clientIp = getClientIp(request);
+    if (!checkRateLimit(clientIp)) {
+      const entry = rateLimitStore.get(clientIp);
+      const retryAfter = entry ? Math.ceil((entry.resetAt - Date.now()) / 1000) : 60;
+      
+      reply.code(429).header('Retry-After', String(retryAfter));
+      reply.header('X-RateLimit-Limit', String(RATE_LIMIT_MAX_REQUESTS));
+      reply.header('X-RateLimit-Remaining', '0');
+      reply.header('X-RateLimit-Reset', String(entry?.resetAt || Date.now() + RATE_LIMIT_WINDOW_MS));
+      
+      return reply.send({
+        error: 'Rate limit exceeded',
+        message: `Too many requests. Please try again in ${retryAfter} seconds.`,
+        retryAfter,
+      });
+    }
+
+    // Add rate limit headers to successful requests
+    const entry = rateLimitStore.get(clientIp);
+    if (entry) {
+      reply.header('X-RateLimit-Limit', String(RATE_LIMIT_MAX_REQUESTS));
+      reply.header('X-RateLimit-Remaining', String(Math.max(0, RATE_LIMIT_MAX_REQUESTS - entry.count)));
+      reply.header('X-RateLimit-Reset', String(entry.resetAt));
+    }
+  }
   // CORS: Only allow from same origin or configured origins in production
   const allowedOrigin = process.env.NODE_ENV === 'production' 
     ? (process.env.ALLOWED_ORIGIN || 'http://localhost:5173')
@@ -106,9 +200,7 @@ server.addHook('onRequest', async (request, reply) => {
   reply.header('X-XSS-Protection', '1; mode=block');
   reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
   
-  // Rate limiting headers (informational)
-  reply.header('X-RateLimit-Limit', '100');
-  reply.header('X-RateLimit-Window', '60');
+  // Additional security headers
   
   if (request.method === 'OPTIONS') {
     reply.code(200).send();
@@ -362,6 +454,19 @@ Summary:`;
 }
 
 /**
+ * Validate URL format and protocol
+ */
+function validateUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    // Only allow http and https
+    return ['http:', 'https:'].includes(parsed.protocol);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * POST /api/search - Aggregate search from multiple engines
  */
 server.post<{
@@ -369,11 +474,25 @@ server.post<{
 }>('/api/search', async (request, reply) => {
   const { query, sources = ['duckduckgo', 'bing'], limit = 20, includeSummary = false } = request.body;
 
+  // Validate and sanitize query
   if (!query || typeof query !== 'string' || query.trim().length === 0) {
     return reply.code(400).send({ error: 'Query is required' });
   }
 
-  const trimmedQuery = query.trim();
+  const sanitizedQuery = sanitizeQuery(query);
+  if (!sanitizedQuery) {
+    return reply.code(400).send({ error: 'Invalid query. Query must be between 1-500 characters.' });
+  }
+
+  // Validate sources array
+  if (sources && !Array.isArray(sources)) {
+    return reply.code(400).send({ error: 'Sources must be an array' });
+  }
+
+  // Validate limit
+  const validatedLimit = Math.min(Math.max(1, limit || 20), 100); // Between 1 and 100
+
+  const trimmedQuery = sanitizedQuery;
   const startTime = Date.now();
 
   // Get API keys from environment
@@ -401,7 +520,7 @@ server.post<{
 
   // Deduplicate and limit
   const unique = deduplicateResults(flattened);
-  const limited = unique.slice(0, limit);
+  const limited = unique.slice(0, validatedLimit);
 
   // Generate summary if requested
   let summary: { text: string; citations: Array<{ index: number; url: string; title: string }> } | undefined;
@@ -519,6 +638,19 @@ server.get<{
     total: results.length,
   });
 });
+
+/**
+ * Validate URL format and protocol (moved before sanitizeQuery for proper ordering)
+ */
+function validateUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    // Only allow http and https
+    return ['http:', 'https:'].includes(parsed.protocol);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Sanitize and validate search query

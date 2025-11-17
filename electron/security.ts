@@ -48,7 +48,7 @@ function buildContentSecurityPolicy(isDev: boolean): string {
     const devServer = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
     return [
       `default-src 'self' ${devServer}`,
-      `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${devServer}`,
+      `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${devServer}`, // unsafe-eval needed for Vite HMR
       `style-src 'self' 'unsafe-inline' ${devServer} https://fonts.googleapis.com`,
       `font-src 'self' data: https://fonts.gstatic.com`,
       `img-src 'self' data: blob: https: ${devServer}`,
@@ -57,13 +57,18 @@ function buildContentSecurityPolicy(isDev: boolean): string {
       `connect-src 'self' https: http: ws: wss: ${devServer}`,
       `worker-src 'self' blob: ${devServer}`,
       `frame-ancestors 'self'`,
+      `base-uri 'self'`,
+      `form-action 'self'`,
+      `object-src 'none'`,
+      `upgrade-insecure-requests`,
     ].join('; ');
   }
 
+  // Production: Stricter CSP without unsafe-eval
   return [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline'",
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "script-src 'self'", // Removed 'unsafe-inline' for production
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com", // unsafe-inline needed for Tailwind
     "font-src 'self' data: https://fonts.gstatic.com",
     "img-src 'self' data: blob: https:",
     "media-src 'self' blob: https:",
@@ -71,6 +76,11 @@ function buildContentSecurityPolicy(isDev: boolean): string {
     "connect-src 'self' https: http: ws: wss:",
     "worker-src 'self' blob:",
     "frame-ancestors 'self'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "object-src 'none'",
+    "upgrade-insecure-requests",
+    "block-all-mixed-content",
   ].join('; ');
 }
 
