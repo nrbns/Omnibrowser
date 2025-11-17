@@ -27,10 +27,7 @@ _Last updated: 2025-12-17_
 |----------|-------|-------------|-----|--------|
 | P0 | @maintainer | Maintain status doc + checklist parity | Ongoing | ✅ |
 | P0 | Security | **Phase 1 Complete** - DOMPurify, CSP, rate limiting, URL validation | Dec 17 | ✅ **Complete** |
-| P1 | Compliance | Create Terms of Service document | Dec 20 | 🔄 Next |
-| P1 | Compliance | Add cookie consent banner (GDPR) | Dec 22 | 🔄 Next |
-| P1 | Compliance | Implement GDPR data export functionality | Dec 24 | 🔄 Next |
-| P1 | Compliance | Add accessibility audit (axe-core) | Dec 26 | 🔄 Next |
+| P1 | Compliance | **Phase 2 Complete** - TOS, cookie consent, GDPR export, accessibility audit | Dec 17 | ✅ **Complete** |
 | P2 | Monitoring | Integrate crash reporting (Sentry) | Dec 28 | 📋 Planned |
 | P2 | Monitoring | Add privacy-respecting analytics | Dec 30 | 📋 Planned |
 
@@ -46,13 +43,19 @@ _Last updated: 2025-12-17_
 
 ## Recent Progress
 
-### Phase 1: Critical Security (Dec 2025) ✅
+### Phase 1: Critical Security (Dec 17, 2025) ✅
 - ✅ **DOMPurify Integration** - HTML sanitization for XSS protection (`src/utils/sanitize.ts`)
 - ✅ **Enhanced CSP Headers** - Stricter production policy with `base-uri`, `form-action`, `object-src`, `upgrade-insecure-requests`
 - ✅ **Electron safeStorage** - Secure storage service for sensitive data encryption (`electron/services/secure-storage.ts`)
 - ✅ **Rate Limiting** - 100 req/min per IP with proper headers (`server/search-proxy.ts`)
 - ✅ **URL Validation** - Comprehensive validation middleware (http/https only, prevents javascript:/data: attacks)
 - ✅ **Input Sanitization** - Query sanitization, prompt injection prevention, JSON sanitization
+
+### Phase 2: Compliance & Accessibility (Dec 17, 2025) ✅
+- ✅ **Terms of Service** - Comprehensive TOS document (`TERMS_OF_SERVICE.md`) with first-run acceptance flow
+- ✅ **Cookie Consent Banner** - GDPR-compliant cookie consent with granular preferences (`src/components/onboarding/CookieConsent.tsx`)
+- ✅ **GDPR Data Export** - Complete data export functionality (bookmarks, history, settings, preferences) (`src/components/privacy/GDPRDataExport.tsx`)
+- ✅ **Accessibility Audit** - axe-core integration for WCAG 2.1 AA compliance testing (`src/components/accessibility/AccessibilityAudit.tsx`)
 
 ### Previous Milestones
 - Signed installers automated for Windows/macOS with published hashes.
@@ -89,9 +92,9 @@ _Last updated: 2025-12-17_
 
 3. **Milestone M3 – Public Release Readiness (target 2025-12-30):**
    - ✅ Phase 1: Critical Security (Complete Dec 17)
-   - 🔄 Phase 2: Compliance (TOS, GDPR, cookie consent) - In Progress
-   - 📋 Phase 3: Monitoring (Sentry, analytics) - Planned
-   - 📋 Phase 4: Final polish (accessibility audit, user onboarding) - Planned  
+   - ✅ Phase 2: Compliance (Complete Dec 17) - TOS, GDPR export, cookie consent, accessibility audit
+   - 📋 Phase 3: Monitoring (Sentry, analytics) - Next
+   - 📋 Phase 4: Final polish (user onboarding tour) - Planned  
 
 ## Dependencies & Notes
 - **Certificates:** Need code-signing certificates (Windows & macOS) before packaging milestone.  
