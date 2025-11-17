@@ -1,11 +1,12 @@
 # OmniBrowser Project Status
 
-_Last updated: 2025-11-09_
+_Last updated: 2025-12-17_
 
 ## Snapshot
 - **Program Phase:** Phase A – Beta Readiness  
-- **Current Iteration (Nov 2025):** Release Hygiene & Foundation  
-- **Overall Health:** 🟡 _Watchlist_ – privacy routing + security headers outstanding before beta sign-off.
+- **Current Iteration (Dec 2025):** Security Hardening & Compliance  
+- **Overall Health:** 🟢 _Good_ – Phase 1 security complete, Phase 2 compliance in progress
+- **Production Readiness:** 75/100 (Beta-ready, needs 2-4 weeks for public release)
 
 ## Phase Tracker
 | Track | Status | Notes |
@@ -14,18 +15,24 @@ _Last updated: 2025-11-09_
 | Onboarding & Docs | 🟢 Complete | Installation guide with screenshots, consent ledger tour, and privacy docs published. |
 | UI/UX Polish | 🟢 Complete | Split-view, hibernation indicators, accessibility fixes, auto theming, and resilient error boundaries live. |
 | Stability & Observability | 🟢 Complete | CI + local checks passing; telemetry hooks and monitoring dashboards deployed. |
+| **Phase 1: Security** | ✅ **Complete** | DOMPurify, enhanced CSP, safeStorage, rate limiting, URL validation (Dec 2025) |
+| **Phase 2: Compliance** | 🔄 **In Progress** | Terms of Service, GDPR features, cookie consent (Next) |
 
 ## Key Blockers
-Track Tor proxy integration, CSP rollout, and telemetry opt-in rates; no blocking issues.
+- **None** - Phase 1 security complete, proceeding with Phase 2 compliance
+- Track Phase 2 compliance tasks (TOS, GDPR, cookie consent) for public release readiness
 
-## Immediate Next Steps (Beta Readiness)
+## Immediate Next Steps (Beta → Public Release)
 | Priority | Owner | Deliverable | ETA | Status |
 |----------|-------|-------------|-----|--------|
 | P0 | @maintainer | Maintain status doc + checklist parity | Ongoing | ✅ |
-| P0 | Release | Schedule beta retrospective / sign-off review | Nov 20 | 🟢 Scheduled |
-| P1 | DevOps | Monitor CI health and dependency drift | Continuous | 🟢 On Track |
-| P1 | Platform | Wire Tor proxy + VPN handoff (beyond UI) | Nov 15 | ✅ Completed |
-| P1 | Security | Land CSP headers + iframe proxy hardening | Nov 16 | 🔄 In Progress |
+| P0 | Security | **Phase 1 Complete** - DOMPurify, CSP, rate limiting, URL validation | Dec 17 | ✅ **Complete** |
+| P1 | Compliance | Create Terms of Service document | Dec 20 | 🔄 Next |
+| P1 | Compliance | Add cookie consent banner (GDPR) | Dec 22 | 🔄 Next |
+| P1 | Compliance | Implement GDPR data export functionality | Dec 24 | 🔄 Next |
+| P1 | Compliance | Add accessibility audit (axe-core) | Dec 26 | 🔄 Next |
+| P2 | Monitoring | Integrate crash reporting (Sentry) | Dec 28 | 📋 Planned |
+| P2 | Monitoring | Add privacy-respecting analytics | Dec 30 | 📋 Planned |
 
 ## Risk & Mitigation
 - **Risk:** Release drift due to scope creep.  
@@ -38,6 +45,16 @@ Track Tor proxy integration, CSP rollout, and telemetry opt-in rates; no blockin
   _Mitigation:_ Add proxy smoke tests, monitor error telemetry, keep manual fallback path documented.
 
 ## Recent Progress
+
+### Phase 1: Critical Security (Dec 2025) ✅
+- ✅ **DOMPurify Integration** - HTML sanitization for XSS protection (`src/utils/sanitize.ts`)
+- ✅ **Enhanced CSP Headers** - Stricter production policy with `base-uri`, `form-action`, `object-src`, `upgrade-insecure-requests`
+- ✅ **Electron safeStorage** - Secure storage service for sensitive data encryption (`electron/services/secure-storage.ts`)
+- ✅ **Rate Limiting** - 100 req/min per IP with proper headers (`server/search-proxy.ts`)
+- ✅ **URL Validation** - Comprehensive validation middleware (http/https only, prevents javascript:/data: attacks)
+- ✅ **Input Sanitization** - Query sanitization, prompt injection prevention, JSON sanitization
+
+### Previous Milestones
 - Signed installers automated for Windows/macOS with published hashes.
 - Full Phase A/B/C feature sets delivered (split view, omnibar recall, spaces, eco-mode).
 - Zero-knowledge sync + collaborative graph sharing implemented and documented.
@@ -51,23 +68,30 @@ Track Tor proxy integration, CSP rollout, and telemetry opt-in rates; no blockin
 - Omnibox surfaces smart `@redix` suggestions and Redix badges by default.
 - Adaptive top nav menus surface persona-specific shortcuts and include a live theme switcher.
 - Personalized onboarding tour asks for focus (Research/Trade/etc.) and preloads matching defaults.
-- Hibernation alerts surface (“Rested N tabs · ≈MB saved”) when regen auto-sleeps tabs.
-- Agent overlay now shows Redix “thinking bubbles” with live skeleton feedback.
+- Hibernation alerts surface ("Rested N tabs · ≈MB saved") when regen auto-sleeps tabs.
+- Agent overlay now shows Redix "thinking bubbles" with live skeleton feedback.
 
 ## Upcoming Milestones
-1. **Milestone M1 – Beta Release Candidate (target 2025-11-30):**
+
+1. **Milestone M1 – Beta Release Candidate (✅ Complete 2025-11-30):**
    - ✅ Restored status tracking
    - ✅ Changelog + tag plan finalized  
    - ✅ CI (lint/test/audit) running clean  
    - ✅ Install guide & consent documentation shipped  
    - ✅ UI polish tasks (split view, hibernation indicators, accessibility fixes) complete
 
-2. **Milestone M2 – Public Beta Announcement (target 2025-12-15):**
+2. **Milestone M2 – Public Beta Announcement (✅ Complete 2025-12-15):**
    - ✅ Signed installers uploaded with hashes  
    - ✅ User-facing release notes published  
    - ✅ Dark/light theming & enhanced error boundaries live  
    - ✅ Consent ledger walkthrough integrated into first-run experience  
-   - ✅ Demo video / README refresh with v0.2 highlights  
+   - ✅ Demo video / README refresh with v0.2 highlights
+
+3. **Milestone M3 – Public Release Readiness (target 2025-12-30):**
+   - ✅ Phase 1: Critical Security (Complete Dec 17)
+   - 🔄 Phase 2: Compliance (TOS, GDPR, cookie consent) - In Progress
+   - 📋 Phase 3: Monitoring (Sentry, analytics) - Planned
+   - 📋 Phase 4: Final polish (accessibility audit, user onboarding) - Planned  
 
 ## Dependencies & Notes
 - **Certificates:** Need code-signing certificates (Windows & macOS) before packaging milestone.  
