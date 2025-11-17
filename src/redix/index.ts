@@ -13,6 +13,8 @@
 
 import { getRedixPool } from '../core/redix-pool';
 import { getDeviceDetector, detectDeviceCapabilities } from '../core/device-detector';
+import { getGhostMode, isGhostModeEnabled } from '../core/ghost-mode';
+import { detectTorBrowser } from '../core/tor-detector';
 import { RedixContentRenderer } from './renderer';
 import { RedixAI } from './ai';
 
@@ -32,10 +34,20 @@ export class RedixBrowser {
     this.capabilities = this.detector.detectCapabilities();
     this.features = this.detector.getRecommendedFeatures(this.capabilities);
     
-    // Initialize AI (WASM or cloud based on capabilities)
+    // Detect Tor Browser and enable Ghost Mode
+    const torDetection = detectTorBrowser();
+    const ghostMode = getGhostMode();
+    
+    if (torDetection.isTorBrowser) {
+      console.log('🔒 Tor Browser detected - enabling Ghost Mode');
+      ghostMode.enable();
+    }
+    
+    // Initialize AI (WASM or cloud based on capabilities and Ghost Mode)
+    const isGhost = isGhostModeEnabled();
     this.ai = new RedixAI({
-      useWASM: this.features.useWASMAI,
-      useCloud: this.features.useCloudAI,
+      useWASM: isGhost ? true : this.features.useWASMAI, // Force WASM in Ghost Mode
+      useCloud: isGhost ? false : this.features.useCloudAI, // No cloud in Ghost Mode
     });
     
     // Initialize renderer
@@ -43,6 +55,10 @@ export class RedixBrowser {
     
     console.log('[Redix] Initialized with capabilities:', this.capabilities);
     console.log('[Redix] Recommended features:', this.features);
+    console.log('[Redix] Ghost Mode:', isGhost ? 'ENABLED 🔒' : 'disabled');
+    if (torDetection.isTorBrowser) {
+      console.log('[Redix] Tor Browser detected - Maximum security active');
+    }
   }
 
   /**
@@ -160,6 +176,10 @@ if (typeof window !== 'undefined') {
     getBrowser: getRedixBrowser,
     getPool: () => getRedixPool(),
     getDetector: () => getDeviceDetector(),
+    getGhostMode: () => getGhostMode(),
+    enableGhostMode: () => enableGhostMode(),
+    disableGhostMode: () => disableGhostMode(),
+    isGhostModeEnabled: () => isGhostModeEnabled(),
   };
 }
 

@@ -35,6 +35,7 @@
       
       <footer class="redix-footer">
         <div class="redix-status" id="redix-status">Ready</div>
+        <div class="redix-security-status" id="redix-security-status"></div>
       </footer>
     </div>
     
@@ -46,10 +47,21 @@
           const browser = window.Redix.init();
           const caps = browser.getCapabilities();
           
+          // Check for Ghost Mode
+          const ghostMode = window.Redix.getGhostMode ? window.Redix.getGhostMode() : null;
+          const isGhost = ghostMode ? ghostMode.isEnabled() : false;
+          
           // Display capabilities
           const capsEl = document.getElementById('redix-capabilities');
           if (capsEl) {
             capsEl.textContent = `WASM: ${caps.hasWASM ? 'Yes' : 'No'} | RAM: ~${caps.ramEstimate}GB | Cores: ${caps.cpuCores} | ${caps.isLowEnd ? 'Low-end' : 'Standard'} device`;
+          }
+          
+          // Display security status
+          const securityEl = document.getElementById('redix-security-status');
+          if (securityEl && ghostMode) {
+            securityEl.textContent = ghostMode.getSecurityStatus();
+            securityEl.className = 'redix-security-status ' + (isGhost ? 'ghost-active' : '');
           }
           
           // Setup navigation

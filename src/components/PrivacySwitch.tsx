@@ -2,17 +2,21 @@
  * PrivacySwitch - Toggle between Normal/Private/Ghost modes
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Lock, Eye, Network, MoonStar } from 'lucide-react';
 import { useProfileStore } from '../state/profileStore';
 import { useShadowStore } from '../state/shadowStore';
 import { useTabsStore } from '../state/tabsStore';
+import { detectTorBrowser } from '../core/tor-detector';
+import { getGhostMode, isGhostModeEnabled } from '../core/ghost-mode';
 
 type PrivacyMode = 'Normal' | 'Private' | 'Ghost';
 
 export function PrivacySwitch() {
   const [mode, setMode] = useState<PrivacyMode>('Normal');
+  const [torDetected, setTorDetected] = useState(false);
+  const [ghostModeActive, setGhostModeActive] = useState(false);
   const policy = useProfileStore((state) => state.policies[state.activeProfileId]);
   const {
     activeSessionId: shadowSessionId,
@@ -20,6 +24,25 @@ export function PrivacySwitch() {
     endShadowSession,
     loading: shadowLoading,
   } = useShadowStore();
+
+  // Detect Tor Browser on mount
+  useEffect(() => {
+    const torDetection = detectTorBrowser();
+    setTorDetected(torDetection.isTorBrowser);
+    
+    // Auto-enable Ghost Mode if Tor is detected
+    if (torDetection.isTorBrowser && torDetection.confidence !== 'low') {
+      const ghostMode = getGhostMode();
+      if (!ghostMode.isEnabled()) {
+        ghostMode.enable();
+        setMode('Ghost');
+        setGhostModeActive(true);
+      }
+    }
+    
+    // Check if Ghost Mode is already enabled
+    setGhostModeActive(isGhostModeEnabled());
+  }, []);
 
   const privateDisabled = policy ? !policy.allowPrivateWindows : false;
   const ghostDisabled = policy ? !policy.allowGhostTabs : false;
@@ -41,8 +64,56 @@ export function PrivacySwitch() {
 
     const { ipc } = await import('../lib/ipc-typed');
     const { activeId } = useTabsStore.getState();
+    const ghostMode = getGhostMode();
+
+    if (newMode === 'Ghost') {
+      // Enable Ghost Mode
+      try {
+        // Check if Tor is detected
+        const torDetection = detectTorBrowser();
+        if (!torDetection.isTorBrowser) {
+          const confirmed = confirm(
+            '⚠️ Ghost Mode is most secure when running inside Tor Browser.\n\n' +
+            'Without Tor Browser, some security features may be limited.\n\n' +
+            'Enable Ghost Mode anyway?'
+          );
+          if (!confirmed) {
+            return;
+          }
+        }
+        
+        ghostMode.enable();
+        setGhostModeActive(true);
+        
+        // Enable Tor proxy if available
+        if (activeId) {
+          try {
+            await ipc.proxy.set({ 
+              tabId: activeId, 
+              type: 'socks5', 
+              host: '127.0.0.1', 
+              port: 9050 // Default Tor port
+            });
+          } catch (error) {
+            console.warn('Could not set Tor proxy:', error);
+            // Continue anyway - Ghost Mode can work without Tor proxy
+          }
+        }
+        
+        setMode('Ghost');
+      } catch (error) {
+        console.error('Failed to enable Ghost mode:', error);
+      }
+      return;
+    }
 
     if (newMode === 'Normal') {
+      // Disable Ghost Mode if active
+      if (ghostModeActive) {
+        ghostMode.disable();
+        setGhostModeActive(false);
+      }
+      
       // Normal mode: Clear any active proxy settings by setting to direct
       try {
         if (activeId) {
@@ -65,85 +136,6 @@ export function PrivacySwitch() {
         return; // Don't set mode again at the end
       } catch (error) {
         console.error('Failed to create private window:', error);
-        return;
-      }
-    } else if (newMode === 'Ghost') {
-      // Ghost = Direct active with Tor (enable Tor for current active tab)
-      try {
-        // Ensure Tor is running
-        try {
-          const torStatus = await ipc.tor.status() as any;
-          if (!torStatus.running || !torStatus.circuitEstablished) {
-            await ipc.tor.start();
-            // Wait for Tor to bootstrap
-            let attempts = 0;
-            const maxAttempts = 30;
-            const checkTor = setInterval(async () => {
-              attempts++;
-              const status = await ipc.tor.status() as any;
-              if (status.circuitEstablished || attempts >= maxAttempts) {
-                clearInterval(checkTor);
-                if (status.circuitEstablished && activeId) {
-                  // Tor is ready - apply Tor proxy to current tab
-                  try {
-                    await ipc.proxy.set({
-                      tabId: activeId,
-                      type: 'socks5',
-                      host: '127.0.0.1',
-                      port: 9050, // Default Tor SOCKS5 port
-                    });
-                    setMode('Ghost');
-                  } catch (error) {
-                    console.error('Failed to apply Tor proxy to tab:', error);
-                    // Fallback: create ghost tab
-                    await ipc.private.createGhostTab({ url: 'about:blank' });
-                    setMode('Normal');
-                  }
-                } else {
-                  console.warn('Tor failed to establish circuit, creating ghost tab anyway');
-                  try {
-                    await ipc.private.createGhostTab({ url: 'about:blank' });
-                    setMode('Normal');
-                  } catch (error) {
-                    console.error('Failed to create ghost tab:', error);
-                  }
-                }
-              }
-            }, 500);
-          } else if (activeId) {
-            // Tor already running - apply Tor proxy to current tab
-            try {
-              await ipc.proxy.set({
-                tabId: activeId,
-                type: 'socks5',
-                host: '127.0.0.1',
-                port: 9050,
-              });
-              setMode('Ghost');
-            } catch (error) {
-              console.error('Failed to apply Tor proxy to tab:', error);
-              // Fallback: create ghost tab
-              await ipc.private.createGhostTab({ url: 'about:blank' });
-              setMode('Normal');
-            }
-          } else {
-            // No active tab - create ghost tab
-            await ipc.private.createGhostTab({ url: 'about:blank' });
-            setMode('Normal');
-          }
-        } catch (torError) {
-          console.warn('Tor not available, creating ghost tab without proxy:', torError);
-          // Still create ghost tab even if Tor fails
-          try {
-            await ipc.private.createGhostTab({ url: 'about:blank' });
-            setMode('Normal');
-          } catch (error) {
-            console.error('Failed to create ghost tab:', error);
-            return;
-          }
-        }
-      } catch (error) {
-        console.error('Failed to enable Ghost mode:', error);
         return;
       }
     }
@@ -195,6 +187,11 @@ export function PrivacySwitch() {
           >
             <Icon size={14} aria-hidden="true" />
             <span>{m.label}</span>
+            {m.badge && (
+              <span className="text-[10px] opacity-75" title="Tor Browser detected">
+                {m.badge}
+              </span>
+            )}
           </motion.button>
         );
       })}

@@ -35,6 +35,8 @@ export class RedixAI {
 
   /**
    * Process content (extract, summarize, structure)
+   * 
+   * In Ghost Mode: Only uses WASM AI or simple extraction (no cloud APIs)
    */
   async processContent(extracted: {
     title: string;
@@ -42,13 +44,15 @@ export class RedixAI {
     html: string;
   }): Promise<ProcessedContent> {
     try {
-      // Try WASM AI first (if enabled and available)
+      // In Ghost Mode, only use local AI (WASM or simple)
       if (this.options.useWASM && await this.hasWASM()) {
         return await this.processWithWASM(extracted);
       }
       
-      // Try Redix backend (if available)
+      // Try Redix backend ONLY if cloud APIs are allowed (not in Ghost Mode)
       if (this.options.useCloud) {
+        // Check if we're in Ghost Mode (would be passed from browser)
+        // For now, respect the useCloud flag
         try {
           return await this.processWithRedix(extracted);
         } catch (error) {
@@ -56,7 +60,7 @@ export class RedixAI {
         }
       }
       
-      // Fallback: Simple extraction
+      // Fallback: Simple extraction (always works, even in Ghost Mode)
       return this.processSimple(extracted);
     } catch (error) {
       console.error('[RedixAI] Processing failed:', error);
