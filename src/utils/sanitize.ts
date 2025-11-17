@@ -1,3 +1,4 @@
+const CONTROL_CHAR_PATTERN = /[\p{Cc}]/gu;
 /**
  * Security Utilities - XSS Protection and Input Sanitization
  * 
@@ -110,7 +111,7 @@ export function isValidUrl(url: string): boolean {
  */
 export function sanitizeInput(input: string, maxLength = 1000): string {
   // Remove null bytes and control characters
-  let sanitized = input.replace(/[\x00-\x1F\x7F]/g, '');
+  let sanitized = input.replace(CONTROL_CHAR_PATTERN, '');
   
   // Limit length
   if (sanitized.length > maxLength) {

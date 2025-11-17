@@ -881,13 +881,13 @@ export const ipc = {
         .catch(() => ({ success: true })); // Fallback to success if IPC fails
     },
     getStatus: () =>
-      ipcCall<{}, { optIn: boolean; enabled: boolean }>('telemetry:getStatus', {}).catch(() => ({
+      ipcCall<Record<string, never>, { optIn: boolean; enabled: boolean }>('telemetry:getStatus', {}).catch(() => ({
         optIn: false,
         enabled: false,
       })),
     getSummary: () =>
       ipcCall<
-        {},
+        Record<string, never>,
         {
           optIn: boolean;
           enabled: boolean;
@@ -911,7 +911,7 @@ export const ipc = {
     setOptIn: (optIn: boolean) =>
       ipcCall<{ optIn: boolean }, { success: boolean }>('analytics:setOptIn', { optIn }).catch(() => ({ success: true })),
     getStatus: () =>
-      ipcCall<{}, { optIn: boolean; enabled: boolean }>('analytics:getStatus', {}).catch(() => ({
+      ipcCall<Record<string, never>, { optIn: boolean; enabled: boolean }>('analytics:getStatus', {}).catch(() => ({
         optIn: false,
         enabled: false,
       })),

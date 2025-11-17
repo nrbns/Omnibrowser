@@ -1,3 +1,4 @@
+const CONTROL_CHAR_PATTERN = /[\p{Cc}]/gu;
 /**
  * Search Proxy - Aggregates DuckDuckGo, Bing, and other search engines
  * Provides CORS-safe proxy and result summarization with LLM summaries
@@ -454,19 +455,6 @@ Summary:`;
 }
 
 /**
- * Validate URL format and protocol
- */
-function validateUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    // Only allow http and https
-    return ['http:', 'https:'].includes(parsed.protocol);
-  } catch {
-    return false;
-  }
-}
-
-/**
  * POST /api/search - Aggregate search from multiple engines
  */
 server.post<{
@@ -642,16 +630,6 @@ server.get<{
 /**
  * Validate URL format and protocol (moved before sanitizeQuery for proper ordering)
  */
-function validateUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    // Only allow http and https
-    return ['http:', 'https:'].includes(parsed.protocol);
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Sanitize and validate search query
  */
@@ -664,7 +642,7 @@ function sanitizeQuery(q: string): string | null {
   
   // Remove control characters and normalize whitespace
   const sanitized = trimmed
-    .replace(/[\x00-\x1F\x7F]/g, '') // Remove control characters
+    .replace(CONTROL_CHAR_PATTERN, '') // Remove control characters
     .replace(/\s+/g, ' ') // Normalize whitespace
     .trim();
   

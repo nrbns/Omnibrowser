@@ -389,14 +389,15 @@ export default function SearchBar() {
               throw new Error(errorData.error || `Search failed: ${redixResponse.statusText}`);
             }
 
-            if (redixResponse.ok) {
             const redixData = await redixResponse.json();
             setAiResponse(redixData.text || 'No response from Redix');
-            
+
             // Log eco metrics if available
             if (redixData.greenScore !== undefined) {
-              console.debug(`[SearchBar] Redix /ask response (green score: ${redixData.greenScore}%, tier: ${redixData.greenTier}, CO2 saved: ${redixData.co2SavedG}g, latency: ${redixData.latency}ms)`);
-              
+              console.debug(
+                `[SearchBar] Redix /ask response (green score: ${redixData.greenScore}%, tier: ${redixData.greenTier}, CO2 saved: ${redixData.co2SavedG}g, latency: ${redixData.latency}ms)`
+              );
+
               // Store eco data for UI display
               if (redixData.greenTier && redixData.tierColor) {
                 // Can be used to show eco badge in search results
@@ -405,12 +406,9 @@ export default function SearchBar() {
                   tier: redixData.greenTier,
                   color: redixData.tierColor,
                   co2Saved: redixData.co2SavedG,
-                  recommendation: redixData.recommendation
+                  recommendation: redixData.recommendation,
                 };
               }
-            }
-            } else {
-              throw new Error(`Redix API error: ${redixResponse.statusText}`);
             }
           } catch (redixError) {
             console.warn('[SearchBar] Redix /ask fallback failed:', redixError);
@@ -427,21 +425,18 @@ export default function SearchBar() {
             }
           }
         }
+      } catch (fallbackError) {
+        console.error('[SearchBar] Legacy Redix fallback failed:', fallbackError);
+        // Final fallback: open search results in a tab
+        try {
+          const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+          await ipc.tabs.create(searchUrl);
+        } catch (error) {
+          console.error('[SearchBar] Failed to open search URL:', error);
+        }
       }
       
       setAiLoading(false);
-    } catch (err) {
-      console.error('[SearchBar] Search with summary failed:', err);
-      setError(err instanceof Error ? err.message : 'Failed to get search results');
-      setAiLoading(false);
-      
-      // Fallback: open search results in a tab
-      try {
-        const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
-        await ipc.tabs.create(searchUrl);
-      } catch (error) {
-        console.error('[SearchBar] Failed to open search URL:', error);
-      }
     }
   };
 
