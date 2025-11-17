@@ -7,6 +7,7 @@ import './styles/globals.css';
 import './lib/battery';
 import { isDevEnv } from './lib/env';
 import { setupClipperHandlers } from './lib/research/clipper-handler';
+import { syncRendererTelemetry } from './lib/monitoring/sentry-client';
 
 // Import test utility in dev mode
 if (isDevEnv()) {
@@ -288,6 +289,12 @@ try {
   
   // Setup research clipper handlers
   setupClipperHandlers();
+
+syncRendererTelemetry().catch((error) => {
+  if (process.env.NODE_ENV === 'development') {
+    console.warn('[Monitoring] Failed to initialize renderer telemetry', error);
+  }
+});
 
   if (!existingRoot) {
     (window as any)[rootKey] = root;

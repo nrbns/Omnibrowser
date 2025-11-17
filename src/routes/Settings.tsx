@@ -5,6 +5,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { Search, Settings as SettingsIcon, Monitor, Shield, Download, Globe, Cpu, Bell, Palette, Power, ChevronRight, Lock, Eye, Trash2, Video, Database, Cloud, Sparkles, Loader2, RefreshCcw, Accessibility } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ipc } from '../lib/ipc-typed';
+import { applyTelemetryOptIn } from '../lib/monitoring/sentry-client';
 import { ShieldsPanel } from '../components/privacy/ShieldsPanel';
 import { NetworkPanel } from '../components/privacy/NetworkPanel';
 import { GDPRDataExport } from '../components/privacy/GDPRDataExport';
@@ -1373,9 +1374,9 @@ export default function Settings() {
                       checked={settings.diagnostics.telemetryOptIn}
                       onChange={async (e) => {
                         updateSetting(['diagnostics', 'telemetryOptIn'], e.target.checked);
-                        // Also update telemetry service
+                        // Also update telemetry + crash reporting service
                         try {
-                          await ipc.telemetry.setOptIn(e.target.checked);
+                          await applyTelemetryOptIn(e.target.checked);
                         } catch (error) {
                           console.warn('Failed to update telemetry service', error);
                         }

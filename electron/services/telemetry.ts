@@ -14,6 +14,8 @@ import { randomUUID } from 'node:crypto';
 import { registerHandler } from '../shared/ipc/router';
 import { z } from 'zod';
 import { createLogger } from './utils/logger';
+import { getCurrentSettings } from './storage';
+import { enableCrashReporting, disableCrashReporting, captureException } from './observability/sentry';
 
 const logger = createLogger('telemetry');
 
@@ -35,6 +37,7 @@ interface TelemetryEvent {
 class TelemetryService {
   private sessionId: string;
   private enabled: boolean = false;
+  private optInPreference: boolean = false;
   private queue: TelemetryEvent[] = [];
   private flushInterval: NodeJS.Timeout | null = null;
   private installTracked: boolean = false;
@@ -46,10 +49,9 @@ class TelemetryService {
 
   private async loadOptInStatus() {
     try {
-      // Settings are accessed via the settings Map in storage.ts
-      // We'll check on first IPC call or use a delayed load
-      // For now, default to false (opt-in required)
-      this.enabled = false;
+      const current = getCurrentSettings();
+      const optIn = Boolean(current?.diagnostics?.telemetryOptIn);
+      await this.setOptIn(optIn);
     } catch (error) {
       logger.warn('Failed to load telemetry opt-in status', { error: error instanceof Error ? error.message : String(error) });
       this.enabled = false;
@@ -57,14 +59,17 @@ class TelemetryService {
   }
 
   async setOptIn(optIn: boolean) {
+    this.optInPreference = optIn;
     this.enabled = optIn && TELEMETRY_ENABLED;
     
     if (this.enabled) {
+      enableCrashReporting();
       this.startFlushInterval();
       if (!this.installTracked) {
         this.trackInstall();
       }
     } else {
+      await disableCrashReporting();
       this.stopFlushInterval();
       this.queue = []; // Clear queue when opting out
     }
@@ -96,6 +101,8 @@ class TelemetryService {
       error: anonymizedError,
       context: context && typeof context === 'object' ? this.anonymizeContext(context as Record<string, unknown>) : {},
     });
+
+    captureException(error, context);
   }
 
   trackPerformance(metric: string, value: number, unit: 'ms' | 'MB' | '%' = 'ms') {
@@ -235,6 +242,13 @@ class TelemetryService {
     this.stopFlushInterval();
     await this.flush();
   }
+
+  getStatus() {
+    return {
+      optIn: this.optInPreference,
+      enabled: this.enabled,
+    };
+  }
 }
 
 let telemetryService: TelemetryService | null = null;
@@ -252,6 +266,10 @@ export function registerTelemetryIpc() {
   registerHandler('telemetry:setOptIn', z.object({ optIn: z.boolean() }), async (_event, request) => {
     await service.setOptIn(request.optIn);
     return { success: true };
+  });
+
+  registerHandler('telemetry:getStatus', z.object({}), async () => {
+    return service.getStatus();
   });
 
   registerHandler('telemetry:trackPerf', z.object({ metric: z.string(), value: z.number(), unit: z.enum(['ms', 'MB', '%']).optional() }), async (_event, request) => {

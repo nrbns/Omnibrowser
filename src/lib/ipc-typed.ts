@@ -138,6 +138,7 @@ const FALLBACK_CHANNELS: Record<string, () => unknown> = {
   'history:search': () => [],
   'performance:battery:update': () => ({ success: true }),
   'session:lastSnapshotSummary': () => null,
+  'telemetry:getStatus': () => ({ optIn: false, enabled: false }),
 };
 
 const reportedMissingChannels = new Set<string>();
@@ -870,6 +871,11 @@ export const ipc = {
       return ipcCall<{ optIn: boolean }, { success: boolean }>('telemetry:setOptIn', { optIn })
         .catch(() => ({ success: true })); // Fallback to success if IPC fails
     },
+    getStatus: () =>
+      ipcCall<{}, { optIn: boolean; enabled: boolean }>('telemetry:getStatus', {}).catch(() => ({
+        optIn: false,
+        enabled: false,
+      })),
     trackPerf: (metric: string, value: number, unit?: 'ms' | 'MB' | '%') => ipcCall<{ metric: string; value: number; unit?: 'ms' | 'MB' | '%' }, { success: boolean }>('telemetry:trackPerf', { metric, value, unit }),
     trackFeature: (feature: string, action?: string) => ipcCall<{ feature: string; action?: string }, { success: boolean }>('telemetry:trackFeature', { feature, action }),
   },

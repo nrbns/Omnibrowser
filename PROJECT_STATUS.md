@@ -28,7 +28,7 @@ _Last updated: 2025-12-17_
 | P0 | @maintainer | Maintain status doc + checklist parity | Ongoing | ✅ |
 | P0 | Security | **Phase 1 Complete** - DOMPurify, CSP, rate limiting, URL validation | Dec 17 | ✅ **Complete** |
 | P1 | Compliance | **Phase 2 Complete** - TOS, cookie consent, GDPR export, accessibility audit | Dec 17 | ✅ **Complete** |
-| P2 | Monitoring | Integrate crash reporting (Sentry) | Dec 28 | 📋 Planned |
+| P2 | Monitoring | Integrate crash reporting (Sentry) | Dec 17 | ✅ **Complete** |
 | P2 | Monitoring | Add privacy-respecting analytics | Dec 30 | 📋 Planned |
 
 ## Risk & Mitigation
@@ -56,6 +56,11 @@ _Last updated: 2025-12-17_
 - ✅ **Cookie Consent Banner** - GDPR-compliant cookie consent with granular preferences (`src/components/onboarding/CookieConsent.tsx`)
 - ✅ **GDPR Data Export** - Complete data export functionality (bookmarks, history, settings, preferences) (`src/components/privacy/GDPRDataExport.tsx`)
 - ✅ **Accessibility Audit** - axe-core integration for WCAG 2.1 AA compliance testing (`src/components/accessibility/AccessibilityAudit.tsx`)
+
+### Phase 3: Monitoring & Reliability (Dec 2025) 🔄
+- ✅ **Sentry Crash Reporting** - Opt-in crash capture wired via telemetry preferences (`@sentry/electron` with scrubbing)
+- 🔄 **Privacy-Safe Analytics** - Instrumentation planned (Matomo/Fathom evaluation)
+- 📋 **SLO Dashboards** - Capture uptime/perf metrics after analytics work
 
 ### Previous Milestones
 - Signed installers automated for Windows/macOS with published hashes.
