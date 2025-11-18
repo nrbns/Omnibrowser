@@ -33,6 +33,7 @@ import { useTradeStore } from '../../state/tradeStore';
 import { TradeSidebar } from '../trade/TradeSidebar';
 import { TermsAcceptance } from '../Onboarding/TermsAcceptance';
 import { CookieConsent, useCookieConsent } from '../Onboarding/CookieConsent';
+import { ToastHost } from '../common/ToastHost';
 
 type ErrorBoundaryState = {
   hasError: boolean;
@@ -305,6 +306,18 @@ export function AppShell() {
   const [restoreStatus, setRestoreStatus] = useState<'idle' | 'restoring'>('idle');
   const [showTOS, setShowTOS] = useState(false);
   const [showCookieConsent, setShowCookieConsent] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return !localStorage.getItem('omnibrowser:onboarding-seen');
+  });
+
+  const dismissOnboarding = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('omnibrowser:onboarding-seen', '1');
+    }
+    setShowOnboarding(false);
+  };
+
   const { hasConsented } = useCookieConsent();
   const [restoreToast, setRestoreToast] = useState<{ message: string; variant: 'success' | 'error' } | null>(null);
 
@@ -946,6 +959,9 @@ export function AppShell() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#1A1D28] text-gray-100">
+      {showOnboarding && (
+        <FirstRunOverlay onClose={dismissOnboarding} />
+      )}
       {/* Top Navigation - Hidden in fullscreen */}
       {!isFullscreen && (
         <div className="flex-none">
@@ -1322,6 +1338,109 @@ export function AppShell() {
           }}
         />
       )}
+      <ToastHost />
+    </div>
+  );
+}
+
+function FirstRunOverlay({ onClose }: { onClose: () => void }) {
+  const [localOnlyMode, setLocalOnlyMode] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('omnibrowser:local-only') === '1';
+  });
+
+  const toggleLocalOnly = () => {
+    setLocalOnlyMode((prev) => {
+      const next = !prev;
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('omnibrowser:local-only', next ? '1' : '0');
+      }
+      return next;
+    });
+  };
+
+  const highlights = [
+    {
+      title: 'Ask & research faster',
+      body: 'AI answers sit above every search result, with citations you can trust.',
+    },
+    {
+      title: 'SuperMemory',
+      body: 'Save any answer or tab and recall it later from the Memory sidebar.',
+    },
+    {
+      title: 'Context-aware modes',
+      body: 'Browse, Research, and Trade each keep their own tab sessions.',
+    },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+      <div className="w-full max-w-2xl rounded-3xl border border-white/10 bg-slate-900/90 p-6 shadow-2xl">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-[0.4em] text-slate-400">Welcome to</p>
+            <h2 className="text-2xl font-semibold text-white">Regen Browser Alpha</h2>
+            <p className="mt-1 text-sm text-slate-300">
+              You’re running a private build meant for early explorers. Here’s what works today:
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-white/20 px-3 py-1.5 text-xs uppercase tracking-wide text-slate-200 hover:bg-white/10"
+          >
+            Skip
+          </button>
+        </div>
+
+        <div className="mt-6 grid gap-4 md:grid-cols-3">
+          {highlights.map((item) => (
+            <div
+              key={item.title}
+              className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-200"
+            >
+              <p className="text-sm font-semibold text-white">{item.title}</p>
+              <p className="mt-2 text-xs text-slate-300">{item.body}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-semibold text-white">Local-first mode</p>
+              <p className="text-xs text-slate-300">
+                Keep AI features offline unless you opt-in. You can change this later in settings.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={toggleLocalOnly}
+              className={`flex h-9 items-center rounded-full px-4 text-xs font-semibold transition ${
+                localOnlyMode
+                  ? 'bg-emerald-500/20 text-emerald-200 border border-emerald-500/40'
+                  : 'bg-slate-800 text-slate-300 border border-white/10'
+              }`}
+            >
+              {localOnlyMode ? 'Local only' : 'Enable cloud AI'}
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-slate-400">
+            Regen logs zero browsing data in alpha. Features labeled “Coming soon” are disabled while we finish them.
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full bg-white px-5 py-2 text-xs font-semibold uppercase tracking-wide text-slate-900 hover:bg-slate-100"
+          >
+            Start exploring
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

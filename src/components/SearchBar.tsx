@@ -20,6 +20,7 @@ import { useAppStore } from '../state/appStore';
 import { useAgentExecutor } from '../core/agents/useAgentRuntime';
 import { fetchSearchLLM, type SearchLLMResponse } from '../services/searchLLM';
 import { MemoryStoreInstance } from '../core/supermemory/store';
+import { showToast } from '../state/toastStore';
 
 // Search proxy base URL (defaults to localhost:3001)
 const SEARCH_PROXY_URL = import.meta.env.VITE_SEARCH_PROXY_URL || 'http://localhost:3001';
@@ -282,6 +283,7 @@ export default function SearchBar() {
       setLlmResult(llmData);
       setQueryResult(mappedResult);
       setAiResponse(mappedResult.answer);
+      showToast('success', 'AI answer ready. Saved above search results.');
       trackAction('search_llm_success', {
         query,
         latencyMs: llmData.latency_ms ?? null,
@@ -307,6 +309,7 @@ export default function SearchBar() {
         query,
         error: primaryError instanceof Error ? primaryError.message : String(primaryError),
       }).catch(() => {});
+      showToast('error', 'AI search temporarily unavailable. Trying fallback...');
     }
     
     // Legacy fallback: QueryEngine + Redix flows
@@ -613,6 +616,7 @@ export default function SearchBar() {
           console.error('[SearchBar] Failed to open search URL:', error);
         }
         setError('Search service unavailable. Please try again.');
+        showToast('error', 'Search service unavailable. Opening Google instead.');
       } finally {
         setAiLoading(false);
       }
@@ -674,6 +678,7 @@ export default function SearchBar() {
         query: llmResult.query,
         title: llmResult.query,
       }).catch(() => {});
+      showToast('success', 'Saved to SuperMemory.');
     } catch (err) {
       console.error('[SearchBar] Failed to save AI answer to memory:', err);
       setSaveStatus('error');
@@ -683,6 +688,7 @@ export default function SearchBar() {
         query: llmResult.query,
         error: err instanceof Error ? err.message : String(err),
       }).catch(() => {});
+      showToast('error', 'Failed to save to SuperMemory.');
     }
   };
 
