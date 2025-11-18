@@ -5,6 +5,7 @@
 
 import { MemoryStoreInstance } from './store';
 import { MemoryEvent } from './tracker';
+import { generateEmbeddingVector } from './embeddingService';
 
 export interface Embedding {
   id: string;
@@ -64,67 +65,7 @@ export function chunkText(text: string, chunkSize: number = CHUNK_SIZE, overlap:
  * Uses Hugging Face Inference API for semantic embeddings
  */
 export async function generateEmbedding(text: string): Promise<number[]> {
-  // Try OpenAI API first, then Hugging Face, then fallback
-  try {
-    const response = await fetch('http://localhost:8000/openai/status');
-    if (response.ok) {
-      const data = await response.json();
-      if (data.available) {
-        // Use OpenAI for embeddings
-        const embedResponse = await fetch('http://localhost:8000/openai/embedding', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text, model: 'text-embedding-3-small' }),
-        });
-        if (embedResponse.ok) {
-          const embedData = await embedResponse.json();
-          return embedData.embedding as number[];
-        }
-      }
-    }
-  } catch (error) {
-    console.debug('[Embedding] OpenAI not available, trying Hugging Face:', error);
-  }
-  
-  // Try Hugging Face API
-  try {
-    const { generateHuggingFaceEmbedding, checkHuggingFaceAvailable } = await import('./huggingface-embedding');
-    const isAvailable = await checkHuggingFaceAvailable();
-    
-    if (isAvailable) {
-      return await generateHuggingFaceEmbedding(text);
-    }
-  } catch (error) {
-    console.debug('[Embedding] Hugging Face not available, using fallback:', error);
-  }
-  
-  // Fallback to hash-based embedding
-  const vector: number[] = new Array(384).fill(0);
-  const words = text.toLowerCase().split(/\s+/);
-  
-  // Simple hash-based embedding (not semantic, but works as fallback)
-  for (let i = 0; i < words.length; i++) {
-    const word = words[i];
-    let hash = 0;
-    for (let j = 0; j < word.length; j++) {
-      hash = ((hash << 5) - hash) + word.charCodeAt(j);
-      hash = hash & hash; // Convert to 32-bit integer
-    }
-    
-    // Distribute hash across dimensions
-    const dim = Math.abs(hash) % 384;
-    vector[dim] += 1 / (i + 1); // Weight by position
-  }
-
-  // Normalize vector
-  const magnitude = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0));
-  if (magnitude > 0) {
-    for (let i = 0; i < vector.length; i++) {
-      vector[i] /= magnitude;
-    }
-  }
-
-  return vector;
+  return generateEmbeddingVector(text);
 }
 
 /**

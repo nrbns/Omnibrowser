@@ -8,7 +8,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Cookie, Settings, X, Check, AlertCircle, Info } from 'lucide-react';
-import { useSettingsStore } from '../../state/settingsStore';
+// import { useSettingsStore } from '../../state/settingsStore'; // Unused for now
 
 export type CookieCategory = 'essential' | 'analytics' | 'functional' | 'advertising';
 
@@ -52,7 +52,7 @@ export function CookieConsent({ onAccept, onDecline, showSettings = false }: Coo
           setHasInteracted(true);
         }
       }
-    } catch (e) {
+    } catch {
       // Invalid stored data, use defaults
     }
   }, []);
@@ -141,7 +141,7 @@ export function CookieConsent({ onAccept, onDecline, showSettings = false }: Coo
         initial={{ opacity: 0, y: 100 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 100 }}
-        className="fixed bottom-0 left-0 right-0 z-[10000] p-4 pointer-events-none"
+        className="fixed bottom-0 left-0 right-0 z-[10001] p-4 pointer-events-none"
       >
         <div className="max-w-4xl mx-auto pointer-events-auto">
           <motion.div
@@ -316,7 +316,7 @@ export function useCookieConsent(): {
 } {
   const [hasConsented, setHasConsented] = useState(false);
   const [preferences, setPreferences] = useState<CookiePreferences | null>(null);
-  const [showBanner, setShowBanner] = useState(false);
+  const [_showBanner, setShowBanner] = useState(false);
 
   useEffect(() => {
     try {
@@ -331,12 +331,12 @@ export function useCookieConsent(): {
       }
       // No consent given yet
       setShowBanner(true);
-    } catch (e) {
+    } catch {
       setShowBanner(true);
     }
   }, []);
 
-  const handleAccept = (prefs: CookiePreferences) => {
+  const _handleAccept = (prefs: CookiePreferences) => {
     localStorage.setItem('omnibrowser:cookie-consent', JSON.stringify(prefs));
     setPreferences(prefs);
     setHasConsented(true);
@@ -362,7 +362,7 @@ export function getCookiePreferences(): CookiePreferences | null {
         return data;
       }
     }
-  } catch (e) {
+  } catch {
     // Invalid data
   }
   return null;

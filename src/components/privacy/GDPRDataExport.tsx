@@ -7,7 +7,7 @@
 
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Download, FileText, Database, Clock, Bookmark, Settings, Cookie, Shield, Loader2, Check, AlertCircle } from 'lucide-react';
+import { Download, FileText, Clock, Bookmark, Settings, Cookie, Shield, Loader2, Check, AlertCircle } from 'lucide-react';
 import { useBookmarksStore } from '../../state/bookmarksStore';
 import { useHistoryStore } from '../../state/historyStore';
 import { useSettingsStore } from '../../state/settingsStore';
@@ -109,8 +109,17 @@ export function GDPRDataExport() {
     try {
       // Try to get consent ledger from IPC if available
       const { ipc } = await import('../../lib/ipc-typed');
-      const ledger = await ipc.consent?.list?.();
-      return Array.isArray(ledger) ? ledger : [];
+      // Use consent.list() if available, otherwise fallback to localStorage
+      if (typeof (ipc.consent as any)?.list === 'function') {
+        const ledger = await (ipc.consent as any).list();
+        return Array.isArray(ledger) ? ledger : [];
+      }
+      // Fallback: try localStorage
+      const stored = localStorage.getItem('omnibrowser:consent-ledger');
+      if (stored) {
+        return JSON.parse(stored);
+      }
+      return [];
     } catch {
       // Fallback: try localStorage
       try {

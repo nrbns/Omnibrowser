@@ -11,7 +11,7 @@
 
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
-import { readFileSync } from 'fs';
+// import { readFileSync } from 'fs'; // Unused for now
 
 export default defineConfig({
   root: resolve(__dirname),

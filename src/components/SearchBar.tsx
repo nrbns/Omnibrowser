@@ -8,14 +8,18 @@ import { Search, Loader2, Globe, FileText, Sparkles, Brain, ChevronDown, Chevron
 import { fetchDuckDuckGoInstant, formatDuckDuckGoResults } from '../services/duckDuckGoSearch';
 import { searchLocal } from '../utils/lunrIndex';
 import { ipc } from '../lib/ipc-typed';
-import { trackSearch } from '../core/supermemory/tracker';
+import { trackSearch, trackAction } from '../core/supermemory/tracker';
 import { useSuggestions } from '../core/supermemory/useSuggestions';
 import { searchVectors } from '../core/supermemory/vectorStore';
 import { sendPrompt } from '../core/llm/adapter';
 import { useTabsStore } from '../state/tabsStore';
-import { EcoBadge } from './EcoBadge';
-import { getQueryEngine, QueryResult } from '../core/query-engine';
+// import { EcoBadge } from './EcoBadge'; // Unused for now
+import { getQueryEngine, QueryResult, detectIntent } from '../core/query-engine';
 import { AnswerCard } from './AnswerCard';
+import { useAppStore } from '../state/appStore';
+import { useAgentExecutor } from '../core/agents/useAgentRuntime';
+import { fetchSearchLLM, type SearchLLMResponse } from '../services/searchLLM';
+import { MemoryStoreInstance } from '../core/supermemory/store';
 
 // Search proxy base URL (defaults to localhost:3001)
 const SEARCH_PROXY_URL = import.meta.env.VITE_SEARCH_PROXY_URL || 'http://localhost:3001';
@@ -32,6 +36,28 @@ type SearchResult = {
   similarity?: number; // For vector search results
 };
 
+function mapLlmResponseToQueryResult(response: SearchLLMResponse, query: string): QueryResult {
+  const sources = (response.raw_results || []).map((result) => ({
+    url: result.url,
+    title: result.title || result.url || 'Source',
+    snippet: result.snippet || '',
+  }));
+
+  const citations = (response.citations || []).map((citation, index) => ({
+    index: index + 1,
+    url: citation.url,
+    title: citation.title || citation.url || `Source ${index + 1}`,
+  }));
+
+  return {
+    answer: response.answer,
+    intent: detectIntent(query),
+    sources,
+    citations,
+    latency: response.latency_ms ?? 0,
+  };
+}
+
 export default function SearchBar() {
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(false);
@@ -45,6 +71,8 @@ export default function SearchBar() {
   const [showAiResponse, setShowAiResponse] = useState(false);
   const [askingAboutPage, setAskingAboutPage] = useState(false);
   const [queryResult, setQueryResult] = useState<QueryResult | null>(null);
+  const [llmResult, setLlmResult] = useState<SearchLLMResponse | null>(null);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [showSearchResults, setShowSearchResults] = useState(false); // Collapsed by default
   
   // Get active tab for "Ask about this page"
@@ -52,6 +80,13 @@ export default function SearchBar() {
     if (!state.activeId) return null;
     return state.tabs.find((t) => t.id === state.activeId) || null;
   });
+  const mode = useAppStore((state) => state.mode);
+  const runResearchAgent = useAgentExecutor('research.agent');
+  const runTradeAgent = useAgentExecutor('trade.agent');
+  const runDocsAgent = useAgentExecutor('docs.agent');
+  const runImagesAgent = useAgentExecutor('images.agent');
+  const runThreatsAgent = useAgentExecutor('threats.agent');
+  const runGraphMindAgent = useAgentExecutor('graphmind.agent');
   
   // SuperMemory suggestions
   const suggestions = useSuggestions(q, { types: ['search', 'visit', 'bookmark'], limit: 5 });
@@ -223,25 +258,59 @@ export default function SearchBar() {
       }
     }
     
-    // PHASE 1: Use QueryEngine for AI-Native answers
+    // Phase 1: Regen search LLM pipeline
     setAiLoading(true);
     setShowAiResponse(true);
     setQueryResult(null);
+    setLlmResult(null);
     setAiResponse('');
+    setSaveStatus('idle');
     setError(null);
     setShowSearchResults(false); // Hide search results by default
     
-    const startTime = Date.now();
+    const tabContext = activeTab
+      ? {
+          tabUrl: activeTab.url,
+          tabTitle: activeTab.title,
+          mode,
+        }
+      : { mode };
     
     try {
-      // Get active tab context
-      const tabContext = activeTab ? {
-        tabUrl: activeTab.url,
-        tabTitle: activeTab.title,
-        mode: 'research', // Could be dynamic based on current mode
-      } : undefined;
-      
-      // Use QueryEngine to get structured answer
+      const llmData = await fetchSearchLLM(query);
+      const mappedResult = mapLlmResponseToQueryResult(llmData, query);
+      setLlmResult(llmData);
+      setQueryResult(mappedResult);
+      setAiResponse(mappedResult.answer);
+      trackAction('search_llm_success', {
+        query,
+        latencyMs: llmData.latency_ms ?? null,
+        citationCount: llmData.citations?.length ?? 0,
+      }).catch(() => {});
+
+      if (Array.isArray(llmData.raw_results) && llmData.raw_results.length > 0) {
+        const formatted = llmData.raw_results.map((result, idx) => ({
+          id: `llm-${idx}`,
+          title: result.title || result.url || `Source ${idx + 1}`,
+          url: result.url,
+          snippet: result.snippet || '',
+          type: 'proxy' as const,
+          source: (result.source as SearchResult['source']) || 'fused',
+        }));
+        setProxyResults(formatted);
+      }
+      setAiLoading(false);
+      return;
+    } catch (primaryError) {
+      console.warn('[SearchBar] search_llm failed, falling back to legacy query engine:', primaryError);
+      trackAction('search_llm_error', {
+        query,
+        error: primaryError instanceof Error ? primaryError.message : String(primaryError),
+      }).catch(() => {});
+    }
+    
+    // Legacy fallback: QueryEngine + Redix flows
+    try {
       const queryEngine = getQueryEngine();
       const result = await queryEngine.query(query, tabContext);
       
@@ -291,6 +360,104 @@ export default function SearchBar() {
         }
       }
       
+      if (mode === 'Research') {
+        try {
+          const agentResult = await runResearchAgent({
+            prompt: query,
+            context: { mode, tabContext, queryResult: result },
+          });
+          if (agentResult.success && agentResult.output) {
+            setAiResponse((prev) =>
+              prev
+                ? `${prev}\n\nResearch Agent:\n${agentResult.output}`
+                : String(agentResult.output)
+            );
+          }
+        } catch (agentError) {
+          console.warn('[SearchBar] Research agent failed:', agentError);
+        }
+      } else if (mode === 'Trade') {
+        try {
+          const agentResult = await runTradeAgent({
+            prompt: query,
+            context: { mode, tabContext, queryResult: result },
+          });
+          if (agentResult.success && agentResult.output) {
+            setAiResponse((prev) =>
+              prev
+                ? `${prev}\n\nTrade Agent:\n${agentResult.output}`
+                : String(agentResult.output)
+            );
+          }
+        } catch (agentError) {
+          console.warn('[SearchBar] Trade agent failed:', agentError);
+        }
+      } else if (mode === 'Docs') {
+        try {
+          const agentResult = await runDocsAgent({
+            prompt: query,
+            context: { mode, tabContext, queryResult: result },
+          });
+          if (agentResult.success && agentResult.output) {
+            setAiResponse((prev) =>
+              prev
+                ? `${prev}\n\nDocs Agent:\n${agentResult.output}`
+                : String(agentResult.output)
+            );
+          }
+        } catch (agentError) {
+          console.warn('[SearchBar] Docs agent failed:', agentError);
+        }
+      } else if (mode === 'Images') {
+        try {
+          const agentResult = await runImagesAgent({
+            prompt: query,
+            context: { mode, tabContext, queryResult: result },
+          });
+          if (agentResult.success && agentResult.output) {
+            setAiResponse((prev) =>
+              prev
+                ? `${prev}\n\nImages Agent:\n${agentResult.output}`
+                : String(agentResult.output)
+            );
+          }
+        } catch (agentError) {
+          console.warn('[SearchBar] Images agent failed:', agentError);
+        }
+      } else if (mode === 'Threats') {
+        try {
+          const agentResult = await runThreatsAgent({
+            prompt: query,
+            context: { mode, tabContext, queryResult: result },
+          });
+          if (agentResult.success && agentResult.output) {
+            setAiResponse((prev) =>
+              prev
+                ? `${prev}\n\nThreats Agent:\n${agentResult.output}`
+                : String(agentResult.output)
+            );
+          }
+        } catch (agentError) {
+          console.warn('[SearchBar] Threats agent failed:', agentError);
+        }
+      } else if (mode === 'GraphMind') {
+        try {
+          const agentResult = await runGraphMindAgent({
+            prompt: query,
+            context: { mode, tabContext, queryResult: result },
+          });
+          if (agentResult.success && agentResult.output) {
+            setAiResponse((prev) =>
+              prev
+                ? `${prev}\n\nGraphMind Agent:\n${agentResult.output}`
+                : String(agentResult.output)
+            );
+          }
+        } catch (agentError) {
+          console.warn('[SearchBar] GraphMind agent failed:', agentError);
+        }
+      }
+
       setAiLoading(false);
       return; // Success - exit early
       
@@ -320,33 +487,60 @@ export default function SearchBar() {
             const decoder = new TextDecoder();
             let buffer = '';
             let fullResponse = '';
+            let streamCancelled = false;
 
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done || streamCancelled) break;
 
-              buffer += decoder.decode(value, { stream: true });
-              const lines = buffer.split('\n');
-              buffer = lines.pop() || '';
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
 
-              for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                  try {
-                    const data = JSON.parse(line.slice(6));
-                    if (data.type === 'token' && data.text) {
-                      fullResponse += data.text;
-                      setAiResponse(fullResponse);
-                    } else if (data.type === 'done') {
-                      console.debug(`[SearchBar] Redix stream complete (green score: ${data.greenScore}, latency: ${data.latency}ms)`);
-                      break;
-                    } else if (data.type === 'error') {
-                      throw new Error(data.error || 'Streaming error');
+                for (const line of lines) {
+                  if (line.trim() === '') continue; // Skip empty lines
+                  
+                  if (line.startsWith('data: ')) {
+                    try {
+                      const jsonStr = line.slice(6).trim();
+                      if (!jsonStr) continue;
+                      
+                      const data = JSON.parse(jsonStr);
+                      if (data.type === 'token' && data.text) {
+                        fullResponse += data.text;
+                        setAiResponse(fullResponse);
+                      } else if (data.type === 'done') {
+                        console.debug(`[SearchBar] Redix stream complete (green score: ${data.greenScore}, latency: ${data.latency}ms)`);
+                        streamCancelled = true;
+                        break;
+                      } else if (data.type === 'error') {
+                        throw new Error(data.error || 'Streaming error');
+                      }
+                    } catch (e) {
+                      // If JSON parse fails, it might be a partial chunk - continue
+                      if (e instanceof SyntaxError) {
+                        console.debug('[SearchBar] Partial SSE chunk, waiting for more data');
+                        continue;
+                      }
+                      console.warn('[SearchBar] Failed to parse SSE chunk:', e);
                     }
-                  } catch (e) {
-                    console.warn('[SearchBar] Failed to parse SSE chunk:', e);
+                  } else if (line.startsWith('event: ')) {
+                    // Handle SSE event types if needed
+                    continue;
                   }
                 }
               }
+            } catch (streamReadError) {
+              console.error('[SearchBar] SSE stream error:', streamReadError);
+              throw streamReadError;
+            } finally {
+              reader.releaseLock();
+            }
+            
+            // Set final response if streaming completed successfully
+            if (fullResponse) {
+              setAiResponse(fullResponse);
             }
           } else {
             throw new Error(`Redix streaming failed: ${streamResponse.statusText}`);
@@ -410,7 +604,7 @@ export default function SearchBar() {
           }
         }
       } catch (fallbackError) {
-        console.error('[SearchBar] Legacy Redix fallback failed:', fallbackError);
+        console.error('[SearchBar] All fallbacks failed:', fallbackError);
         // Final fallback: open search results in a tab
         try {
           const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
@@ -418,9 +612,10 @@ export default function SearchBar() {
         } catch (error) {
           console.error('[SearchBar] Failed to open search URL:', error);
         }
+        setError('Search service unavailable. Please try again.');
+      } finally {
+        setAiLoading(false);
       }
-      
-      setAiLoading(false);
     }
   };
 
@@ -453,6 +648,41 @@ export default function SearchBar() {
       setError(err.message || 'Failed to get AI response about page');
     } finally {
       setAskingAboutPage(false);
+    }
+  };
+
+  const handleSaveAnswerToMemory = async () => {
+    if (!llmResult) {
+      return;
+    }
+    setSaveStatus('saving');
+    try {
+      await MemoryStoreInstance.saveEvent({
+        type: 'note',
+        value: llmResult.answer,
+        metadata: {
+          url: llmResult.citations?.[0]?.url || activeTab?.url || '',
+          title: llmResult.query,
+          notePreview: llmResult.answer.substring(0, 200),
+          tags: ['ai-answer', 'search'],
+        },
+      });
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 4000);
+      trackAction('memory_save', {
+        source: 'search_llm',
+        query: llmResult.query,
+        title: llmResult.query,
+      }).catch(() => {});
+    } catch (err) {
+      console.error('[SearchBar] Failed to save AI answer to memory:', err);
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus('idle'), 4000);
+      trackAction('memory_save_error', {
+        source: 'search_llm',
+        query: llmResult.query,
+        error: err instanceof Error ? err.message : String(err),
+      }).catch(() => {});
     }
   };
 
@@ -683,6 +913,25 @@ export default function SearchBar() {
               </div>
             </div>
           ) : null}
+
+          {llmResult && (
+            <div className="flex items-center justify-end">
+              <button
+                type="button"
+                onClick={handleSaveAnswerToMemory}
+                disabled={saveStatus === 'saving' || saveStatus === 'saved'}
+                className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-100 hover:bg-emerald-500/20 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {saveStatus === 'saving'
+                  ? 'Saving...'
+                  : saveStatus === 'saved'
+                  ? 'Saved'
+                  : saveStatus === 'error'
+                  ? 'Retry Save'
+                  : 'Save to Memory'}
+              </button>
+            </div>
+          )}
           
           {/* Search Results (Secondary - Collapsed by default) */}
           {allResults.length > 0 && (

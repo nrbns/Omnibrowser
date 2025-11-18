@@ -272,7 +272,7 @@ export function TabContentSurface({ tab, overlayActive }: TabContentSurfaceProps
   return (
     <motion.div
       ref={containerRef}
-      className={`relative h-full w-full bg-slate-950 ${overlayActive ? 'pointer-events-none' : ''}`}
+      className={`h-full w-full bg-black ${overlayActive ? 'pointer-events-none' : ''}`}
       key={targetUrl}
       id={panelId}
       role="tabpanel"
@@ -283,15 +283,29 @@ export function TabContentSurface({ tab, overlayActive }: TabContentSurfaceProps
       transition={{ duration: 0.35, ease: 'easeOut' }}
       style={{
         position: 'absolute',
-        inset: 0,
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        width: '100%',
+        height: '100%',
         zIndex: isInactive ? 0 : 1,
       }}
     >
       {isElectron ? (
         <webview
           ref={webviewRef}
-          className="h-full w-full"
-          style={{ width: '100%', height: '100%', display: isInactive ? 'none' : 'block' }}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100%',
+            height: '100%',
+            display: isInactive ? 'none' : 'block',
+            border: 'none',
+          }}
           src={targetUrl}
           allowpopups="true"
           autosize="on"
@@ -301,8 +315,16 @@ export function TabContentSurface({ tab, overlayActive }: TabContentSurfaceProps
       ) : (
         <iframe
           ref={iframeRef}
-          className="h-full w-full"
-          style={{ width: '100%', height: '100%' }}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100%',
+            height: '100%',
+            border: 'none',
+          }}
           src={targetUrl ?? 'about:blank'}
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
           allow="fullscreen"

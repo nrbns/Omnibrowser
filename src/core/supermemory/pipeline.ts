@@ -7,6 +7,7 @@ import { MemoryEvent } from './tracker';
 import { MemoryStoreInstance } from './store';
 import { embedMemoryEvent } from './embedding';
 import { superMemoryDB } from './db';
+import { extractTagsFromEvent } from './tag-extractor';
 
 export interface PipelineResult {
   eventId: string;
@@ -22,17 +23,20 @@ export async function processMemoryEvent(
   event: Omit<MemoryEvent, 'id' | 'ts' | 'score'>
 ): Promise<PipelineResult> {
   try {
+    const enrichedEvent = applyAutoTags(event);
+
     // Step 1: Save event to database
-    const eventId = await MemoryStoreInstance.saveEvent(event);
+    const eventId = await MemoryStoreInstance.saveEvent(enrichedEvent);
     
-    // Step 2: Generate embeddings asynchronously (don't block)
-    // We get the full event to embed it
-    const fullEvent: MemoryEvent = {
-      ...event,
-      id: eventId,
-      ts: Date.now(),
-      score: 0, // Will be calculated by saveEvent
-    };
+    // Step 2: Retrieve stored event for embedding (ensures ts/score match)
+    const fullEvent =
+      (await MemoryStoreInstance.getEventById(eventId)) ??
+      ({
+        ...enrichedEvent,
+        id: eventId,
+        ts: Date.now(),
+        score: 0,
+      } as MemoryEvent);
     
     // Step 3: Generate and store embeddings
     let embeddingIds: string[] = [];
@@ -130,6 +134,24 @@ export async function cleanupOldData(daysToKeep: number = 90): Promise<void> {
   } catch (error) {
     console.error('[Pipeline] Failed to cleanup old data:', error);
   }
+}
+
+function applyAutoTags(event: Omit<MemoryEvent, 'id' | 'ts' | 'score'>): Omit<MemoryEvent, 'id' | 'ts' | 'score'> {
+  const tags = extractTagsFromEvent(event);
+  if (tags.length === 0) {
+    return event;
+  }
+
+  const existing = Array.isArray(event.metadata?.tags) ? event.metadata!.tags : [];
+  const mergedTags = Array.from(new Set([...existing, ...tags])).slice(0, 10);
+
+  return {
+    ...event,
+    metadata: {
+      ...(event.metadata || {}),
+      tags: mergedTags,
+    },
+  };
 }
 
 /**

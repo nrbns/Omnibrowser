@@ -276,7 +276,7 @@ export function streamAsk(
     }
   });
 
-  eventSource.addEventListener('error', (error) => {
+  eventSource.addEventListener('error', (_error) => {
     onError(new Error('SSE connection failed'));
     eventSource.close();
   });

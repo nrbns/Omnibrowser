@@ -3,9 +3,9 @@
  * Uses Hugging Face Inference API for semantic embeddings
  */
 
-import { MemoryStoreInstance } from './store';
-import { MemoryEvent } from './tracker';
-import { Embedding } from './embedding';
+// import { MemoryStoreInstance } from './store'; // Unused for now
+// import { MemoryEvent } from './tracker'; // Unused for now
+// import { Embedding } from './embedding'; // Unused for now
 
 const HUGGINGFACE_API_URL = 'http://localhost:8000/huggingface'; // Backend API URL
 const DEFAULT_MODEL = 'sentence-transformers/all-MiniLM-L6-v2';

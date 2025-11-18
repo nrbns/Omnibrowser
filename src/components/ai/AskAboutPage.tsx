@@ -3,7 +3,7 @@
  * Allows users to ask questions about the current page
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import { Send, Loader, Sparkles, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PageExtractor, ExtractedContent } from './PageExtractor';
@@ -77,7 +77,7 @@ export function AskAboutPage({ url, onClose }: AskAboutPageProps) {
           if (answerRef.current) {
             answerRef.current.scrollTop = answerRef.current.scrollHeight;
           }
-        } catch (apiError) {
+        } catch {
           // If both fail, throw the original LLM error
           throw llmError;
         }

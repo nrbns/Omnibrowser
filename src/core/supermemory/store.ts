@@ -10,7 +10,7 @@ export type { MemoryEvent } from './event-types';
 
 const STORAGE_PREFIX = 'sm-';
 const MAX_EVENTS = 10000; // Limit total events
-const MAX_EVENTS_PER_TYPE = 1000; // Limit per event type
+// const MAX_EVENTS_PER_TYPE = 1000; // Limit per event type // Unused for now
 
 class MemoryStore {
   private db: IDBDatabase | null = null;
@@ -155,6 +155,15 @@ class MemoryStore {
     if (filters?.until) {
       filtered = filtered.filter(e => e.ts <= filters.until!);
     }
+    if (filters?.pinned !== undefined) {
+      filtered = filtered.filter(e => Boolean(e.metadata?.pinned) === filters.pinned);
+    }
+    if (filters?.tags && filters.tags.length > 0) {
+      filtered = filtered.filter((e) => {
+        const eventTags = e.metadata?.tags || [];
+        return filters.tags!.every((tag) => eventTags.includes(tag));
+      });
+    }
 
     return filtered.slice(0, filters?.limit || 100);
   }
@@ -172,7 +181,7 @@ class MemoryStore {
     ).length;
     
     // Recency: newer events get higher score (decay over time)
-    const now = Date.now();
+    // const now = Date.now(); // Unused for now
     const recency = 1; // Current event is most recent
     
     // Combined score (frequency * 0.6 + recency * 0.4)
@@ -257,6 +266,47 @@ class MemoryStore {
    */
   async export(): Promise<MemoryEvent[]> {
     return this.getEvents({ limit: MAX_EVENTS });
+  }
+
+  /**
+   * Get single event by ID
+   */
+  async getEventById(eventId: string): Promise<MemoryEvent | null> {
+    if (this.useIndexedDB) {
+      try {
+        const { superMemoryDB } = await import('./db');
+        return await superMemoryDB.getEvent(eventId);
+      } catch (error) {
+        console.warn('[SuperMemory] IndexedDB getEvent failed, falling back to localStorage:', error);
+        this.useIndexedDB = false;
+      }
+    }
+
+    const allEvents = this.get<MemoryEvent[]>('events') || [];
+    return allEvents.find((event) => event.id === eventId) || null;
+  }
+
+  /**
+   * Get events by ID list (preserves order)
+   */
+  async getEventsByIds(eventIds: string[]): Promise<MemoryEvent[]> {
+    if (eventIds.length === 0) return [];
+
+    if (this.useIndexedDB) {
+      try {
+        const { superMemoryDB } = await import('./db');
+        return await superMemoryDB.getEventsByIds(eventIds);
+      } catch (error) {
+        console.warn('[SuperMemory] IndexedDB getEventsByIds failed, falling back to localStorage:', error);
+        this.useIndexedDB = false;
+      }
+    }
+
+    const allEvents = this.get<MemoryEvent[]>('events') || [];
+    const map = new Map(allEvents.map((event) => [event.id, event]));
+    return eventIds
+      .map((id) => map.get(id))
+      .filter((event): event is MemoryEvent => Boolean(event));
   }
 }
 

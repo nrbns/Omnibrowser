@@ -169,7 +169,7 @@ export class DeviceDetector {
     
     // Fallback: Estimate based on user agent and platform
     const ua = navigator.userAgent.toLowerCase();
-    const platform = navigator.platform.toLowerCase();
+    // const platform = navigator.platform.toLowerCase(); // Unused for now
     
     // Mobile devices typically have 2-8GB
     if (this.detectMobile() || this.detectTablet()) {
@@ -233,8 +233,10 @@ export class DeviceDetector {
   private detectTablet(): boolean {
     const ua = navigator.userAgent.toLowerCase();
     const hasTouch = (navigator.maxTouchPoints ?? 0) > 2;
-    return /ipad|android(?!.*mobile)|tablet|playbook|silk/i.test(ua) ||
-           (hasTouch && /MacIntel/.test(navigator.platform));
+    return Boolean(
+      /ipad|android(?!.*mobile)|tablet|playbook|silk/i.test(ua) ||
+      (hasTouch && /MacIntel/.test(navigator.platform))
+    );
   }
 
   /**

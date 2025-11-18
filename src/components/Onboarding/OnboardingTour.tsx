@@ -18,7 +18,7 @@ import {
 import { useAppStore } from '../../state/appStore';
 import { useOnboardingStore } from '../../state/onboardingStore';
 import { useTabGraphStore } from '../../state/tabGraphStore';
-import { ipc } from '../../lib/ipc-typed';
+// import { ipc } from '../../lib/ipc-typed'; // Unused for now
 import { applyTelemetryOptIn } from '../../lib/monitoring/sentry-client';
 import { applyAnalyticsOptIn } from '../../lib/monitoring/analytics-client';
 
@@ -918,7 +918,7 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.2 }}
-        className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70 backdrop-blur-sm"
+        className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm"
         style={{ pointerEvents: 'auto' }}
         tabIndex={-1}
         role="dialog"
@@ -972,7 +972,7 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 20 }}
             transition={{ duration: 0.2 }}
-            className="relative w-[min(520px,90vw)] rounded-3xl border border-slate-700/70 bg-slate-950/95 p-6 text-gray-100 shadow-2xl z-[1001]"
+            className="relative w-[min(520px,90vw)] rounded-3xl border border-slate-700/70 bg-slate-950/95 p-6 text-gray-100 shadow-2xl z-[10000]"
             style={{ pointerEvents: 'auto', position: 'relative' }}
             onClick={(e) => {
               // Only stop propagation if clicking directly on modal container (not buttons)

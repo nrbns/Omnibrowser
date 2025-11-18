@@ -5,7 +5,9 @@
 
 import fastify from 'fastify';
 
-const CONTROL_CHAR_PATTERN = /[\p{Cc}]/gu;
+// Control character pattern using Unicode escapes (safer than \x00-\x1f)
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHAR_PATTERN = /[\u0000-\u001F\u007F]/gu;
 
 // LLM adapter functions adapted for Node.js server context
 // Note: This is a simplified version that works in Node.js
@@ -659,7 +661,10 @@ function sanitizeForPrompt(text: string): string {
   if (!text || typeof text !== 'string') return '';
   
   // Remove potential prompt injection patterns
+  // Remove control characters using Unicode escapes (safer than \x00-\x1f)
   return text
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001F\u007F]/g, '') // Remove control characters
     .replace(/```/g, '') // Remove code blocks
     .replace(/---/g, '') // Remove markdown separators
     .replace(/\n{3,}/g, '\n\n') // Limit consecutive newlines

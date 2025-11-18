@@ -30,7 +30,10 @@ export default function AgentConsole() {
 
   // Listen for agent tokens and steps
   useEffect(() => {
-    if (!window.agent) return;
+    if (typeof window === 'undefined' || !window.agent) {
+      console.warn('[AgentConsole] window.agent not available');
+      return;
+    }
     
     const tokenHandler = (t: any) => {
       setLogs((l: any[]) => [...l, t]);
@@ -62,13 +65,17 @@ export default function AgentConsole() {
       }
     };
     
-    window.agent.onToken(tokenHandler);
-    window.agent.onStep(stepHandler);
+    try {
+      window.agent.onToken(tokenHandler);
+      window.agent.onStep(stepHandler);
+    } catch (error) {
+      console.error('[AgentConsole] Failed to register agent handlers:', error);
+    }
     
     return () => {
       // Cleanup handled by component unmount
     };
-  }, [appendTranscript]);
+  }, [appendTranscript, runId]);
 
   // Listen for streaming AI chunks
   useEffect(() => {
@@ -155,7 +162,7 @@ export default function AgentConsole() {
           action: query.trim(),
           error: error instanceof Error ? error.message : String(error),
         });
-      } catch (err) {
+      } catch {
         // Ignore tracking errors
       }
     }
@@ -284,9 +291,13 @@ export default function AgentConsole() {
                 <button
                   className="rounded-lg border border-indigo-500/60 bg-indigo-500/20 px-3 py-1.5 text-xs font-medium text-indigo-100 transition hover:bg-indigo-500/30"
                   onClick={async () => {
+                    if (typeof window === 'undefined' || !window.agent) {
+                      alert('Agent API not available. Please ensure you are running in Electron.');
+                      return;
+                    }
                     try {
                       const parsed = JSON.parse(dslRef.current);
-                      const res = await window.agent?.start?.(parsed) as any;
+                      const res = await window.agent.start(parsed) as any;
                       if (res?.runId) {
                         setRunId(res.runId);
                         
@@ -303,6 +314,7 @@ export default function AgentConsole() {
                       }
                     } catch (error) {
                       console.error('Failed to start agent run:', error);
+                      alert(`Failed to start agent run: ${error instanceof Error ? error.message : String(error)}`);
                     }
                   }}
                 >
@@ -311,7 +323,18 @@ export default function AgentConsole() {
                 <button
                   className="rounded-lg border border-slate-700/60 bg-slate-800/60 px-3 py-1.5 text-xs font-medium text-gray-300 transition hover:bg-slate-800/80"
                   onClick={async () => {
-                    if (runId) await window.agent?.stop?.(runId);
+                    if (typeof window === 'undefined' || !window.agent) {
+                      alert('Agent API not available. Please ensure you are running in Electron.');
+                      return;
+                    }
+                    if (runId) {
+                      try {
+                        await window.agent.stop(runId);
+                      } catch (error) {
+                        console.error('Failed to stop agent run:', error);
+                        alert(`Failed to stop agent run: ${error instanceof Error ? error.message : String(error)}`);
+                      }
+                    }
                   }}
                 >
                   Stop Run

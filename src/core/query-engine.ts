@@ -239,7 +239,7 @@ export class QueryEngine {
       const citations: QueryResult['citations'] = [];
       
       if (workflowResult.steps) {
-        workflowResult.steps.forEach((step: any, idx: number) => {
+        workflowResult.steps.forEach((step: any) => {
           if (step.tool === 'web_search' && step.observation) {
             // Parse search results (simplified - in production, parse structured results)
             const lines = step.observation.split('\n').filter((l: string) => l.trim());

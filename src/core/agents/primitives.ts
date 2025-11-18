@@ -334,8 +334,8 @@ export function readPageText(document: Document = window.document): string {
  * Take a screenshot (requires Electron context or Canvas API)
  */
 export async function takeScreenshot(
-  options: ScreenshotOptions = {},
-  document: Document = window.document
+  _options: ScreenshotOptions = {},
+  _document: Document = window.document
 ): Promise<string | null> {
   // This requires Electron's webContents.capturePage() or html2canvas
   // For now, return null - implement based on your architecture

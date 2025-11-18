@@ -692,7 +692,6 @@ export function registerTabIpc(win: BrowserWindow) {
       try {
         const { getCrashRecovery } = await import('./performance/crash-recovery');
         const crashRecovery = getCrashRecovery();
-        const tabs = getTabs(win);
         const serializedTabs = serializeTabsForWindow(win);
         
         await crashRecovery.createSnapshot([{
@@ -976,7 +975,7 @@ export function registerTabIpc(win: BrowserWindow) {
       try {
         const { cleanupNavigation } = await import('./navigation-kernel');
         cleanupNavigation(tabId);
-      } catch (error) {
+      } catch {
         // Fallback to direct cleanup
         const { removeTabHistory } = await import('./navigation-history');
         const { clearTabCache } = await import('./navigation-cache');

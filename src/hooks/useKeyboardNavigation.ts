@@ -3,7 +3,7 @@
  * Provides consistent keyboard navigation across components
  */
 
-import { useEffect, useCallback } from 'react';
+import { useEffect } from 'react';
 
 export interface KeyboardShortcut {
   key: string;

@@ -939,7 +939,7 @@ export const Omnibox = forwardRef<OmniboxHandle, { onCommandPalette: () => void;
           }
           // Fallback: try Redix IPC directly
           const tabUrl = activeTab?.url;
-          const context = tabUrl ? await ipc.tabs.getContext(activeTab.id).catch(() => null) : null;
+          const _context = tabUrl ? await ipc.tabs.getContext(activeTab.id).catch(() => null) : null;
           // Start Redix stream (will show in status bar or open dialog)
           await ipc.redix.stream(
             prompt,

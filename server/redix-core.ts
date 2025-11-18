@@ -23,6 +23,8 @@ interface AskRequest {
   };
 }
 
+// AskResponse interface (kept for future use)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 interface AskResponse {
   text: string;
   provider: string;
@@ -197,7 +199,7 @@ export class RedixServer {
 
     this.app.post<{ Body: AskRequest & { stream?: boolean } }>('/ask', async (request, reply) => {
       try {
-        const { query, context, options, stream } = request.body;
+        const { query, context: _context, options, stream } = request.body;
         if (!query?.trim()) {
           reply.code(400).send({ error: 'Query is required' });
           return;

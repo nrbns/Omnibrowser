@@ -7,9 +7,9 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, Clock, Tag, X, Sparkles, Trash2, Pin, PinOff, BarChart3, FileText } from 'lucide-react';
 import { MemoryEvent } from '../../core/supermemory/tracker';
-import type { MemoryEventType } from '../../core/supermemory/event-types';
-import { useSuggestions } from '../../core/supermemory/useSuggestions';
-import { searchVectors } from '../../core/supermemory/vectorStore';
+// import type { MemoryEventType } from '../../core/supermemory/event-types'; // Unused for now
+// import { useSuggestions } from '../../core/supermemory/useSuggestions'; // Unused for now
+import { semanticSearchMemories, SemanticMemoryMatch } from '../../core/supermemory/search';
 import { useDebounce } from '../../utils/useDebounce';
 import { superMemoryDB } from '../../core/supermemory/db';
 import { MemoryStoreInstance } from '../../core/supermemory/store';
@@ -28,7 +28,7 @@ export function MemorySidebar({ open, onClose }: MemorySidebarProps) {
   const [events, setEvents] = useState<MemoryEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedType, setSelectedType] = useState<MemoryEvent['type'] | 'all'>('all');
-  const [semanticResults, setSemanticResults] = useState<Array<{ event: MemoryEvent; similarity: number }>>([]);
+  const [semanticResults, setSemanticResults] = useState<SemanticMemoryMatch[]>([]);
   const [showPinnedOnly, setShowPinnedOnly] = useState(false);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [allTags, setAllTags] = useState<string[]>([]);
@@ -105,34 +105,18 @@ export function MemorySidebar({ open, onClose }: MemorySidebarProps) {
 
     const performSemanticSearch = async () => {
       try {
-        // Use new vector store search
-        const results = await searchVectors(debouncedQuery, {
-          maxVectors: 10,
-          minSimilarity: 0.6,
+        const results = await semanticSearchMemories(debouncedQuery, {
+          limit: 18,
+          minSimilarity: 0.5,
         });
-        
-        // Load events for matched embeddings
-        const matchedEvents: Array<{ event: MemoryEvent; similarity: number }> = [];
-        for (const result of results) {
-          try {
-            const events = await MemoryStoreInstance.getEvents({ limit: 1000 });
-            const found = events.find((e: MemoryEvent) => e.id === result.embedding.eventId);
-            if (found) {
-              matchedEvents.push({ event: found, similarity: result.similarity });
-            }
-          } catch {
-            // Skip if event not found
-          }
-        }
-        
-        setSemanticResults(matchedEvents);
+        setSemanticResults(results);
       } catch (error) {
         console.error('[MemorySidebar] Semantic search failed:', error);
         setSemanticResults([]);
       }
     };
 
-    performSemanticSearch();
+    void performSemanticSearch();
   }, [debouncedQuery]);
 
   const displayedEvents = useMemo(() => {
@@ -187,7 +171,7 @@ export function MemorySidebar({ open, onClose }: MemorySidebarProps) {
     }
   };
 
-  const handleAddTag = async (eventId: string, tag: string) => {
+  const _handleAddTag = async (eventId: string, tag: string) => {
     try {
       const event = events.find(e => e.id === eventId);
       if (!event) return;
@@ -212,7 +196,7 @@ export function MemorySidebar({ open, onClose }: MemorySidebarProps) {
     }
   };
 
-  const handleRemoveTag = async (eventId: string, tag: string) => {
+  const _handleRemoveTag = async (eventId: string, tag: string) => {
     try {
       const event = events.find(e => e.id === eventId);
       if (!event) return;
@@ -553,7 +537,8 @@ export function MemorySidebar({ open, onClose }: MemorySidebarProps) {
                       <div className="text-xs text-purple-400 mb-2">Semantic matches</div>
                     )}
                     {displayedEvents.map((event) => {
-                      const similarity = semanticResults.find(r => r.event.id === event.id)?.similarity;
+                      const match = semanticResults.find((r) => r.event.id === event.id);
+                      const similarity = match?.similarity;
                       return (
                         <motion.div
                           key={event.id}
@@ -574,6 +559,11 @@ export function MemorySidebar({ open, onClose }: MemorySidebarProps) {
                               {event.metadata?.url && (
                                 <div className="text-xs text-gray-400 mt-1 truncate">
                                   {event.metadata.url}
+                                </div>
+                              )}
+                              {match?.chunkText && (
+                                <div className="text-xs text-gray-400 mt-2 line-clamp-2 italic">
+                                  “…{match.chunkText.substring(0, 180)}…”
                                 </div>
                               )}
                             </div>

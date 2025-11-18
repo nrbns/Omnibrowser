@@ -1,4 +1,4 @@
-const CONTROL_CHAR_PATTERN = /[\p{Cc}]/gu;
+// const CONTROL_CHAR_PATTERN = /[\p{Cc}]/gu; // Unused for now
 /**
  * Security Utilities - XSS Protection and Input Sanitization
  * 
@@ -110,8 +110,9 @@ export function isValidUrl(url: string): boolean {
  * Removes potentially dangerous characters and limits length
  */
 export function sanitizeInput(input: string, maxLength = 1000): string {
-  // Remove null bytes and control characters
-  let sanitized = input.replace(CONTROL_CHAR_PATTERN, '');
+  // Remove null bytes and control characters using Unicode escapes (safer than \x00-\x1f)
+  // eslint-disable-next-line no-control-regex
+  let sanitized = input.replace(/[\u0000-\u001F\u007F]/g, '');
   
   // Limit length
   if (sanitized.length > maxLength) {

@@ -376,7 +376,7 @@ export function extractPageContent(document: Document, url?: string): PageMetada
  * Extract page content from a URL (requires server-side or Electron context)
  * This is a placeholder - actual implementation depends on how you fetch pages
  */
-export async function extractPageContentFromUrl(url: string): Promise<PageMetadata | null> {
+export async function extractPageContentFromUrl(_url: string): Promise<PageMetadata | null> {
   // This would typically use Electron's webContents or a headless browser
   // For now, return null - implement based on your architecture
   console.warn('[PageExtractor] extractPageContentFromUrl requires Electron or server context');

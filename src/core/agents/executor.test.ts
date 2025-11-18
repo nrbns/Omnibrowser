@@ -2,7 +2,7 @@
  * Agent Executor Tests
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { executor, executeActions } from './executor';
 import type { AgentAction, ExecutionContext } from './executor';
 

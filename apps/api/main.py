@@ -10,7 +10,25 @@ from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from apps.api.routes import auth, workspaces, agent, downloads, notes, search, sentinel, redix, multi_hop_reasoning, huggingface, openai, extract, prompt, eco, llm_assistant, ai_search
+from apps.api.routes import (
+    auth,
+    workspaces,
+    agent,
+    downloads,
+    notes,
+    search,
+    sentinel,
+    redix,
+    multi_hop_reasoning,
+    huggingface,
+    openai,
+    extract,
+    prompt,
+    eco,
+    llm_assistant,
+    ai_search,
+    search_llm,
+)
 from apps.api.database import init_db
 
 # WebSocket connection manager
@@ -85,6 +103,7 @@ app.include_router(prompt.router, prefix="/prompt", tags=["prompt"])
 app.include_router(eco.router, prefix="/eco", tags=["eco"])
 app.include_router(llm_assistant.router, prefix="/llm", tags=["llm-assistant"])
 app.include_router(ai_search.router, prefix="/search", tags=["ai-search"])
+app.include_router(search_llm.router, prefix="/api", tags=["search-llm"])
 
 @app.get("/")
 async def root():

@@ -72,7 +72,7 @@ const workflows: Record<string, Workflow> = {
   },
 };
 
-async function executeStep(step: WorkflowStep, context: any = {}): Promise<any> {
+async function executeStep(step: WorkflowStep, _context: any = {}): Promise<any> {
   switch (step.action) {
     case 'search':
       if (step.query) {

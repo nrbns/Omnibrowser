@@ -5,7 +5,7 @@
 // @ts-nocheck
 
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { FileText, BookOpen, Save, X, PenLine, FileDown, Archive, Send, Loader2 } from 'lucide-react';
+import { FileText, BookOpen, PenLine, FileDown, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Skeleton } from '../common/Skeleton';
 import { useTabsStore } from '../../state/tabsStore';
@@ -153,7 +153,7 @@ export function ResearchSplit() {
 
   // Auto-save notes (debounced)
   const saveNotes = useRef(
-    debounce(async (url: string, notesText: string, highlightsData: Highlight[]) => {
+    debounce(async (url: string, notesText: string, highlightsData: ResearchHighlight[]) => {
       if (!url || url.startsWith('about:') || url.startsWith('chrome:')) return;
       try {
         await ipc.research.saveNotes(url, notesText, highlightsData);
@@ -207,7 +207,7 @@ export function ResearchSplit() {
     return unsubscribe;
   }, [currentUrl]);
 
-  const handleHighlightNoteChange = (id: string, nextNote: string) => {
+  const _handleHighlightNoteChange = (id: string, nextNote: string) => {
     setHighlights((prev) =>
       prev.map((highlight) =>
         highlight.id === id
@@ -220,7 +220,7 @@ export function ResearchSplit() {
     );
   };
 
-  const sortedHighlights = useMemo(
+  const _sortedHighlights = useMemo(
     () => [...highlights].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)),
     [highlights],
   );
@@ -438,7 +438,9 @@ export function ResearchSplit() {
             value={notes}
             onChange={(e) => {
               setNotes(e.target.value);
-              saveNotes(e.target.value, highlights);
+              if (currentUrl) {
+                saveNotes(currentUrl, e.target.value, highlights);
+              }
             }}
             placeholder="Add your notes here..."
             className="w-full h-full bg-transparent text-sm text-gray-300 placeholder-gray-500 resize-none border-none outline-none"

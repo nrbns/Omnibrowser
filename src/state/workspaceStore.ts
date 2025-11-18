@@ -37,7 +37,7 @@ type WorkspaceState = {
   loadWorkspaces: () => Promise<void>;
 };
 
-export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
+export const useWorkspaceStore = create<WorkspaceState>((set, _get) => ({
   workspaces: [],
   activeWorkspaceId: null,
   

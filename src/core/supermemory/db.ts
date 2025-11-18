@@ -543,6 +543,52 @@ class SuperMemoryDB {
       }),
     ]);
   }
+
+  /**
+   * Get a single event by ID
+   */
+  async getEvent(eventId: string): Promise<MemoryEvent | null> {
+    const db = await this.getDB();
+    const transaction = db.transaction(['events'], 'readonly');
+    const store = transaction.objectStore('events');
+
+    return new Promise((resolve, reject) => {
+      const request = store.get(eventId);
+      request.onsuccess = () => resolve((request.result as MemoryEvent) || null);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  /**
+   * Get multiple events by IDs (preserves order of IDs)
+   */
+  async getEventsByIds(ids: string[]): Promise<MemoryEvent[]> {
+    if (ids.length === 0) return [];
+    const db = await this.getDB();
+    const transaction = db.transaction(['events'], 'readonly');
+    const store = transaction.objectStore('events');
+    const results = new Map<string, MemoryEvent>();
+
+    await Promise.all(
+      ids.map(
+        (id) =>
+          new Promise<void>((resolve, reject) => {
+            const request = store.get(id);
+            request.onsuccess = () => {
+              if (request.result) {
+                results.set(id, request.result as MemoryEvent);
+              }
+              resolve();
+            };
+            request.onerror = () => reject(request.error);
+          })
+      )
+    );
+
+    return ids
+      .map((id) => results.get(id))
+      .filter((event): event is MemoryEvent => Boolean(event));
+  }
 }
 
 // Singleton instance

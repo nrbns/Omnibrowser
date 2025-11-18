@@ -645,7 +645,7 @@ What should I do next?`],
     request: AgenticWorkflowRequest,
     streamCallback?: StreamCallback
   ): Promise<AgenticWorkflowResponse> {
-    const { query, context = '', workflowType = 'research', tools = [], options = {} } = request;
+    const { query, context = '', workflowType = 'research', tools: _tools = [], options = {} } = request;
 
     switch (workflowType) {
       case 'research':

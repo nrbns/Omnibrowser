@@ -4,11 +4,11 @@
  */
 
 import { useState, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { 
-  Plus, Trash2, Play, Save, Loader2, ChevronRight, 
+  Trash2, Play, Save, Loader2, 
   Search, MousePointerClick, FileText, Globe, Settings,
-  ArrowRight, GitBranch, Repeat, CheckCircle2
+  ArrowRight, GitBranch, Repeat
 } from 'lucide-react';
 
 export interface WorkflowStep {

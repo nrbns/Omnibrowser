@@ -146,7 +146,7 @@ export function MainView() {
           setBrowserReady(true);
           setIsLoading(false);
         }
-      } catch (error) {
+      } catch {
         // Retry with exponential backoff
         if (retryCount < MAX_RETRIES) {
           const delay = Math.min(1000 * Math.pow(2, retryCount), 5000);
@@ -215,7 +215,7 @@ export function MainView() {
   // Empty state overlay is handled by OmniDesk component
 
   return (
-    <div ref={containerRef} className="flex-1 relative bg-white overflow-hidden w-full">
+    <div ref={containerRef} className="h-full w-full relative bg-white overflow-hidden">
       {/* Browser Webview Container - always present so BrowserView can render immediately */}
       <div
         id="browser-view-container"

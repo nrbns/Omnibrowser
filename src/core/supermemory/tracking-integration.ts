@@ -4,7 +4,8 @@
  */
 
 import React from 'react';
-import { trackVisit, trackSearch, trackModeSwitch, trackBookmark, trackHighlight, trackScreenshot, trackNote } from './tracker';
+import { trackVisit, trackSearch, trackModeSwitch } from './tracker';
+// import { trackBookmark, trackHighlight, trackScreenshot, trackNote } from './tracker'; // Unused for now
 import { useTabsStore } from '../../state/tabsStore';
 import { useAppStore } from '../../state/appStore';
 
@@ -62,7 +63,7 @@ export async function autoTrackSearch(
 export async function autoTrackModeSwitch(
   fromMode: string,
   toMode: string,
-  reason?: string
+  _reason?: string
 ): Promise<void> {
   try {
     await trackModeSwitch(toMode);

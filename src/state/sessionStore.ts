@@ -4,7 +4,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { useTabsStore, type Tab } from './tabsStore';
+import { useTabsStore } from './tabsStore';
 
 export interface Session {
   id: string;
@@ -95,7 +95,7 @@ export const useSessionStore = create<SessionStore>()(
                 ? (createdTab as { id: string }).id
                 : undefined;
             // Activate if it was active in session
-            if (tabData.active && createdTabId) {
+            if (tabData.active && createdTabId && typeof createdTabId === 'string') {
               useTabsStore.getState().setActive(createdTabId);
             }
             // Small delay to prevent overwhelming the system

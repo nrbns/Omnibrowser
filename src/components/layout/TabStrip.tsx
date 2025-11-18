@@ -11,6 +11,7 @@ import { X, Plus, Eye, Sparkles } from 'lucide-react';
 import { ipc } from '../../lib/ipc-typed';
 import { useTabsStore } from '../../state/tabsStore';
 import { useContainerStore } from '../../state/containerStore';
+import { useAppStore } from '../../state/appStore';
 import { ipcEvents } from '../../lib/ipc-events';
 import { TabHoverCard } from '../TopNav/TabHoverCard';
 import { ContainerQuickSelector } from '../containers/ContainerQuickSelector';
@@ -61,8 +62,9 @@ const mapTabsForStore = (list: Tab[]) =>
   }));
 
 export function TabStrip() {
-  const { setAll: setAllTabs, setActive: setActiveTab, activeId } = useTabsStore();
+  const { setAll: setAllTabs, setActive: setActiveTab, activeId, tabs: storeTabs, updateTab } = useTabsStore();
   const { activeContainerId } = useContainerStore();
+  const { mode: currentMode } = useAppStore();
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [predictedClusters, setPredictedClusters] = useState<Array<{ id: string; label: string; tabIds: string[]; confidence?: number }>>([]);
   const [prefetchEntries, setPrefetchEntries] = useState<Array<{ tabId: string; url: string; reason: string; confidence?: number }>>([]);
@@ -188,21 +190,28 @@ export function TabStrip() {
         console.log('[TabStrip] refreshTabsFromMain: Got', tabList.length, 'tabs');
       }
 
-      const mappedTabs = tabList.map((t: any) => ({
-        id: t.id,
-        title: t.title || 'New Tab',
-        url: t.url || 'about:blank',
-        active: t.active || false,
-        mode: t.mode || 'normal',
-        containerId: t.containerId,
-        containerName: t.containerName,
-        containerColor: t.containerColor,
-        createdAt: t.createdAt,
-        lastActiveAt: t.lastActiveAt,
-        sessionId: t.sessionId,
-        profileId: t.profileId,
-        sleeping: Boolean(t.sleeping),
-      }));
+      const mappedTabs = tabList.map((t: any) => {
+        // Get appMode from store if available, otherwise use current mode
+        const storeTab = storeTabs.find(st => st.id === t.id);
+        const appMode = storeTab?.appMode || currentMode;
+        
+        return {
+          id: t.id,
+          title: t.title || 'New Tab',
+          url: t.url || 'about:blank',
+          active: t.active || false,
+          mode: t.mode || 'normal',
+          appMode: appMode,
+          containerId: t.containerId,
+          containerName: t.containerName,
+          containerColor: t.containerColor,
+          createdAt: t.createdAt,
+          lastActiveAt: t.lastActiveAt,
+          sessionId: t.sessionId,
+          profileId: t.profileId,
+          sleeping: Boolean(t.sleeping),
+        };
+      });
 
       const ids = mappedTabs.map(t => t.id).sort().join(',');
       previousTabIdsRef.current = ids;
@@ -288,27 +297,34 @@ export function TabStrip() {
 
       applyTabs(tabsRef.current.length > 0 ? tabsRef.current : tabs);
 
-      const unsubscribe = ipcEvents.on<TabUpdate[]>('tabs:updated', (tabList) => {
+      const unsubscribe = ipcEvents.on('tabs:updated', (tabList: any[]) => {
         if (!isMounted) return;
         if (!Array.isArray(tabList) || tabList.length === 0) {
           applyTabs([]);
           return;
         }
-        const mappedTabs: Tab[] = tabList.map((t) => ({
-          id: t.id,
-          title: t.title || 'New Tab',
-          url: t.url || 'about:blank',
-          active: Boolean(t.active),
-          mode: (t as any).mode || 'normal',
-          containerId: t.containerId,
-          containerName: t.containerName,
-          containerColor: t.containerColor,
-          createdAt: t.createdAt,
-          lastActiveAt: t.lastActiveAt,
-          sessionId: t.sessionId,
-          profileId: t.profileId,
-          sleeping: (t as any).sleeping,
-        }));
+        const mappedTabs: Tab[] = tabList.map((t) => {
+          // Get appMode from store if available, otherwise use current mode
+          const storeTab = storeTabs.find(st => st.id === t.id);
+          const appMode = storeTab?.appMode || currentMode;
+          
+          return {
+            id: t.id,
+            title: t.title || 'New Tab',
+            url: t.url || 'about:blank',
+            active: Boolean(t.active),
+            appMode: appMode,
+            mode: (t as any).mode || 'normal',
+            containerId: t.containerId,
+            containerName: t.containerName,
+            containerColor: t.containerColor,
+            createdAt: t.createdAt,
+            lastActiveAt: t.lastActiveAt,
+            sessionId: t.sessionId,
+            profileId: t.profileId,
+            sleeping: (t as any).sleeping,
+          };
+        });
         applyTabs(mappedTabs);
       });
 
@@ -379,20 +395,27 @@ export function TabStrip() {
         if (!isMounted) return;
         
         if (Array.isArray(tabList) && tabList.length > 0) {
-          const mappedTabs = tabList.map((t: any) => ({
-            id: t.id,
-            title: t.title || 'New Tab',
-            url: t.url || 'about:blank',
-            active: t.active || false,
-            mode: t.mode || 'normal',
-            containerId: t.containerId,
-            containerName: t.containerName,
-            containerColor: t.containerColor,
-            createdAt: t.createdAt,
-            lastActiveAt: t.lastActiveAt,
-            sessionId: t.sessionId,
-            profileId: t.profileId,
-          }));
+          const mappedTabs = tabList.map((t: any) => {
+            // Get appMode from store if available, otherwise use current mode
+            const storeTab = storeTabs.find(st => st.id === t.id);
+            const appMode = storeTab?.appMode || currentMode;
+            
+            return {
+              id: t.id,
+              title: t.title || 'New Tab',
+              url: t.url || 'about:blank',
+              active: t.active || false,
+              mode: t.mode || 'normal',
+              appMode: appMode,
+              containerId: t.containerId,
+              containerName: t.containerName,
+              containerColor: t.containerColor,
+              createdAt: t.createdAt,
+              lastActiveAt: t.lastActiveAt,
+              sessionId: t.sessionId,
+              profileId: t.profileId,
+            };
+          });
           
           // Update ref to track tab IDs and only update state if changed
           const tabIds = mappedTabs.map(t => t.id).sort().join(',');
@@ -551,21 +574,28 @@ export function TabStrip() {
         return;
       }
       
-      const mappedTabs = tabList.map((t: any) => ({
-        id: t.id,
-        title: t.title || 'New Tab',
-        url: t.url || 'about:blank',
-        active: t.active || false,
-        containerId: t.containerId,
-        containerName: t.containerName,
-        containerColor: t.containerColor,
-        mode: t.mode,
-        createdAt: t.createdAt,
-        lastActiveAt: t.lastActiveAt,
-        sessionId: t.sessionId,
-        profileId: t.profileId,
-        sleeping: Boolean(t.sleeping),
-      }));
+      const mappedTabs = tabList.map((t: any) => {
+        // Get appMode from store if available, otherwise use current mode
+        const storeTab = storeTabs.find(st => st.id === t.id);
+        const appMode = storeTab?.appMode || currentMode;
+        
+        return {
+          id: t.id,
+          title: t.title || 'New Tab',
+          url: t.url || 'about:blank',
+          active: t.active || false,
+          containerId: t.containerId,
+          containerName: t.containerName,
+          containerColor: t.containerColor,
+          mode: t.mode,
+          appMode: appMode,
+          createdAt: t.createdAt,
+          lastActiveAt: t.lastActiveAt,
+          sessionId: t.sessionId,
+          profileId: t.profileId,
+          sleeping: Boolean(t.sleeping),
+        };
+      });
 
       // OPTIMIZED: Check if tabs actually changed before updating
       const newTabIds = mappedTabs.map(t => t.id).sort().join(',');
@@ -698,9 +728,13 @@ export function TabStrip() {
         containerId: activeContainerId || undefined,
       });
       if (result && result.id) {
+        // Tag the new tab with current app mode
+        const tabId = typeof result === 'object' && 'id' in result ? result.id : result;
+        updateTab(tabId, { appMode: currentMode });
+        
         // Tab created successfully - IPC event will update the UI
         if (IS_DEV) {
-          console.log('[TabStrip] Tab created via addTab:', result.id);
+          console.log('[TabStrip] Tab created via addTab:', tabId);
         }
         // Force a refresh to ensure UI updates even if IPC event is delayed
         setTimeout(async () => {
@@ -1216,7 +1250,8 @@ export function TabStrip() {
         <div className="flex items-center gap-2 min-w-0 flex-1" style={{ pointerEvents: 'auto' }}>
           <AnimatePresence mode="popLayout">
             {tabs && Array.isArray(tabs) && tabs.length > 0 ? (
-              tabs.map((tab) => {
+              // Filter tabs by current mode - only show tabs that match the current app mode
+              tabs.filter(tab => !tab.appMode || tab.appMode === currentMode).map((tab) => {
                 const tabDomId = `tab-${tab.id}`;
                 const panelDomId = `tabpanel-${tab.id}`;
                 const prefetchForTab = prefetchEntries.find((entry) => entry.tabId === tab.id);

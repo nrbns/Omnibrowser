@@ -45,7 +45,7 @@ export function ContainerQuickSelector({ onSelect, compact = false, showLabel = 
   useEffect(() => {
     const ensurePresets = async () => {
       const existing = await ipc.containers.list();
-      const presetNames = PRESET_CONTAINERS.map(p => p.name.toLowerCase());
+      // const presetNames = PRESET_CONTAINERS.map(p => p.name.toLowerCase()); // Unused for now
       
       const missing = PRESET_CONTAINERS.filter(
         preset => !existing.some(c => c.name.toLowerCase() === preset.name.toLowerCase())

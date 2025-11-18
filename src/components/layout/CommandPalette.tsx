@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { motion } from 'framer-motion';
-import { Search, ArrowRight, Box, Clock, Sparkles, History, TrendingUp } from 'lucide-react';
+import { Search, ArrowRight, Box, Clock, Sparkles, History } from 'lucide-react';
 import type { CommandDescriptor } from '../../lib/commands/types';
 import { getAllCommands, onCommandsChanged } from '../../lib/commands/registry';
 import { initializeBuiltinCommands, builtinsInitialized } from '../../lib/commands/builtin';

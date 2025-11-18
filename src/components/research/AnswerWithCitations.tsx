@@ -4,7 +4,7 @@
 
 import { useMemo, useState } from 'react';
 import { ExternalLink, FileText, Download } from 'lucide-react';
-import type { ResearchResult, ResearchInlineEvidence, ResearchCitation, ResearchSource } from '../../types/research';
+import type { ResearchInlineEvidence, ResearchCitation, ResearchSource } from '../../types/research';
 import { motion } from 'framer-motion';
 import { ipc } from '../../lib/ipc-typed';
 
@@ -88,7 +88,7 @@ export function AnswerWithCitations({
 
     return parts.map((part, idx) => {
       if (part.citation !== undefined && part.sourceIndex !== undefined) {
-        const citation = citations.find(c => c.index === part.citation);
+        // const citation = citations.find(c => c.index === part.citation); // Unused for now
         const source = sources[part.sourceIndex];
         const sourceKey = source?.url ?? `source-${part.sourceIndex}`;
         return (
@@ -118,7 +118,7 @@ export function AnswerWithCitations({
         await onExport(format);
       } else {
         // Default export implementation
-        const exportData = {
+        const _exportData = {
           query: '',
           summary,
           citations: citations.map(c => ({

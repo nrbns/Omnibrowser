@@ -48,7 +48,7 @@ export function PrivacySwitch() {
   const ghostDisabled = policy ? !policy.allowGhostTabs : false;
   const shadowDisabled = policy ? !policy.allowPrivateWindows : false;
 
-  const modes: Array<{ value: PrivacyMode; icon: typeof Lock; label: string; color: string; disabled?: boolean; badge?: string }> = [
+  const modes: Array<{ value: PrivacyMode; icon: typeof Lock; label: string; color: string; disabled?: boolean; badge?: React.ReactNode }> = [
     { value: 'Normal', icon: Lock, label: 'Normal', color: 'text-gray-400' },
     { value: 'Private', icon: Eye, label: 'Private', color: 'text-blue-400', disabled: privateDisabled },
     {
@@ -121,12 +121,14 @@ export function PrivacySwitch() {
         setGhostModeActive(false);
       }
       
-      // Normal mode: Clear any active proxy settings by setting to direct
+      // Normal mode: Clear any active proxy settings
       try {
         if (activeId) {
+          // Clear per-tab proxy by omitting type/host/port
           await ipc.proxy.set({ tabId: activeId });
         }
-        await ipc.proxy.set({ mode: 'direct' });
+        // Clear global proxy by omitting type/host/port (schema allows optional fields)
+        await ipc.proxy.set({});
         setMode('Normal');
       } catch (error) {
         console.error('Failed to switch to Normal mode:', error);

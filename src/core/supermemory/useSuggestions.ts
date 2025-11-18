@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { MemoryStore } from './store';
+// import { MemoryStore } from './store'; // Unused for now
 import { MemoryEvent } from './tracker';
 import { useDebounce } from '../../utils/useDebounce';
 import { searchEmbeddings } from './embedding';

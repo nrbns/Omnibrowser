@@ -881,7 +881,7 @@ export const ipc = {
           allowScreenshots: boolean;
           allowClipping: boolean;
         }
-      >('profiles:getPolicy', profileId ? { profileId } : {}),
+      >('profiles:getPolicy', profileId ? { profileId } : ({} as Record<string, never>)),
   },
   telemetry: {
     setOptIn: (optIn: boolean) => {
@@ -890,7 +890,7 @@ export const ipc = {
         .catch(() => ({ success: true })); // Fallback to success if IPC fails
     },
     getStatus: () =>
-      ipcCall<Record<string, never>, { optIn: boolean; enabled: boolean }>('telemetry:getStatus', {}).catch(() => ({
+      ipcCall<Record<string, never>, { optIn: boolean; enabled: boolean }>('telemetry:getStatus', {} as Record<string, never>).catch(() => ({
         optIn: false,
         enabled: false,
       })),
@@ -905,7 +905,7 @@ export const ipc = {
           uptimeSeconds: number;
           perfMetrics: Array<{ metric: string; samples: number; avg: number; p95: number; last: number; unit: string }>;
         }
-      >('telemetry:getSummary', {}).catch(() => ({
+      >('telemetry:getSummary', {} as Record<string, never>).catch(() => ({
         optIn: false,
         enabled: false,
         crashCount: 0,

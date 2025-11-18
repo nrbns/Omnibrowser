@@ -2,7 +2,7 @@
  * ProgressBar - Animated loading indicator under omnibox
  */
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useIPCEvent } from '../../lib/use-ipc-event';
 

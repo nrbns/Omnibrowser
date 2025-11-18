@@ -8,16 +8,16 @@ import { Folder, Plus, X, Edit2, Check, Loader2, Layers } from 'lucide-react';
 import { ipc } from '../../lib/ipc-typed';
 import { useWorkspaceStore, type Workspace } from '../../state/workspaceStore';
 import { useTabsStore } from '../../state/tabsStore';
-import { isDevEnv } from '../../lib/env';
+// import { isDevEnv } from '../../lib/env'; // Unused for now
 
-const IS_DEV = isDevEnv();
+// const IS_DEV = isDevEnv(); // Unused for now
 
 interface WorkspaceSwitcherProps {
   compact?: boolean;
 }
 
 export function WorkspaceSwitcher({ compact = false }: WorkspaceSwitcherProps) {
-  const { workspaces, activeWorkspaceId, setWorkspaces, setActiveWorkspace, loadWorkspaces } = useWorkspaceStore();
+  const { workspaces, activeWorkspaceId, setWorkspaces: _setWorkspaces, setActiveWorkspace, loadWorkspaces } = useWorkspaceStore();
   const { tabs } = useTabsStore();
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);

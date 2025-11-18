@@ -437,7 +437,7 @@ export async function streamPrompt(
     throw new Error(`API key required for ${provider}`);
   }
 
-  const baseUrl = getBaseUrl(provider);
+  // const baseUrl = getBaseUrl(provider); // Unused for now
 
   // Simplified streaming - for now, use regular sendPrompt and simulate streaming
   // In production, implement proper SSE/streaming

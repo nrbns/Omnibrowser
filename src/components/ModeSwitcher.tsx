@@ -1,10 +1,13 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { useAppStore, type AppState } from '../state/appStore';
 import { trackModeSwitch } from '../core/supermemory/tracker';
+import { useModeManager } from '../core/modes/manager';
 
 export default function ModeSwitcher() {
   const mode = useAppStore(s=>s.mode);
   const setMode = useAppStore(s=>s.setMode);
+  const modeLoading = useModeManager(s=>s.loading);
   const prevModeRef = React.useRef<string | null>(null);
   
   React.useEffect(() => {
@@ -16,20 +19,27 @@ export default function ModeSwitcher() {
   
   const primaryModes: AppState['mode'][] = ['Browse', 'Research', 'Trade'];
   const secondaryModes: AppState['mode'][] = ['Games', 'Docs', 'Images', 'Threats', 'GraphMind'];
-  const [showMore, setShowMore] = React.useState(false);
+  const [showMore, setShowMore] = useState(false);
 
   return (
     <div className="flex items-center gap-1">
+      {modeLoading && (
+        <div className="px-2 py-1 flex items-center gap-1.5 text-xs text-gray-400">
+          <Loader2 size={12} className="animate-spin" />
+          <span>Switching...</span>
+        </div>
+      )}
       {/* Primary modes - always visible */}
       {primaryModes.map((m) => (
         <button
           key={m}
           onClick={() => setMode(m)}
+          disabled={modeLoading}
           className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
             mode === m
               ? 'bg-blue-500/20 text-blue-200 border border-blue-500/40'
               : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'
-          }`}
+          } ${modeLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
           {m}
         </button>
@@ -39,11 +49,12 @@ export default function ModeSwitcher() {
       <div className="relative">
         <button
           onClick={() => setShowMore(!showMore)}
+          disabled={modeLoading}
           className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
             secondaryModes.includes(mode)
               ? 'bg-purple-500/20 text-purple-200 border border-purple-500/40'
               : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'
-          }`}
+          } ${modeLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
           More {showMore ? '▼' : '▶'}
         </button>
@@ -56,11 +67,12 @@ export default function ModeSwitcher() {
                   setMode(m);
                   setShowMore(false);
                 }}
+                disabled={modeLoading}
                 className={`w-full text-left px-3 py-2 text-xs transition-colors ${
                   mode === m
                     ? 'bg-purple-500/20 text-purple-200'
                     : 'text-gray-300 hover:bg-gray-800'
-                }`}
+                } ${modeLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 {m}
               </button>
@@ -80,7 +92,7 @@ export function LegacyModeSwitcher() {
     <select
       className="bg-neutral-800 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400/50"
       value={mode}
-      onChange={(e) => setMode(e.target.value as any)}
+      onChange={(e) => setMode(e.target.value as AppState['mode'])}
       aria-label="Select browser mode"
       title="Select browser mode"
     >

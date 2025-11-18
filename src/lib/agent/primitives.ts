@@ -3,7 +3,7 @@
  * Type-safe client for agent primitives from renderer process
  */
 
-import { ipc } from '../ipc-typed';
+// import { ipc } from '../ipc-typed'; // Unused for now
 
 export interface ReadPageOptions {
   url: string;

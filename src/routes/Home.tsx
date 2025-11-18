@@ -7,6 +7,7 @@ import DocsPanel from '../modes/docs';
 import ImagesPanel from '../modes/images';
 import ThreatsPanel from '../modes/threats';
 import GraphMindPanel from '../modes/graphmind';
+import ResearchPanel from '../modes/research';
 import { MainView } from '../components/layout/MainView';
 import { ResearchSplit } from '../components/Panels/ResearchSplit';
 import { OmniDesk } from '../components/OmniDesk';
@@ -55,9 +56,9 @@ export default function Home() {
   }, []);
   
   return (
-    <div className={`h-full w-full bg-[#1A1D28] flex flex-col ${isFullscreen ? 'absolute inset-0' : ''}`}>
-      {(mode === 'Browse' || !mode || mode === 'Research') && (
-        <div className="flex-1 w-full relative">
+    <div className={`h-full w-full bg-[#1A1D28] flex flex-col overflow-hidden ${isFullscreen ? 'absolute inset-0' : ''}`}>
+      {mode === 'Browse' || !mode ? (
+        <div className="flex-1 w-full relative min-h-0 overflow-hidden">
           <MainView />
           {/* Show OmniDesk when no tabs or active tab is about:blank (search page) */}
           {/* OmniDesk will handle its own visibility logic */}
@@ -67,25 +68,44 @@ export default function Home() {
               <OmniDesk variant="overlay" />
             </div>
           </div>
-          {/* Show Research panel overlay when in Research mode and not fullscreen */}
-          {mode === 'Research' && !isFullscreen && (
-            <div className="absolute inset-0 pointer-events-none z-30">
-              <div className="pointer-events-auto h-full w-full">
-                <ResearchSplit />
-              </div>
+        </div>
+      ) : mode === 'Research' ? (
+        <div className="flex-1 w-full relative flex flex-col min-h-0 overflow-hidden">
+          {/* Top: Research Panel (full width) */}
+          {!isFullscreen && (
+            <div className="h-96 border-b border-gray-700/30 flex-shrink-0 overflow-hidden">
+              <ResearchPanel />
             </div>
           )}
+          {/* Bottom: Browser view with ResearchSplit overlay */}
+          <div className="flex-1 relative min-h-0 overflow-hidden">
+            <MainView />
+            {/* Show ResearchSplit overlay when not fullscreen */}
+            {!isFullscreen && (
+              <div className="absolute inset-0 pointer-events-none z-30">
+                <div className="pointer-events-auto h-full w-full">
+                  <ResearchSplit />
+                </div>
+              </div>
+            )}
+          </div>
         </div>
-      )}
-      {mode === 'Trade' && <TradePanel />}
-      {mode === 'Games' && <GamesPanel />}
-      {mode === 'Docs' && <DocsPanel />}
-      {mode === 'Images' && <ImagesPanel />}
-      {mode === 'Threats' && <ThreatsPanel />}
-      {mode === 'GraphMind' && <GraphMindPanel />}
+      ) : mode === 'Trade' ? (
+        <TradePanel />
+      ) : mode === 'Games' ? (
+        <GamesPanel />
+      ) : mode === 'Docs' ? (
+        <DocsPanel />
+      ) : mode === 'Images' ? (
+        <ImagesPanel />
+      ) : mode === 'Threats' ? (
+        <ThreatsPanel />
+      ) : mode === 'GraphMind' ? (
+        <GraphMindPanel />
+      ) : null}
       
-      {/* Research Pane - Available in all modes */}
-      {!isFullscreen && <ResearchPane />}
+      {/* Research Pane - Available in all modes except Research (which has its own panel) */}
+      {!isFullscreen && mode !== 'Research' && <ResearchPane />}
     </div>
   );
 }

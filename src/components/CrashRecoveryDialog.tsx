@@ -17,8 +17,8 @@ interface CrashRecoveryDialogProps {
   onReload: () => void;
 }
 
-export function CrashRecoveryDialog({ tabId, reason, exitCode, onClose, onReload }: CrashRecoveryDialogProps) {
-  const [snapshots, setSnapshots] = useState<Array<{ id: string; timestamp: number }>>([]);
+export function CrashRecoveryDialog({ tabId: _tabId, reason, exitCode, onClose, onReload }: CrashRecoveryDialogProps) {
+  const [snapshots] = useState<Array<{ id: string; timestamp: number }>>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -40,7 +40,7 @@ export function CrashRecoveryDialog({ tabId, reason, exitCode, onClose, onReload
     onClose();
   };
 
-  const handleRestoreSnapshot = async (snapshotId: string) => {
+  const handleRestoreSnapshot = async (_snapshotId: string) => {
     setLoading(true);
     try {
       // Note: This would need to be added to IPC schema

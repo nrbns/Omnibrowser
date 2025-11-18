@@ -28,6 +28,9 @@ import { initNightlySummarization } from '../../core/supermemory/summarizer';
 import { RedixDebugPanel } from '../redix/RedixDebugPanel';
 import { autoTogglePrivacy } from '../../core/privacy/auto-toggle';
 import { useAppStore } from '../../state/appStore';
+// import { ModeManager } from '../../core/modes/manager'; // Unused for now
+import { useTradeStore } from '../../state/tradeStore';
+import { TradeSidebar } from '../trade/TradeSidebar';
 import { TermsAcceptance } from '../Onboarding/TermsAcceptance';
 import { CookieConsent, useCookieConsent } from '../Onboarding/CookieConsent';
 
@@ -224,7 +227,8 @@ export function AppShell() {
   const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
   const [consentRequest, setConsentRequest] = useState<ConsentRequest | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [memorySidebarOpen, setMemorySidebarOpen] = useState(false);
+  const memorySidebarOpen = useAppStore((state) => state.memorySidebarOpen);
+  const setMemorySidebarOpen = useAppStore((state) => state.setMemorySidebarOpen);
   const [redixDebugOpen, setRedixDebugOpen] = useState(false);
   const { crashedTab, setCrashedTab, handleReload } = useCrashRecovery();
   
@@ -304,7 +308,6 @@ export function AppShell() {
   const { hasConsented } = useCookieConsent();
   const [restoreToast, setRestoreToast] = useState<{ message: string; variant: 'success' | 'error' } | null>(null);
 
-
   // Check TOS acceptance on mount
   useEffect(() => {
     try {
@@ -323,7 +326,7 @@ export function AppShell() {
       }
       // TOS not accepted or version mismatch - show TOS
       setShowTOS(true);
-    } catch (e) {
+    } catch {
       // Invalid stored data - show TOS
       setShowTOS(true);
     }
@@ -419,7 +422,11 @@ export function AppShell() {
   const tabsState = useTabsStore();
   const activeTab = useMemo(() => tabsState.tabs.find(tab => tab.id === tabsState.activeId), [tabsState.tabs, tabsState.activeId]);
   const mode = useAppStore((state) => state.mode);
-  const [contentSplit, setContentSplit] = useState(0.62);
+  const researchPaneOpen = useAppStore((state) => state.researchPaneOpen);
+  const setResearchPaneOpen = useAppStore((state) => state.setResearchPaneOpen);
+  const tradeSidebarOpen = useTradeStore((state) => state.sidebarOpen);
+  const setTradeSidebarOpen = useTradeStore((state) => state.setSidebarOpen);
+  const [_contentSplit, setContentSplit] = useState(0.62);
   
   // Track visits when active tab URL changes
   const lastTrackedUrl = useRef<string>('');
@@ -505,6 +512,64 @@ export function AppShell() {
     }
   }, [restoreSummary]);
 
+  // Auto-open mode-specific panels (mode manager handles this via onActivate hooks, but we keep this as a fallback)
+  useEffect(() => {
+    // Mode manager's onActivate hooks handle most of this, but we ensure UI stays in sync
+    if (mode === 'Research') {
+      if (!memorySidebarOpen) {
+        setMemorySidebarOpen(true);
+      }
+      if (!researchPaneOpen) {
+        setResearchPaneOpen(true);
+      }
+      if (tradeSidebarOpen) {
+        setTradeSidebarOpen(false);
+      }
+    } else if (mode === 'Trade') {
+      if (!tradeSidebarOpen) {
+        setTradeSidebarOpen(true);
+      }
+      if (researchPaneOpen) {
+        setResearchPaneOpen(false);
+      }
+      if (memorySidebarOpen) {
+        setMemorySidebarOpen(false);
+      }
+    } else if (mode === 'GraphMind') {
+      const graphDockOpen = useAppStore.getState().graphDockOpen;
+      if (!graphDockOpen) {
+        useAppStore.getState().toggleGraphDock();
+      }
+      // Close other panels
+      if (researchPaneOpen) {
+        setResearchPaneOpen(false);
+      }
+      if (tradeSidebarOpen) {
+        setTradeSidebarOpen(false);
+      }
+      if (memorySidebarOpen) {
+        setMemorySidebarOpen(false);
+      }
+    } else {
+      // Browse mode or other modes - close mode-specific panels
+      if (researchPaneOpen) {
+        setResearchPaneOpen(false);
+      }
+      if (tradeSidebarOpen) {
+        setTradeSidebarOpen(false);
+      }
+      // Keep memory sidebar open in Browse mode if user wants it
+    }
+  }, [
+    mode,
+    memorySidebarOpen,
+    researchPaneOpen,
+    setResearchPaneOpen,
+    tradeSidebarOpen,
+    setTradeSidebarOpen,
+    setMemorySidebarOpen,
+  ]);
+
   // Initialize Redix optimizer
   useEffect(() => {
     initializeOptimizer().catch(console.error);
@@ -530,18 +595,40 @@ export function AppShell() {
         console.log('[Redix] Policy recommendations:', recommendations);
       }
     }
+    
+    // Handle mode transition errors
+    if (event.type === 'redix:mode:error') {
+      const { mode, error } = event.payload || {};
+      console.error('[ModeManager] Mode transition error:', mode, error);
+      setRestoreToast({
+        message: `Failed to switch to ${mode} mode: ${error || 'Unknown error'}`,
+        variant: 'error',
+      });
+    }
+    
+    // Handle successful mode activation
+    if (event.type === 'redix:mode:activated') {
+      const { mode } = event.payload || {};
+      if (mode && mode !== 'Browse') {
+        // Optionally show success toast for non-Browse modes
+        // setRestoreToast({ message: `Switched to ${mode} mode`, variant: 'success' });
+      }
+    }
   });
 
   // Auto-start onboarding for new users (with a small delay to let UI settle)
+  // Only start if TOS and Cookie Consent are not showing
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    if (showTOS || showCookieConsent) return; // Don't start onboarding if modals are showing
+    
     const timer = setTimeout(() => {
       if (!onboardingStorage.isCompleted() && !onboardingVisible) {
         startOnboarding();
       }
     }, 1200); // Delay to let UI render first (increased for slower machines)
     return () => clearTimeout(timer);
-  }, [onboardingVisible, startOnboarding]);
+  }, [onboardingVisible, startOnboarding, showTOS, showCookieConsent]);
 
   // Privacy auto-toggle: Auto-enable Private/Ghost mode on sensitive sites (Browse mode only)
   useEffect(() => {
@@ -719,7 +806,7 @@ export function AppShell() {
       // ⌘⇧M / Ctrl+Shift+M: Toggle Memory Sidebar
       if (modifier && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'm') {
         e.preventDefault();
-        setMemorySidebarOpen(prev => !prev);
+        setMemorySidebarOpen(!memorySidebarOpen);
         return;
       }
 
@@ -782,10 +869,22 @@ export function AppShell() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [commandPaletteOpen, permissionRequest, consentRequest, rightPanelOpen, clipperActive, memorySidebarOpen]);
   
-  // Sync memory sidebar state with TopNav
+  // Sync memory sidebar state with TopNav and listen for external changes
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('memory-sidebar:toggle', { detail: { open: memorySidebarOpen } }));
-  }, [memorySidebarOpen]);
+    
+    const handleMemorySidebarToggle = (event: CustomEvent) => {
+      const { open } = event.detail;
+      if (open !== memorySidebarOpen) {
+        setMemorySidebarOpen(open);
+      }
+    };
+    
+    window.addEventListener('memory-sidebar:toggle', handleMemorySidebarToggle as EventListener);
+    return () => {
+      window.removeEventListener('memory-sidebar:toggle', handleMemorySidebarToggle as EventListener);
+    };
+  }, [memorySidebarOpen, setMemorySidebarOpen]);
 
   const handleCreateHighlight = async (highlight: ResearchHighlight) => {
     if (!activeTab?.url) {
@@ -846,7 +945,7 @@ export function AppShell() {
   };
 
   return (
-    <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-[#1A1D28] text-gray-100">
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#1A1D28] text-gray-100">
       {/* Top Navigation - Hidden in fullscreen */}
       {!isFullscreen && (
         <div className="flex-none">
@@ -862,7 +961,7 @@ export function AppShell() {
               <TopNav
                 onAgentToggle={() => setRightPanelOpen(!rightPanelOpen)}
                 onCommandPalette={() => setCommandPaletteOpen(true)}
-                onMemoryToggle={() => setMemorySidebarOpen(prev => !prev)}
+                onMemoryToggle={() => setMemorySidebarOpen(!memorySidebarOpen)}
                 onClipperToggle={() => {
                   if (tabsState.activeId) {
                     setClipperActive(true);
@@ -904,7 +1003,7 @@ export function AppShell() {
       {/* Main Layout - Full Width (No Sidebar) */}
       <div className="flex flex-1 min-h-0 w-full overflow-hidden">
         {/* Center Content - Full Width */}
-        <div className="flex min-w-0 flex-1 flex-col overflow-hidden sm:overflow-auto">
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {!isFullscreen && restoreSummary && !restoreDismissed && (
             <div className="px-4 pt-3">
               <div className="flex flex-col gap-3 rounded-xl border border-blue-500/40 bg-blue-500/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -954,30 +1053,28 @@ export function AppShell() {
 
           {/* Route/Web Content */}
           {showWebContent ? (
-            <div className="flex flex-col sm:flex-row flex-1 min-h-0 min-w-0 overflow-hidden">
-              <div
-                className="min-h-[50vh] sm:min-h-0 sm:min-w-[320px] flex-shrink-0 flex-grow-0 w-full sm:w-auto"
-                style={{ width: '100%' }}
-              >
+            <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
+              {/* Main browser viewport - fills all available space */}
+              <div className="flex-1 min-w-0 min-h-0 overflow-hidden relative flex">
                 <TabContentSurface tab={activeTab} overlayActive={overlayActive} />
               </div>
+              {/* Resizer handle - hidden on small screens */}
               <div
                 onMouseDown={handleResizeStart}
-                className="hidden sm:flex z-20 h-full w-[6px] cursor-col-resize items-center justify-center bg-slate-900/50 transition-colors hover:bg-slate-800"
+                className="hidden sm:flex z-20 h-full w-[6px] cursor-col-resize items-center justify-center bg-slate-900/50 transition-colors hover:bg-slate-800 flex-shrink-0"
               >
                 <div className="h-24 w-[2px] rounded-full bg-slate-700/80" />
               </div>
-              <div
-                className="relative min-h-[50vh] sm:min-h-0 sm:min-w-[260px] flex-1 overflow-hidden w-full sm:w-auto border-t sm:border-t-0 sm:border-l border-slate-800/60"
-              >
-                <div className="h-full min-h-0 overflow-auto bg-slate-950/40">
+              {/* Right panel (optional) - hidden on small screens, uses display:none so doesn't affect layout */}
+              <div className="hidden sm:block relative min-w-[260px] w-[260px] flex-shrink-0 overflow-hidden border-l border-slate-800/60">
+                <div className="h-full min-h-0 overflow-y-auto bg-slate-950/40">
                   <Outlet />
                 </div>
               </div>
             </div>
           ) : (
-            <div className={`relative flex-1 min-h-0 min-w-0 overflow-hidden ${isFullscreen ? 'absolute inset-0' : ''}`}>
-              <div className={`h-full min-h-0 overflow-auto ${overlayActive ? 'webview--masked' : ''}`}>
+            <div className={`flex-1 min-h-0 min-w-0 overflow-hidden ${isFullscreen ? 'absolute inset-0' : ''}`}>
+              <div className={`h-full w-full overflow-hidden ${overlayActive ? 'webview--masked' : ''}`}>
                 <Outlet />
               </div>
             </div>
@@ -1094,7 +1191,8 @@ export function AppShell() {
         </Suspense>
       )}
 
-      {onboardingVisible && (
+      {/* Onboarding Tour - Only show if TOS and Cookie Consent are not showing */}
+      {onboardingVisible && !showTOS && !showCookieConsent && (
         <Suspense fallback={null}>
           <Portal>
             <ErrorBoundary componentName="OnboardingTour">
@@ -1165,6 +1263,7 @@ export function AppShell() {
           window.dispatchEvent(new CustomEvent('memory-sidebar:toggle', { detail: { open: false } }));
         }} 
       />
+      <TradeSidebar open={tradeSidebarOpen} onClose={() => setTradeSidebarOpen(false)} />
       
       {/* Redix Debug Panel */}
       <RedixDebugPanel open={redixDebugOpen} onClose={() => setRedixDebugOpen(false)} />
@@ -1211,8 +1310,8 @@ export function AppShell() {
         />
       )}
 
-      {/* Cookie Consent Banner */}
-      {showCookieConsent && !showTOS && (
+      {/* Cookie Consent Banner - Only show if TOS is not showing and onboarding is not active */}
+      {showCookieConsent && !showTOS && !onboardingVisible && (
         <CookieConsent
           onAccept={(preferences) => {
             localStorage.setItem('omnibrowser:cookie-consent', JSON.stringify(preferences));

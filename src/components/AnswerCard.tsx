@@ -145,7 +145,7 @@ export function AnswerCard({ result, onViewSource, onViewFullPage, className = '
                 className="mt-2 space-y-2"
               >
                 {result.contradictions.map((contradiction, idx) => {
-                  const conflicting = contradiction.conflictingSources ?? contradiction.sources ?? [];
+                  const conflicting = (contradiction as any).conflictingSources ?? contradiction.sources ?? [];
                   return (
                     <div key={idx} className="text-xs text-yellow-300/80 pl-6">
                       <div className="font-medium">{contradiction.fact}</div>

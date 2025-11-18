@@ -11,10 +11,10 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Mic, MicOff, Volume2, VolumeX, Battery, AlertTriangle } from 'lucide-react';
+import { Mic, MicOff, VolumeX, Battery, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTabsStore } from '../../state/tabsStore';
-import { ipc } from '../../lib/ipc-typed';
+// import { ipc } from '../../lib/ipc-typed'; // Unused for now
 
 // Redix core URL
 const REDIX_CORE_URL = import.meta.env.VITE_REDIX_CORE_URL || 'http://localhost:8001';
@@ -32,11 +32,11 @@ interface SpeechRecognition extends EventTarget {
   onend: ((this: SpeechRecognition, ev: Event) => any) | null;
 }
 
-interface SpeechRecognitionEvent extends Event {
+interface _SpeechRecognitionEvent extends Event {
   results: SpeechRecognitionResultList;
 }
 
-interface SpeechRecognitionErrorEvent extends Event {
+interface _SpeechRecognitionErrorEvent extends Event {
   error: string;
 }
 
@@ -63,7 +63,7 @@ interface VoiceCompanionProps {
   compact?: boolean;
 }
 
-export default function VoiceCompanion({ position = 'bottom-right', compact = false }: VoiceCompanionProps) {
+export default function VoiceCompanion({ position = 'bottom-right', compact: _compact = false }: VoiceCompanionProps) {
   const [listening, setListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [response, setResponse] = useState('');

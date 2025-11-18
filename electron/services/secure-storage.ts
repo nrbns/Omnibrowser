@@ -33,7 +33,7 @@ export function encryptAndStore(key: string, value: unknown): boolean {
     }
 
     const jsonString = JSON.stringify(value);
-    const encrypted = safeStorage.encryptString(jsonString);
+    safeStorage.encryptString(jsonString);
     
     // Store encrypted buffer as base64 in a secure location
     // Note: In a real implementation, you'd want to use a secure keychain
@@ -44,7 +44,7 @@ export function encryptAndStore(key: string, value: unknown): boolean {
     // For now, return success but data is not persisted
     return true;
   } catch (error) {
-    logger.error(`Failed to encrypt data for key ${key}:`, { error });
+    logger.error(`Failed to encrypt data for key ${key}:`, { error: error as Record<string, unknown> });
     return false;
   }
 }
@@ -67,7 +67,7 @@ export function decryptAndRetrieve<T>(key: string, encryptedData: string): T | n
     const decrypted = safeStorage.decryptString(buffer);
     return JSON.parse(decrypted) as T;
   } catch (error) {
-    logger.error(`Failed to decrypt data for key ${key}:`, { error });
+    logger.error(`Failed to decrypt data for key ${key}:`, { error: error as Record<string, unknown> });
     return null;
   }
 }
@@ -92,7 +92,6 @@ export async function storeApiKey(provider: string, apiKey: string): Promise<boo
  * Retrieve API key
  */
 export async function getApiKey(provider: string): Promise<string | null> {
-  const key = `api_key_${provider}`;
   // TODO: Retrieve from keychain
   // For now, return null as we're not persisting
   logger.warn(`API key retrieval for ${provider} not yet implemented with keychain`);

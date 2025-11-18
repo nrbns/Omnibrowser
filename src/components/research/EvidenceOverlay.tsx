@@ -18,7 +18,7 @@ export function EvidenceOverlay({
   evidence,
   sources,
   activeEvidenceId,
-  onEvidenceClick,
+  onEvidenceClick: _onEvidenceClick,
 }: EvidenceOverlayProps) {
   const { activeId } = useTabsStore();
   const highlightRefs = useRef<Map<string, () => void>>(new Map());
@@ -53,7 +53,7 @@ export function EvidenceOverlay({
         }
 
         // Inject highlight script into the page
-        const highlightScript = `
+        const _highlightScript = `
           (function() {
             const quote = ${JSON.stringify(activeEvidence.quote)};
             const context = ${JSON.stringify(activeEvidence.context)};

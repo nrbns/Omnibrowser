@@ -7,18 +7,18 @@ import type {
   DOMSelector,
   ClickOptions,
   FillOptions,
-  ElementInfo,
-  PageInfo,
+  // ElementInfo, // Unused for now
+  // PageInfo, // Unused for now
 } from './primitives';
 import {
   readElement,
   clickElement,
   fillInput,
-  readText,
+  // readText, // Unused for now
   readPageText,
   scrollPage,
   waitForPageReady,
-  getPageInfo,
+  // getPageInfo, // Unused for now
   extractStructuredData,
   saveToMemory,
 } from './primitives';

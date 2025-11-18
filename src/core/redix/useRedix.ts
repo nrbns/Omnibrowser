@@ -3,7 +3,7 @@
  */
 
 import { useEffect, useRef } from 'react';
-import { Redix, RedixEvent } from './runtime';
+import { Redix, RedixEvent, RedixDispatchEvent } from './runtime';
 
 /**
  * Hook to watch for Redix events
@@ -39,7 +39,7 @@ export function useRedix(
  * Hook to dispatch Redix events
  */
 export function useRedixDispatch() {
-  return (event: Omit<RedixEvent, 'ts'>) => {
+  return (event: RedixDispatchEvent) => {
     Redix.dispatch(event);
   };
 }

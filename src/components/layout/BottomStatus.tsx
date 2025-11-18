@@ -70,7 +70,7 @@ export function BottomStatus() {
   const [promptResponse, setPromptResponse] = useState('');
   const [promptError, setPromptError] = useState<string | null>(null);
   const [promptEcoScore, setPromptEcoScore] = useState<{score: number; tier: string; co2Saved: number} | null>(null);
-  const promptSessionRef = useRef<string | null>(null);
+  // const promptSessionRef = useRef<string | null>(null); // Unused for now
   const [extraOpen, setExtraOpen] = useState(false);
   const [trendOpen, setTrendOpen] = useState(false);
   const extraRef = useRef<HTMLDivElement | null>(null);
@@ -170,46 +170,8 @@ export function BottomStatus() {
     };
   }, []);
 
-  // Poll Redix /metrics endpoint for real-time updates
-  useEffect(() => {
-    if (!isElectron) return;
-    
-    const pollMetrics = async () => {
-      try {
-        const redixUrl = import.meta.env.VITE_REDIX_CORE_URL || 'http://localhost:8001';
-        const response = await fetch(`${redixUrl}/metrics`).catch(() => null);
-        
-        if (response?.ok) {
-          const data = await response.json();
-          // Update metrics store with Redix data
-          pushMetricSample({
-            timestamp: Date.now(),
-            cpu: data.cpu || 0,
-            memory: data.memory || 0,
-            carbonIntensity: data.greenScore ? 100 - data.greenScore : undefined,
-          });
-        } else {
-          // Fallback: Use mock data if Redix unavailable
-          const mockCpu = Math.random() * 30 + 10; // 10-40%
-          const mockMemory = Math.random() * 50 + 20; // 20-70%
-          pushMetricSample({
-            timestamp: Date.now(),
-            cpu: mockCpu,
-            memory: mockMemory,
-          });
-        }
-      } catch (error) {
-        // Silent fail - metrics will use store defaults
-        console.debug('[BottomStatus] Metrics polling failed:', error);
-      }
-    };
-    
-    // Poll immediately, then every 2 seconds
-    pollMetrics();
-    const interval = setInterval(pollMetrics, 2000);
-    
-    return () => clearInterval(interval);
-  }, [isElectron, pushMetricSample]);
+  // Real-time metrics: Electron uses IPC, non-Electron uses WebSocket/SSE
+  // This effect is removed - metrics are handled in the unified effect below
 
   const pushPrivacyEvent = useCallback(
     (event: Omit<PrivacyEventEntry, 'id' | 'timestamp'> & { timestamp?: number }) => {
@@ -374,7 +336,7 @@ export function BottomStatus() {
     prevVpnRef.current = vpnStatus;
   }, [vpnStatus, addPrivacyEvent]);
 
-  // Real-time metrics polling for Electron
+  // Real-time metrics: Electron uses IPC, non-Electron uses WebSocket with auto-reconnect
   useEffect(() => {
     if (isElectron) {
       let cancelled = false;
@@ -395,9 +357,6 @@ export function BottomStatus() {
           };
           
           pushMetricSample(sample);
-          
-          // Note: Efficiency store is updated via efficiency:mode events from the resource monitor
-          // We just update the metrics store here for real-time CPU/RAM display
         } catch (error) {
           if (!cancelled) {
             console.warn('[metrics] Failed to poll metrics:', error);
@@ -405,9 +364,9 @@ export function BottomStatus() {
         }
       };
 
-      // Start polling immediately, then every 1-2 seconds
+      // Start polling immediately, then every 1 second for real-time feel
       pollMetrics();
-      pollInterval = setInterval(pollMetrics, 1500); // Poll every 1.5 seconds
+      pollInterval = setInterval(pollMetrics, 1000);
 
       return () => {
         cancelled = true;
@@ -416,44 +375,100 @@ export function BottomStatus() {
         }
       };
     } else {
-      // Non-Electron: Use WebSocket
-      const socket = new WebSocket(`${apiBaseUrl.replace(/^http/, 'ws')}/ws/metrics`);
-      metricsSocketRef.current = socket;
+      // Non-Electron: Use WebSocket with auto-reconnect
+      let socket: WebSocket | null = null;
+      let reconnectTimeout: NodeJS.Timeout | null = null;
+      let reconnectAttempts = 0;
+      const maxReconnectAttempts = 10;
+      const reconnectDelay = 3000; // Start with 3 seconds
 
-      socket.onmessage = (event) => {
+      const connectWebSocket = () => {
+        if (socket?.readyState === WebSocket.OPEN) return;
+        
         try {
-          const data = JSON.parse(event.data);
-          if (data.type !== 'metrics') return;
-          const sample = {
-            timestamp: typeof data.timestamp === 'number' ? data.timestamp : Date.now(),
-            cpu: typeof data.cpu === 'number' ? data.cpu : 0,
-            memory: typeof data.memory === 'number' ? data.memory : 0,
-            carbonIntensity: typeof data.carbon_intensity === 'number' ? data.carbon_intensity : undefined,
+          const wsUrl = `${apiBaseUrl.replace(/^http/, 'ws')}/ws/metrics`;
+          socket = new WebSocket(wsUrl);
+          metricsSocketRef.current = socket;
+
+          socket.onmessage = (event) => {
+            try {
+              const data = JSON.parse(event.data);
+              if (data.type !== 'metrics') return;
+              const sample = {
+                timestamp: typeof data.timestamp === 'number' ? data.timestamp : Date.now(),
+                cpu: typeof data.cpu === 'number' ? data.cpu : 0,
+                memory: typeof data.memory === 'number' ? data.memory : 0,
+                carbonIntensity: typeof data.carbon_intensity === 'number' ? data.carbon_intensity : undefined,
+              };
+              pushMetricSample(sample);
+              reconnectAttempts = 0; // Reset on successful message
+            } catch (error) {
+              console.warn('[metrics] Failed to parse message', error);
+            }
           };
-          pushMetricSample(sample);
+
+          socket.onopen = () => {
+            console.info('[metrics] Connected to metrics websocket');
+            reconnectAttempts = 0;
+          };
+
+          socket.onerror = (event) => {
+            console.warn('[metrics] Metrics websocket error', event);
+          };
+
+          socket.onclose = () => {
+            console.info('[metrics] Metrics websocket closed');
+            socket = null;
+            metricsSocketRef.current = null;
+            
+            // Auto-reconnect with exponential backoff
+            if (reconnectAttempts < maxReconnectAttempts) {
+              reconnectAttempts++;
+              const delay = reconnectDelay * Math.min(reconnectAttempts, 5); // Cap at 5x delay
+              reconnectTimeout = setTimeout(() => {
+                connectWebSocket();
+              }, delay);
+            } else {
+              console.warn('[metrics] Max reconnect attempts reached, falling back to polling');
+              // Fallback to HTTP polling
+              const pollInterval = setInterval(async () => {
+                try {
+                  const response = await fetch(`${apiBaseUrl}/metrics`);
+                  if (response.ok) {
+                    const data = await response.json();
+                    pushMetricSample({
+                      timestamp: Date.now(),
+                      cpu: data.cpu || 0,
+                      memory: data.memory || 0,
+                      carbonIntensity: data.carbon_intensity,
+                    });
+                  }
+                } catch (error) {
+                  console.debug('[metrics] Polling fallback failed:', error);
+                }
+              }, 2000);
+              return () => clearInterval(pollInterval);
+            }
+          };
         } catch (error) {
-          console.warn('[metrics] Failed to parse message', error);
+          console.error('[metrics] Failed to create websocket:', error);
         }
       };
 
-      socket.onopen = () => {
-        console.info('[metrics] Connected to metrics websocket');
-      };
-
-      socket.onerror = (event) => {
-        console.warn('[metrics] Metrics websocket error', event);
-      };
-
-      socket.onclose = () => {
-        console.info('[metrics] Metrics websocket closed');
-      };
+      connectWebSocket();
 
       return () => {
-        socket.close();
+        if (reconnectTimeout) {
+          clearTimeout(reconnectTimeout);
+        }
+        if (socket) {
+          socket.close();
+          socket = null;
+        }
         metricsSocketRef.current = null;
       };
     }
-  }, [isElectron, apiBaseUrl]); // pushMetricSample is stable, removed from deps
+  }, [isElectron, apiBaseUrl, pushMetricSample]);
 
   // Poll shields stats for privacy scorecard
   useEffect(() => {
@@ -582,10 +597,10 @@ export function BottomStatus() {
     return Math.max(0, Math.min(100, Math.round(value)));
   };
 
-  const smoothValue = (previous: number, next: number, factor = 0.35) => {
-    if (!Number.isFinite(previous)) return next;
-    return previous + (next - previous) * factor;
-  };
+  // const smoothValue = (previous: number, next: number, factor = 0.35) => {
+  //   if (!Number.isFinite(previous)) return next;
+  //   return previous + (next - previous) * factor;
+  // }; // Unused for now
 
   const TrendChart = ({
     label,
@@ -886,7 +901,7 @@ export function BottomStatus() {
           maxTokens: 500,
         });
         setPromptResponse(response.text);
-      } catch (llmError) {
+      } catch {
         throw new Error('AI service unavailable. Please check your API keys or Redix server.');
       }
     } catch (error: any) {

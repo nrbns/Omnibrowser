@@ -13,7 +13,7 @@
  */
 
 import { TorDetector, detectTorBrowser } from './tor-detector';
-import { DeviceDetector, detectDeviceCapabilities } from './device-detector';
+import { DeviceDetector } from './device-detector';
 
 export interface GhostModeConfig {
   enabled: boolean;
@@ -38,7 +38,7 @@ export class GhostMode {
     
     // Auto-detect Tor and enable Ghost Mode if detected
     const torDetection = detectTorBrowser();
-    const deviceCaps = detectDeviceCapabilities();
+    // const deviceCaps = detectDeviceCapabilities(); // Unused for now
     
     this.config = {
       enabled: torDetection.isTorBrowser && torDetection.confidence !== 'low',
@@ -69,7 +69,7 @@ export class GhostMode {
     if (this.config.noStorage) {
       try {
         // Override localStorage to prevent writes
-        const originalSetItem = Storage.prototype.setItem;
+        // const originalSetItem = Storage.prototype.setItem; // Unused for now
         Storage.prototype.setItem = function() {
           console.warn('[Ghost Mode] Storage disabled - ephemeral session only');
           // Silently fail or use memory-only storage

@@ -7,7 +7,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FileText, Check, X, ExternalLink } from 'lucide-react';
-import { useSettingsStore } from '../../state/settingsStore';
+// import { useSettingsStore } from '../../state/settingsStore'; // Unused for now
 
 interface TermsAcceptanceProps {
   onAccept: () => void;
@@ -20,7 +20,7 @@ export function TermsAcceptance({ onAccept, onDecline }: TermsAcceptanceProps) {
   const [showFullTerms, setShowFullTerms] = useState(false);
   const [acceptedVersion, setAcceptedVersion] = useState<string | null>(null);
   
-  const settings = useSettingsStore();
+  // const settings = useSettingsStore(); // Unused for now
 
   // Check if user has already accepted current version
   useEffect(() => {
@@ -35,7 +35,7 @@ export function TermsAcceptance({ onAccept, onDecline }: TermsAcceptanceProps) {
           onAccept();
           return;
         }
-      } catch (e) {
+      } catch {
         // Invalid stored data, show acceptance screen
       }
     }
@@ -78,7 +78,7 @@ export function TermsAcceptance({ onAccept, onDecline }: TermsAcceptanceProps) {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[10000] bg-gray-900/95 backdrop-blur-sm flex items-center justify-center p-4"
+        className="fixed inset-0 z-[10002] bg-gray-900/95 backdrop-blur-sm flex items-center justify-center p-4"
       >
         <motion.div
           initial={{ scale: 0.95, opacity: 0 }}

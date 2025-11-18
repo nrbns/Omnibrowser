@@ -5,7 +5,7 @@
  * Uses axe-core for WCAG 2.1 AA compliance checking.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { 
   Accessibility, 

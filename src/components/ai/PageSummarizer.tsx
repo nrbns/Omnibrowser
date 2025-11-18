@@ -85,7 +85,7 @@ export function PageSummarizer({ url, onClose }: PageSummarizerProps) {
               } else if (data.type === 'error') {
                 throw new Error(data.text || 'Unknown error');
               }
-            } catch (e) {
+            } catch {
               // Skip invalid JSON
             }
           }

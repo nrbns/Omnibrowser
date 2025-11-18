@@ -19,7 +19,7 @@ export interface MemorySummary {
   createdAt: number;
 }
 
-const SUMMARY_STORE = 'summaries';
+// const SUMMARY_STORE = 'summaries'; // Unused for now
 
 /**
  * Summarize events using AI (via backend)
@@ -351,7 +351,7 @@ export async function runNightlySummarization(): Promise<{
         // Compress if 5+ events (lowered threshold for better compression)
         if (dayEvents.length >= 5) {
           try {
-            const summary = await compressEvents(dayEvents, 'daily');
+            await compressEvents(dayEvents, 'daily');
             summariesCreated++;
             eventsCompressed += dayEvents.length;
             
@@ -385,7 +385,7 @@ export async function runNightlySummarization(): Promise<{
         // Compress if 10+ events (lowered threshold)
         if (weekEvents.length >= 10) {
           try {
-            const summary = await compressEvents(weekEvents, 'weekly');
+            await compressEvents(weekEvents, 'weekly');
             summariesCreated++;
             eventsCompressed += weekEvents.length;
             
@@ -419,7 +419,7 @@ export async function runNightlySummarization(): Promise<{
         // Compress if 20+ events (lowered threshold)
         if (monthEvents.length >= 20) {
           try {
-            const summary = await compressEvents(monthEvents, 'monthly');
+            await compressEvents(monthEvents, 'monthly');
             summariesCreated++;
             eventsCompressed += monthEvents.length;
             

@@ -20,7 +20,7 @@ export async function loadIndex() {
     idx = lunr.Index.load(index);
     docs = documents;
     return idx;
-  } catch (err) {
+  } catch {
     // Fallback: build minimal in-memory index (empty)
     idx = lunr(function (this: any) {
       this.ref('id');

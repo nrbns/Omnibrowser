@@ -3,7 +3,7 @@
  * Tracks user behavior events for personalization
  */
 
-import { MemoryStore } from './store';
+// import { MemoryStore } from './store'; // Unused for now
 import { processMemoryEvent } from './pipeline';
 import type { MemoryEvent, SearchEventMetadata, VisitEventMetadata, HighlightEventMetadata, ScreenshotEventMetadata, NoteEventMetadata } from './event-types';
 

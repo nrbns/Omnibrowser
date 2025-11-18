@@ -4,7 +4,8 @@
  */
 
 import type { Embedding } from './embedding';
-import { generateEmbedding, searchEmbeddings as searchEmbeddingsBase } from './embedding';
+import { generateEmbedding } from './embedding';
+// import { searchEmbeddings as searchEmbeddingsBase } from './embedding'; // Unused for now
 import { superMemoryDB } from './db';
 
 export interface VectorSearchResult {
@@ -263,7 +264,7 @@ class VectorStore {
       // Get count from IndexedDB
       const count = await superMemoryDB.getEmbeddingCount();
       return count || this.cache.size;
-    } catch (error) {
+    } catch {
       // Fallback to cache size
       return this.cache.size;
     }

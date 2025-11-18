@@ -6,9 +6,9 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
-  Shield, Lock, Eye, EyeOff, Globe, Cookie, Fingerprint,
-  Network, Database, Trash2, Settings, AlertTriangle, CheckCircle2,
-  BarChart3, Clock, TrendingUp, Download, FileText, Activity, Zap
+  Shield, Lock, Cookie, Fingerprint,
+  Database, Trash2, Settings, AlertTriangle, CheckCircle2,
+  BarChart3, TrendingUp, Download, FileText, Zap
 } from 'lucide-react';
 import { ipc } from '../../lib/ipc-typed';
 

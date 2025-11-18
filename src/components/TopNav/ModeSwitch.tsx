@@ -47,7 +47,7 @@ export function ModeSwitch() {
   };
 
   const currentMode = mode || 'Browse';
-  const isPrimaryMode = primaryModes.some(m => m.id === currentMode);
+  // const isPrimaryMode = primaryModes.some(m => m.id === currentMode); // Unused for now
   const isSecondaryMode = secondaryModes.some(m => m.id === currentMode);
   
   // Find current mode config
