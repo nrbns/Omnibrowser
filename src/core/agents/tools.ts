@@ -2,8 +2,20 @@ import { semanticSearchMemories } from '../supermemory/search';
 import { processMemoryEvent } from '../supermemory/pipeline';
 import type { AgentTool } from './types';
 import { dispatch } from '../redix/runtime';
+import { aiEngine } from '../ai';
 
 async function defaultRedixAsk(prompt: string): Promise<string> {
+  // First attempt via Sprint 2 AI orchestrator
+  try {
+    const result = await aiEngine.runTask({ kind: 'agent', prompt });
+    if (result.text?.trim()) {
+      return result.text;
+    }
+  } catch (error) {
+    console.warn('[AgentTools] aiEngine redixAsk fallback triggered:', error);
+  }
+
+  // Fallback to legacy Redix dispatch
   try {
     const response = await dispatch({
       type: 'redix:agent:query',
@@ -12,7 +24,7 @@ async function defaultRedixAsk(prompt: string): Promise<string> {
     });
     return (response as any)?.payload?.text || '';
   } catch (error) {
-    console.warn('[AgentTools] redixAsk failed:', error);
+    console.warn('[AgentTools] legacy redixAsk failed:', error);
     return '';
   }
 }

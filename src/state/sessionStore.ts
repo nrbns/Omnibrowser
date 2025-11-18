@@ -1,165 +1,116 @@
-/**
- * Session Store - Save and restore browser sessions
- */
-
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { useTabsStore } from './tabsStore';
+import { ipc } from '../lib/ipc-typed';
+import { useTabsStore, type Tab } from './tabsStore';
 
-export interface Session {
-  id: string;
-  name: string;
-  tabs: Array<{
-    id: string;
-    url: string;
-    title: string;
-    active: boolean;
-    favicon?: string;
-    containerId?: string;
-    containerName?: string;
-    mode?: 'normal' | 'ghost' | 'private';
-  }>;
-  createdAt: number;
+type SnapshotTab = Pick<
+  Tab,
+  'id' | 'url' | 'title' | 'appMode' | 'containerId' | 'containerName' | 'containerColor'
+>;
+
+type SessionSnapshot = {
   updatedAt: number;
-  description?: string;
-}
+  tabCount: number;
+  tabs: SnapshotTab[];
+  activeId: string | null;
+  hash: string;
+};
 
-interface SessionStore {
-  sessions: Session[];
-  currentSessionId: string | null;
-  saveSession: (name: string, description?: string) => string;
-  loadSession: (sessionId: string) => void;
-  deleteSession: (sessionId: string) => void;
-  updateSession: (sessionId: string, updates: Partial<Omit<Session, 'id' | 'createdAt'>>) => void;
-  exportSession: (sessionId: string) => string;
-  importSession: (data: string) => void;
-  getSession: (sessionId: string) => Session | undefined;
-}
+type SessionStore = {
+  snapshot: SessionSnapshot | null;
+  saveSnapshot: (tabs: Tab[], activeId: string | null) => void;
+  clearSnapshot: () => void;
+  restoreFromSnapshot: () => Promise<{ restored: boolean; tabCount: number }>;
+};
+
+const buildHash = (tabs: SnapshotTab[], activeId: string | null) => {
+  const base = tabs
+    .map((tab) => `${tab.appMode ?? 'all'}|${tab.url ?? 'about:blank'}`)
+    .join('::');
+  return `${activeId ?? 'none'}#${base}`;
+};
 
 export const useSessionStore = create<SessionStore>()(
   persist(
     (set, get) => ({
-      sessions: [],
-      currentSessionId: null,
-      
-      saveSession: (name, description) => {
-        const tabs = useTabsStore.getState().tabs;
-        const activeId = useTabsStore.getState().activeId;
-        
-        const session: Session = {
-          id: crypto.randomUUID(),
-          name,
-          description,
-          tabs: tabs.map((t) => ({
-            id: t.id,
-            url: t.url || 'about:blank',
-            title: t.title || 'New Tab',
-            active: t.id === activeId,
-            favicon: undefined, // Can be enhanced
-            containerId: t.containerId,
-            containerName: t.containerName,
-            mode: t.mode,
-          })),
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        };
-        
-        set((state) => ({
-          sessions: [...state.sessions, session],
-          currentSessionId: session.id,
+      snapshot: null,
+      saveSnapshot: (tabs, activeId) => {
+        if (!Array.isArray(tabs) || tabs.length === 0) {
+          set({ snapshot: null });
+          return;
+        }
+        const snapshotTabs: SnapshotTab[] = tabs.map((tab) => ({
+          id: tab.id,
+          url: tab.url,
+          title: tab.title,
+          appMode: tab.appMode,
+          containerId: tab.containerId,
+          containerName: tab.containerName,
+          containerColor: tab.containerColor,
         }));
-        
-        return session.id;
-      },
-      
-      loadSession: async (sessionId) => {
-        const session = get().sessions.find((s) => s.id === sessionId);
-        if (!session) return;
-        
-        // Close all current tabs
-        const currentTabs = useTabsStore.getState().tabs;
-        currentTabs.forEach((tab) => {
-          useTabsStore.getState().remove(tab.id);
+        const last = get().snapshot;
+        const hash = buildHash(snapshotTabs, activeId);
+        if (last?.hash === hash) {
+          return;
+        }
+        set({
+          snapshot: {
+            updatedAt: Date.now(),
+            tabCount: snapshotTabs.length,
+            tabs: snapshotTabs,
+            activeId: snapshotTabs.some((tab) => tab.id === activeId) ? activeId : snapshotTabs[0].id,
+            hash,
+          },
         });
-        
-        // Restore tabs from session
-        const { ipc } = await import('../lib/ipc-typed');
-        for (const tabData of session.tabs) {
+      },
+      clearSnapshot: () => set({ snapshot: null }),
+      restoreFromSnapshot: async () => {
+        const snapshot = get().snapshot;
+        if (!snapshot || snapshot.tabs.length === 0) {
+          return { restored: false, tabCount: 0 };
+        }
+        const tabsStore = useTabsStore.getState();
+        const createdTabIds: string[] = [];
+        for (const saved of snapshot.tabs) {
+          const targetUrl = saved.url || 'about:blank';
           try {
-            // Create tab via IPC
-            const createdTab = await ipc.tabs.create(tabData.url);
-            const createdTabId =
-              typeof createdTab === 'string'
-                ? createdTab
-                : createdTab && typeof createdTab === 'object' && 'id' in createdTab
-                ? (createdTab as { id: string }).id
-                : undefined;
-            // Activate if it was active in session
-            if (tabData.active && createdTabId && typeof createdTabId === 'string') {
-              useTabsStore.getState().setActive(createdTabId);
+            const result = await ipc.tabs.create(targetUrl);
+            const resolvedId =
+              typeof result === 'string' ? result : (result && typeof result === 'object' ? (result as any).id : null);
+            if (resolvedId) {
+              tabsStore.updateTab(resolvedId, {
+                title: saved.title,
+                appMode: saved.appMode,
+                containerId: saved.containerId,
+                containerName: saved.containerName,
+                containerColor: saved.containerColor,
+              });
+              createdTabIds.push(resolvedId);
             }
-            // Small delay to prevent overwhelming the system
-            await new Promise(resolve => setTimeout(resolve, 100));
           } catch (error) {
-            console.error('[SessionStore] Failed to restore tab:', error);
+            console.warn('[SessionStore] Failed to recreate tab from snapshot:', error);
           }
         }
-        
-        set({ currentSessionId: sessionId });
-      },
-      
-      deleteSession: (sessionId) => {
-        set((state) => ({
-          sessions: state.sessions.filter((s) => s.id !== sessionId),
-          currentSessionId: state.currentSessionId === sessionId ? null : state.currentSessionId,
-        }));
-      },
-      
-      updateSession: (sessionId, updates) => {
-        set((state) => ({
-          sessions: state.sessions.map((s) =>
-            s.id === sessionId
-              ? { ...s, ...updates, updatedAt: Date.now() }
-              : s
-          ),
-        }));
-      },
-      
-      exportSession: (sessionId) => {
-        const session = get().sessions.find((s) => s.id === sessionId);
-        if (!session) return '';
-        return JSON.stringify(session, null, 2);
-      },
-      
-      importSession: (data) => {
-        try {
-          const session: Session = JSON.parse(data);
-          // Validate session structure
-          if (!session.name || !Array.isArray(session.tabs)) {
-            throw new Error('Invalid session format');
-          }
-          
-          // Generate new ID and timestamps
-          session.id = crypto.randomUUID();
-          session.createdAt = Date.now();
-          session.updatedAt = Date.now();
-          
-          set((state) => ({
-            sessions: [...state.sessions, session],
-          }));
-        } catch (e) {
-          console.error('[SessionStore] Failed to import session:', e);
-          throw new Error('Failed to import session: Invalid format');
+        if (createdTabIds.length === 0) {
+          return { restored: false, tabCount: 0 };
         }
-      },
-      
-      getSession: (sessionId) => {
-        return get().sessions.find((s) => s.id === sessionId);
+        const snapshotActiveIndex = snapshot.tabs.findIndex((tab) => tab.id === snapshot.activeId);
+        const resolvedActive =
+          snapshotActiveIndex >= 0 ? createdTabIds[snapshotActiveIndex] : createdTabIds[createdTabIds.length - 1];
+        if (resolvedActive) {
+          tabsStore.setActive(resolvedActive);
+          try {
+            await ipc.tabs.activate({ id: resolvedActive });
+          } catch (error) {
+            console.warn('[SessionStore] Failed to activate restored tab:', error);
+          }
+        }
+        return { restored: true, tabCount: createdTabIds.length };
       },
     }),
     {
-      name: 'omnibrowser-sessions',
-    }
-  )
+      name: 'regen:session-snapshot',
+      version: 1,
+    },
+  ),
 );
-

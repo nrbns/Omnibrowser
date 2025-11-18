@@ -3,23 +3,30 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bot, Send, StopCircle, Copy, CheckCircle2, Loader2, Sparkles } from 'lucide-react';
-import { ipc } from '../lib/ipc-typed';
-import { ipcEvents } from '../lib/ipc-events';
+import { aiEngine, type AITaskResult } from '../core/ai';
+import { MemoryStoreInstance } from '../core/supermemory/store';
+import { semanticSearchMemories } from '../core/supermemory/search';
 import { useAgentStreamStore } from '../state/agentStreamStore';
-import { trackAgent } from '../core/supermemory/tracker';
+import { useAgentMemoryStore } from '../state/agentMemoryStore';
+import { trackAgent, trackAction } from '../core/supermemory/tracker';
 
 export default function AgentConsole() {
   const [runId, setRunId] = useState<string | null>(null);
   const [_logs, setLogs] = useState<any[]>([]);
   const [streamingText, setStreamingText] = useState<string>('');
-  const [streamId, setStreamId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied'>('idle');
   const responsePaneRef = useRef<HTMLDivElement | null>(null);
   const dslRef = useRef<string>(JSON.stringify({ goal: "Open example.com", steps: [{ skill: 'navigate', args: { url: 'https://example.com' } }], output: { type: 'json', schema: {} } }, null, 2));
+  const streamMetaRef = useRef<{ startedAt: number; query: string; model?: string; provider?: string } | null>(null);
+  const latestOutputRef = useRef<string>('');
+  const abortControllerRef = useRef<AbortController | null>(null);
   
   const { status, transcript, events, setRun, setStatus, appendTranscript, reset } = useAgentStreamStore();
+  const agentConsoleHistory = useAgentMemoryStore((state) =>
+    state.entries.filter((entry) => entry.agentId === 'agent.console').slice(0, 5),
+  );
 
   // Auto-scroll response pane to bottom when new content arrives
   useEffect(() => {
@@ -27,6 +34,108 @@ export default function AgentConsole() {
       responsePaneRef.current.scrollTop = responsePaneRef.current.scrollHeight;
     }
   }, [streamingText, transcript]);
+
+  useEffect(() => {
+    latestOutputRef.current = streamingText || transcript || '';
+  }, [streamingText, transcript]);
+
+  const finalizeTelemetry = useCallback(
+    (
+      status: 'success' | 'error' | 'cancelled',
+      extras?: {
+        error?: string;
+        provider?: string;
+        model?: string;
+        promptTokens?: number | null;
+        completionTokens?: number | null;
+        totalTokens?: number | null;
+      },
+    ) => {
+      const meta = streamMetaRef.current;
+      if (!meta) return;
+      const latencyMs = Math.round(performance.now() - meta.startedAt);
+      trackAction(`agent_stream_${status}`, {
+        source: 'AgentConsole',
+        queryLength: meta.query.length,
+        latencyMs,
+        provider: extras?.provider ?? meta.provider ?? 'unknown',
+        model: extras?.model ?? meta.model ?? 'unknown',
+        promptTokens: extras?.promptTokens ?? undefined,
+        completionTokens: extras?.completionTokens ?? undefined,
+        totalTokens: extras?.totalTokens ?? undefined,
+        outputChars: latestOutputRef.current.length || undefined,
+        error: extras?.error,
+      }).catch(() => {});
+      streamMetaRef.current = null;
+    },
+    [],
+  );
+
+  const persistConsoleMemory = useCallback(
+    async (payload: {
+      prompt: string;
+      runId: string;
+      success: boolean;
+      response?: string;
+      error?: string;
+      usage?: AITaskResult['usage'];
+      durationMs?: number;
+    }) => {
+      try {
+        useAgentMemoryStore.getState().addEntry({
+          agentId: 'agent.console',
+          runId: payload.runId,
+          prompt: payload.prompt,
+          response: payload.response,
+          error: payload.error,
+          success: payload.success,
+          tokens: payload.usage
+            ? {
+                prompt: payload.usage.prompt_tokens ?? null,
+                completion: payload.usage.completion_tokens ?? null,
+                total: payload.usage.total_tokens ?? null,
+              }
+            : undefined,
+        });
+      } catch (error) {
+        console.warn('[AgentConsole] Failed to update agent memory store:', error);
+      }
+
+      if (typeof window === 'undefined') {
+        return;
+      }
+
+      try {
+        await MemoryStoreInstance.saveEvent({
+          type: 'agent',
+          value: payload.response || payload.error || payload.prompt,
+          metadata: {
+            action: payload.prompt,
+            runId: payload.runId,
+            skill: 'agent.console',
+            result: payload.response,
+            error: payload.error,
+            duration: payload.durationMs,
+            tokensUsed: payload.usage?.total_tokens ?? undefined,
+            promptTokens: payload.usage?.prompt_tokens,
+            completionTokens: payload.usage?.completion_tokens,
+            success: payload.success,
+          },
+        });
+      } catch (error) {
+        console.warn('[AgentConsole] Failed to persist console memory:', error);
+      }
+    },
+    [],
+  );
+
+  const clearConsoleHistory = useCallback(() => {
+    try {
+      useAgentMemoryStore.getState().clearAgent('agent.console');
+    } catch (error) {
+      console.warn('[AgentConsole] Failed to clear agent console history:', error);
+    }
+  }, []);
 
   // Listen for agent tokens and steps
   useEffect(() => {
@@ -77,108 +186,194 @@ export default function AgentConsole() {
     };
   }, [appendTranscript, runId]);
 
-  // Listen for streaming AI chunks
-  useEffect(() => {
-    if (!streamId) return;
-
-    const streamChunkHandler = (data: { streamId: string; chunk: { text?: string; finished?: boolean } }) => {
-      if (data.streamId === streamId) {
-        if (data.chunk.text) {
-          setStreamingText(prev => prev + (data.chunk.text || ''));
-          appendTranscript(data.chunk.text || '');
-        }
-        if (data.chunk.finished) {
-          setIsStreaming(false);
-          setStreamId(null);
-          setStatus('complete');
-        }
-      }
-    };
-
-    const streamErrorHandler = (data: { streamId: string; error: string }) => {
-      if (data.streamId === streamId) {
-        setIsStreaming(false);
-        setStreamId(null);
-        setStatus('error');
-        useAgentStreamStore.getState().setError(data.error);
-      }
-    };
-
-    const unsubscribeChunk = ipcEvents.on<{ streamId: string; chunk: { text?: string; finished?: boolean } }>('agent:stream:chunk', streamChunkHandler);
-    const unsubscribeDone = ipcEvents.on<{ streamId: string }>('agent:stream:done', (data) => {
-      if (data.streamId === streamId) {
-        setIsStreaming(false);
-        setStreamId(null);
-        setStatus('complete');
-      }
-    });
-    const unsubscribeError = ipcEvents.on<{ streamId: string; error: string }>('agent:stream:error', streamErrorHandler);
-    
-    return () => {
-      unsubscribeChunk();
-      unsubscribeDone();
-      unsubscribeError();
-    };
-  }, [streamId, appendTranscript, setStatus]);
-
   const handleStartStream = useCallback(async () => {
-    if (!query.trim() || isStreaming) return;
-    
+    const trimmedQuery = query.trim();
+    if (!trimmedQuery || isStreaming) return;
+
+    reset();
+    setStreamingText('');
+    setIsStreaming(true);
+    setStatus('connecting');
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    streamMetaRef.current = { startedAt: performance.now(), query: trimmedQuery };
+
+    const runToken = `agent-stream-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setRun(runToken, trimmedQuery);
+
+    // Track agent action
     try {
-      setStreamingText('');
-      reset();
-      setIsStreaming(true);
-      setStatus('connecting');
-      
-      // Track agent action
-      try {
-        await trackAgent('stream_start', {
-          action: query.trim(),
-          skill: 'stream',
-        });
-      } catch (error) {
-        console.warn('[AgentConsole] Failed to track agent action:', error);
-      }
-      
-      const result = await ipc.agent.stream.start(query.trim(), {
-        model: 'llama3.2',
-        temperature: 0.7,
+      await trackAgent('stream_start', {
+        action: trimmedQuery,
+        skill: 'stream',
       });
-      
-      if (result?.streamId) {
-        setStreamId(result.streamId);
-        setRun(result.streamId, query.trim());
-        setStatus('live');
-      }
     } catch (error) {
-      console.error('Failed to start stream:', error);
+      console.warn('[AgentConsole] Failed to track agent action:', error);
+    }
+
+    // Build enhanced context with recent runs and relevant memories
+    const context: any = {
+      mode: 'agent-console',
+    };
+
+    // Add recent agent runs
+    if (agentConsoleHistory.length > 0) {
+      context.agent_runs = agentConsoleHistory.slice(0, 3).map((entry) => ({
+        prompt: entry.prompt,
+        response: entry.response,
+        success: entry.success,
+        error: entry.error,
+        createdAt: entry.createdAt,
+      }));
+    }
+
+    // Fetch relevant memories for context
+    let relevantMemories: any[] = [];
+    try {
+      const memoryMatches = await semanticSearchMemories(trimmedQuery, { limit: 5, minSimilarity: 0.6 });
+      relevantMemories = memoryMatches.map((m) => ({
+        value: m.event.value,
+        metadata: m.event.metadata,
+        id: m.event.id,
+        type: m.event.type,
+        similarity: m.similarity,
+      }));
+    } catch (error) {
+      console.warn('[AgentConsole] Failed to fetch memory context:', error);
+    }
+
+    if (relevantMemories.length > 0) {
+      context.memories = relevantMemories;
+    }
+
+    try {
+      let finalResult: AITaskResult | null = null;
+      let streamError: string | null = null;
+      let sawFirstToken = false;
+
+      await aiEngine.runTask(
+        {
+          kind: 'agent',
+          prompt: trimmedQuery,
+          context,
+          mode: 'agent-console',
+          metadata: { surface: 'agent-console' },
+          llm: { temperature: 0.2, maxTokens: 900 },
+          signal: controller.signal,
+        },
+        (event) => {
+          if (event.type === 'token' && typeof event.data === 'string') {
+            if (!sawFirstToken) {
+              sawFirstToken = true;
+              setStatus('live');
+            }
+            setStreamingText((prev) => `${prev}${event.data}`);
+            appendTranscript(event.data);
+          } else if (event.type === 'done') {
+            if (event.data && typeof event.data !== 'string') {
+              finalResult = event.data as AITaskResult;
+            } else if (typeof event.data === 'string') {
+              finalResult = {
+                text: event.data,
+                provider: 'unknown',
+                model: 'unknown',
+              };
+            }
+          } else if (event.type === 'error') {
+            streamError = typeof event.data === 'string' ? event.data : 'AI stream failed';
+          }
+        },
+      );
+
+      abortControllerRef.current = null;
+
+      if (controller.signal.aborted) {
+        setIsStreaming(false);
+        finalizeTelemetry('cancelled');
+        return;
+      }
+
+      if (streamError) {
+        const durationMs = streamMetaRef.current
+          ? Math.round(performance.now() - streamMetaRef.current.startedAt)
+          : undefined;
+        await persistConsoleMemory({
+          prompt: trimmedQuery,
+          runId: runToken,
+          success: false,
+          error: streamError,
+          response: latestOutputRef.current || streamingText || undefined,
+          durationMs,
+        });
+        setIsStreaming(false);
+        setStatus('error');
+        useAgentStreamStore.getState().setError(streamError);
+        finalizeTelemetry('error', { error: streamError });
+        return;
+      }
+
+      const finalOutput = finalResult?.text ?? latestOutputRef.current ?? streamingText ?? '';
+      const durationMs = streamMetaRef.current
+        ? Math.round(performance.now() - streamMetaRef.current.startedAt)
+        : undefined;
+      await persistConsoleMemory({
+        prompt: trimmedQuery,
+        runId: runToken,
+        success: true,
+        response: finalOutput,
+        usage: finalResult?.usage,
+        durationMs,
+      });
+      setIsStreaming(false);
+      setStatus('complete');
+      finalizeTelemetry('success', {
+        provider: finalResult?.provider,
+        model: finalResult?.model,
+        promptTokens: finalResult?.usage?.prompt_tokens ?? null,
+        completionTokens: finalResult?.usage?.completion_tokens ?? null,
+        totalTokens: finalResult?.usage?.total_tokens ?? null,
+      });
+    } catch (error) {
+      abortControllerRef.current = null;
+      if (controller.signal.aborted) {
+        finalizeTelemetry('cancelled');
+        return;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      const durationMs = streamMetaRef.current
+        ? Math.round(performance.now() - streamMetaRef.current.startedAt)
+        : undefined;
+      await persistConsoleMemory({
+        prompt: trimmedQuery,
+        runId: runToken,
+        success: false,
+        error: message,
+        response: latestOutputRef.current || streamingText || undefined,
+        durationMs,
+      });
       setIsStreaming(false);
       setStatus('error');
-      useAgentStreamStore.getState().setError(error instanceof Error ? error.message : String(error));
-      
-      // Track error
+      useAgentStreamStore.getState().setError(message);
+      finalizeTelemetry('error', { error: message });
+
       try {
         await trackAgent('stream_error', {
-          action: query.trim(),
-          error: error instanceof Error ? error.message : String(error),
+          action: trimmedQuery,
+          error: message,
         });
       } catch {
         // Ignore tracking errors
       }
     }
-  }, [query, isStreaming, reset, setStatus, setRun]);
+  }, [query, isStreaming, reset, setStatus, setRun, appendTranscript, finalizeTelemetry, agentConsoleHistory]);
 
-  const handleStopStream = useCallback(async () => {
-    if (!streamId) return;
-    try {
-      await ipc.agent.stream.stop(streamId);
-      setIsStreaming(false);
-      setStreamId(null);
-      setStatus('complete');
-    } catch (error) {
-      console.error('Failed to stop stream:', error);
-    }
-  }, [streamId, setStatus]);
+  const handleStopStream = useCallback(() => {
+    if (!abortControllerRef.current) return;
+    abortControllerRef.current.abort();
+    abortControllerRef.current = null;
+    setIsStreaming(false);
+    setStatus('complete');
+  }, [setStatus]);
 
   const handleCopyResponse = useCallback(async () => {
     const textToCopy = streamingText || transcript;
@@ -369,6 +564,45 @@ export default function AgentConsole() {
                     </motion.div>
                   ))}
                 </AnimatePresence>
+              </div>
+            </div>
+          )}
+
+          {/* Recent Agent Runs */}
+          {agentConsoleHistory.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-medium text-gray-300">Recent Agent Runs</h3>
+                <button
+                  className="text-xs text-gray-500 hover:text-gray-300"
+                  onClick={clearConsoleHistory}
+                >
+                  Clear
+                </button>
+              </div>
+              <div className="space-y-2">
+                {agentConsoleHistory.map((entry) => (
+                  <button
+                    key={entry.id}
+                    onClick={() => setQuery(entry.prompt)}
+                    className="w-full rounded-lg border border-slate-700/60 bg-slate-900/40 p-3 text-left transition hover:border-slate-500/60 hover:bg-slate-900/70"
+                  >
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-gray-500">
+                        {new Date(entry.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                      <span className={entry.success ? 'text-emerald-400' : 'text-rose-400'}>
+                        {entry.success ? 'Succeeded' : 'Error'}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm text-gray-200 line-clamp-1">{entry.prompt}</p>
+                    {(entry.response || entry.error) && (
+                      <p className="mt-1 text-xs text-gray-400 line-clamp-2">
+                        {(entry.response || entry.error || '').trim()}
+                      </p>
+                    )}
+                  </button>
+                ))}
               </div>
             </div>
           )}

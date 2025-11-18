@@ -1,7 +1,7 @@
 // @ts-nocheck
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Sparkles, Info, RefreshCcw, ChevronRight, Search } from 'lucide-react';
+import { Sparkles, Info, RefreshCcw, ChevronRight, Search, Upload, FileText, X } from 'lucide-react';
 import { useSettingsStore } from '../../state/settingsStore';
 import VoiceButton from '../../components/VoiceButton';
 import { ipc } from '../../lib/ipc-typed';
@@ -9,6 +9,10 @@ import { useTabsStore } from '../../state/tabsStore';
 import { useDebounce } from '../../utils/useDebounce';
 import { fetchDuckDuckGoInstant, formatDuckDuckGoResults } from '../../services/duckDuckGoSearch';
 import { searchLocal } from '../../utils/lunrIndex';
+import { aiEngine, type AITaskResult } from '../../core/ai';
+import { semanticSearchMemories } from '../../core/supermemory/search';
+import { parsePdfFile } from '../docs/parsers/pdf';
+import { parseDocxFile } from '../docs/parsers/docx';
 import {
   ResearchResult,
   ResearchSource,
@@ -21,6 +25,15 @@ import { useContainerStore } from '../../state/containerStore';
 import { ResearchGraphView } from '../../components/research/ResearchGraphView';
 import { AnswerWithCitations } from '../../components/research/AnswerWithCitations';
 import { EvidenceOverlay } from '../../components/research/EvidenceOverlay';
+
+type UploadedDocument = {
+  id: string;
+  file: File;
+  name: string;
+  text: string;
+  type: string;
+  size: number;
+};
 
 export default function ResearchPanel() {
   const [query, setQuery] = useState('');
@@ -37,6 +50,9 @@ export default function ResearchPanel() {
   const [autocompleteSuggestions, setAutocompleteSuggestions] = useState<Array<{ title: string; subtitle?: string; action?: () => void }>>([]);
   const [showAutocomplete, setShowAutocomplete] = useState(false);
   const [autocompleteLoading, setAutocompleteLoading] = useState(false);
+  const [uploadedDocuments, setUploadedDocuments] = useState<UploadedDocument[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const autocompleteRef = useRef<HTMLDivElement>(null);
   const { activeId, tabs } = useTabsStore();
   const useHybridSearch = useSettingsStore((s) => s.searchEngine !== 'mock');
@@ -79,6 +95,64 @@ export default function ResearchPanel() {
   const recencyWeight = useMemo(() => (100 - authorityBias) / 100, [authorityBias]);
   const authorityWeight = useMemo(() => authorityBias / 100, [authorityBias]);
 
+  // File upload handlers
+  const handleFileUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+
+    setUploading(true);
+    const newDocuments: UploadedDocument[] = [];
+
+    for (const file of Array.from(files)) {
+      try {
+        const fileType = file.type.toLowerCase();
+        const fileName = file.name.toLowerCase();
+        
+        let extractedText = '';
+        
+        // Extract text based on file type
+        if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {
+          extractedText = await parsePdfFile(file);
+        } else if (
+          fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+          fileName.endsWith('.docx')
+        ) {
+          extractedText = await parseDocxFile(file);
+        } else if (
+          fileType === 'text/plain' ||
+          fileType === 'text/markdown' ||
+          fileName.endsWith('.txt') ||
+          fileName.endsWith('.md')
+        ) {
+          // Plain text files
+          extractedText = await file.text();
+        } else {
+          console.warn(`[Research] Unsupported file type: ${fileType} (${file.name})`);
+          continue;
+        }
+
+        if (extractedText.trim().length > 0) {
+          newDocuments.push({
+            id: `doc-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+            file,
+            name: file.name,
+            text: extractedText.trim(),
+            type: fileType || 'unknown',
+            size: file.size,
+          });
+        }
+      } catch (err) {
+        console.error(`[Research] Failed to parse file ${file.name}:`, err);
+      }
+    }
+
+    setUploadedDocuments((prev) => [...prev, ...newDocuments]);
+    setUploading(false);
+  };
+
+  const handleRemoveDocument = (id: string) => {
+    setUploadedDocuments((prev) => prev.filter((doc) => doc.id !== id));
+  };
+
   const handleSearch = async (input?: string) => {
     const searchQuery = typeof input === 'string' ? input : query;
     if (!searchQuery.trim()) return;
@@ -94,58 +168,200 @@ export default function ResearchPanel() {
         return;
       }
 
-      // Mode-aware Redix: Auto-graph generation for Research mode
-      const redixUrl = import.meta.env.VITE_REDIX_CORE_URL || 'http://localhost:8001';
-      try {
-        // Call Redix /workflow with research workflow type for auto-graph
-        const workflowResponse = await fetch(`${redixUrl}/workflow`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query: searchQuery,
-            workflowType: 'research',
-            tools: ['web_search', 'knowledge_graph'],
-            options: { maxIterations: 3, maxTokens: 1000 },
-          }),
-        });
+      // Build enhanced context with memories and tab info
+      const activeTab = tabs.find(t => t.id === activeId);
+      const context: any = {
+        mode: 'research',
+        includeCounterpoints,
+        region: region !== 'global' ? region : undefined,
+        recencyWeight,
+        authorityWeight,
+      };
 
-        if (workflowResponse.ok) {
-          const workflowData = await workflowResponse.json();
-          // Auto-generate graph from workflow results
-          if (workflowData.result && typeof window !== 'undefined' && window.graph) {
-            try {
-              // Add nodes to graph for auto-visualization
-              const concepts = workflowData.result.split(/[.,;]/).slice(0, 5); // Extract key concepts
-              for (const concept of concepts) {
-                const trimmed = concept.trim();
-                if (trimmed.length > 3) {
-                  await window.graph.add({ id: `research-${Date.now()}-${Math.random()}`, label: trimmed, type: 'research-concept' });
-                }
-              }
-              // Refresh graph view
-              await refreshGraph();
-            } catch (graphError) {
-              console.debug('[Research] Auto-graph generation failed:', graphError);
-            }
-          }
-        }
-      } catch (redixError) {
-        console.debug('[Research] Redix auto-graph failed:', redixError);
+      // Add active tab context
+      if (activeTab) {
+        context.active_tab = {
+          url: activeTab.url,
+          title: activeTab.title,
+        };
       }
 
-      // Try Redix/backend first
+      // Add uploaded documents to context
+      if (uploadedDocuments.length > 0) {
+        context.documents = uploadedDocuments.map((doc) => ({
+          name: doc.name,
+          text: doc.text.slice(0, 5000), // Limit text length for context (first 5000 chars)
+          type: doc.type,
+          size: doc.size,
+        }));
+      }
+
+      // Fetch relevant memories for context
+      let relevantMemories: any[] = [];
       try {
-        const response = await ipc.research.queryEnhanced(searchQuery, {
-          maxSources: 12,
-          includeCounterpoints,
-          region: region !== 'global' ? region : undefined,
-          recencyWeight,
-          authorityWeight,
+        const memoryMatches = await semanticSearchMemories(searchQuery, { limit: 5, minSimilarity: 0.6 });
+        relevantMemories = memoryMatches.map((m) => ({
+          value: m.event.value,
+          metadata: m.event.metadata,
+          id: m.event.id,
+          type: m.event.type,
+          similarity: m.similarity,
+        }));
+      } catch (error) {
+        console.warn('[Research] Failed to fetch memory context:', error);
+      }
+
+      if (relevantMemories.length > 0) {
+        context.memories = relevantMemories;
+      }
+
+      // Use unified AI engine for research queries
+      try {
+        let streamedText = '';
+        let streamedResult: AITaskResult | null = null;
+        
+        const aiResult = await aiEngine.runTask(
+          {
+            kind: 'search',
+            prompt: searchQuery,
+            context,
+            mode: 'research',
+            metadata: {
+              includeCounterpoints,
+              region: region !== 'global' ? region : undefined,
+              recencyWeight,
+              authorityWeight,
+            },
+            llm: {
+              temperature: 0.2,
+              maxTokens: 1000,
+            },
+          },
+          (event) => {
+            if (event.type === 'token' && typeof event.data === 'string') {
+              streamedText += event.data;
+              // Update result with streaming text if needed
+            } else if (event.type === 'done' && typeof event.data !== 'string') {
+              streamedResult = event.data as AITaskResult;
+            }
+          },
+        );
+
+        const finalResult = streamedResult ?? aiResult;
+        const finalAnswer = streamedText || finalResult?.text || '';
+        
+        // Auto-generate graph from AI response if available
+        if (finalAnswer && typeof window !== 'undefined' && window.graph) {
+          try {
+            // Extract key concepts from AI response
+            const concepts = finalAnswer.split(/[.,;]/).slice(0, 5);
+            for (const concept of concepts) {
+              const trimmed = concept.trim();
+              if (trimmed.length > 3 && trimmed.length < 50) {
+                await window.graph.add({
+                  id: `research-${Date.now()}-${Math.random()}`,
+                  label: trimmed,
+                  type: 'research-concept',
+                });
+              }
+            }
+            await refreshGraph();
+          } catch (graphError) {
+            console.debug('[Research] Auto-graph generation failed:', graphError);
+          }
+        }
+
+        // Convert AI result to ResearchResult format
+        const sources: ResearchSource[] = [];
+        
+        // Add citations from AI response as sources
+        if (finalResult?.citations && finalResult.citations.length > 0) {
+          sources.push(...finalResult.citations.map((cite, idx) => {
+            let domain = cite.source || '';
+            try {
+              if (cite.url) {
+                domain = new URL(cite.url).hostname;
+              }
+            } catch {
+              // Invalid URL, use source or empty
+              domain = cite.source || '';
+            }
+            return {
+              id: `ai-citation-${idx}`,
+              title: cite.title || cite.url || `Source ${idx + 1}`,
+              url: cite.url || '',
+              domain,
+              snippet: cite.snippet || '',
+              text: cite.snippet || '',
+              type: 'web' as ResearchSourceType,
+              relevanceScore: 95 - idx * 3,
+              timestamp: Date.now(),
+            };
+          }));
+        }
+
+        // Add uploaded documents as sources
+        if (uploadedDocuments.length > 0) {
+          sources.push(...uploadedDocuments.map((doc, idx) => ({
+            id: doc.id,
+            title: doc.name,
+            url: '',
+            domain: 'uploaded',
+            snippet: doc.text.slice(0, 200) + (doc.text.length > 200 ? '...' : ''),
+            text: doc.text,
+            type: 'document' as ResearchSourceType,
+            relevanceScore: 98 - idx, // High relevance for uploaded documents
+            timestamp: Date.now(),
+          })));
+        }
+
+        // Add local search results
+        try {
+          const localResults = await searchLocal(searchQuery);
+          sources.push(...localResults.map((lr, idx) => ({
+            id: `local-${lr.id}`,
+            title: lr.title,
+            url: '',
+            domain: 'local',
+            snippet: lr.snippet,
+            text: lr.snippet,
+            type: 'document' as ResearchSourceType,
+            relevanceScore: 85 - idx * 3,
+            timestamp: Date.now(),
+          })));
+        } catch (localError) {
+          console.debug('[Research] Local search failed:', localError);
+        }
+
+        // Build inline citations from AI response
+        const inlineCitations = finalResult?.citations?.map((cite, idx) => ({
+          id: `citation-${idx}`,
+          text: cite.title || cite.url || `Source ${idx + 1}`,
+          url: cite.url || '',
+          position: finalAnswer.indexOf(cite.title || '') >= 0 
+            ? finalAnswer.indexOf(cite.title || '') 
+            : idx * 50, // Approximate position
+        })) || [];
+
+        setResult({
+          query: searchQuery,
+          summary: finalAnswer || 'No answer generated',
+          sources: sources.slice(0, 12),
+          citations: inlineCitations,
+          inlineEvidence: [],
+          contradictions: [],
+          verification: {
+            score: 0.8,
+            confidence: 'high',
+            suggestions: [
+              `AI-generated response using ${finalResult?.provider || 'unknown'} (${finalResult?.model || 'unknown'})`,
+              ...(finalResult?.citations?.length ? [`${finalResult.citations.length} citation(s) included`] : []),
+            ],
+          },
         });
-        setResult(response);
         return;
-      } catch (redixError) {
-        console.warn('[Research] Redix query failed, falling back to DuckDuckGo:', redixError);
+      } catch (aiError) {
+        console.warn('[Research] AI engine failed, falling back to legacy search:', aiError);
         
         // Fallback to DuckDuckGo Instant Answer API
         const duckResult = await fetchDuckDuckGoInstant(searchQuery);
@@ -554,6 +770,24 @@ export default function ResearchPanel() {
                 {autocompleteLoading && (
                   <div className="text-xs text-gray-400 animate-pulse">Searching…</div>
                 )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept=".pdf,.docx,.txt,.md"
+                  onChange={(e) => handleFileUpload(e.target.files)}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                  className="rounded-lg border border-white/20 bg-white/10 px-3 py-1.5 text-sm text-gray-100 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-40 flex items-center gap-1.5"
+                  title="Upload documents (PDF, DOCX, TXT, MD)"
+                >
+                  <Upload size={14} />
+                  {uploading ? 'Processing…' : 'Upload'}
+                </button>
                 <button
                   type="submit"
                   disabled={loading || !query.trim()}
@@ -593,6 +827,35 @@ export default function ResearchPanel() {
             )}
           </div>
         </div>
+
+        {/* Uploaded documents display */}
+        {uploadedDocuments.length > 0 && (
+          <div className="px-6 pb-3 flex-shrink-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-gray-400 font-medium">Uploaded documents:</span>
+              {uploadedDocuments.map((doc) => (
+                <div
+                  key={doc.id}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 text-xs text-gray-300 group"
+                >
+                  <FileText size={12} className="text-gray-400" />
+                  <span className="max-w-[200px] truncate">{doc.name}</span>
+                  <span className="text-gray-500">
+                    ({(doc.size / 1024).toFixed(1)} KB)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveDocument(doc.id)}
+                    className="ml-1 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-white/10 rounded"
+                    title="Remove document"
+                  >
+                    <X size={12} className="text-gray-400 hover:text-gray-200" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </header>
 
       <main className="flex flex-1 min-h-0 gap-6 overflow-hidden px-6 pb-6">

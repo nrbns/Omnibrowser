@@ -15,9 +15,13 @@ import {
   Star,
   Filter,
   Gamepad2,
+  Sparkles,
+  Loader2,
 } from 'lucide-react';
 import gameCatalog from './gameCatalog.json';
 import { GamePlayer } from './GamePlayer';
+import { aiEngine } from '../../core/ai';
+import { semanticSearchMemories } from '../../core/supermemory/search';
 
 interface Game {
   id: string;
@@ -46,6 +50,9 @@ export function GameHub() {
   const [selectedGame, setSelectedGame] = useState<Game | null>(null);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [recentGames, setRecentGames] = useState<string[]>([]);
+  const [aiRecommendations, setAiRecommendations] = useState<string[]>([]);
+  const [isLoadingRecommendations, setIsLoadingRecommendations] = useState(false);
+  const [showAiRecommendations, setShowAiRecommendations] = useState(false);
 
   // Load favorites and recent from localStorage
   useEffect(() => {
@@ -59,24 +66,63 @@ export function GameHub() {
     }
   }, []);
 
+  // Enhanced search state
+  const [enhancedSearchResults, setEnhancedSearchResults] = useState<Set<string>>(new Set());
+  const [isSearching, setIsSearching] = useState(false);
+
+  // Enhanced search with AI
+  useEffect(() => {
+    if (!searchQuery.trim() || searchQuery.length < 3) {
+      setEnhancedSearchResults(new Set());
+      setIsSearching(false);
+      return;
+    }
+
+    setIsSearching(true);
+    const timeoutId = setTimeout(async () => {
+      try {
+        const aiResults = await enhancedSearch(searchQuery);
+        setEnhancedSearchResults(new Set(aiResults));
+      } catch (error) {
+        console.warn('[GameHub] Enhanced search failed:', error);
+        setEnhancedSearchResults(new Set());
+      } finally {
+        setIsSearching(false);
+      }
+    }, 500); // Debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery, enhancedSearch]);
+
   // Filter and sort games
   const filteredGames = useMemo(() => {
     let games = gameCatalog.games as Game[];
 
-    // Filter by category
-    if (selectedCategory !== 'all') {
-      games = games.filter((g) => g.category === selectedCategory);
-    }
+    // Show AI recommendations if enabled
+    if (showAiRecommendations && aiRecommendations.length > 0) {
+      games = games.filter((g) => aiRecommendations.includes(g.id));
+    } else {
+      // Filter by category
+      if (selectedCategory !== 'all') {
+        games = games.filter((g) => g.category === selectedCategory);
+      }
 
-    // Filter by search
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      games = games.filter(
-        (g) =>
-          g.title.toLowerCase().includes(query) ||
-          g.description.toLowerCase().includes(query) ||
-          g.tags.some((tag) => tag.toLowerCase().includes(query))
-      );
+      // Filter by search (with AI enhancement)
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase();
+        // Use AI-enhanced search results if available
+        if (enhancedSearchResults.size > 0) {
+          games = games.filter((g) => enhancedSearchResults.has(g.id));
+        } else {
+          // Fallback to regular text search
+          games = games.filter(
+            (g) =>
+              g.title.toLowerCase().includes(query) ||
+              g.description.toLowerCase().includes(query) ||
+              g.tags.some((tag) => tag.toLowerCase().includes(query))
+          );
+        }
+      }
     }
 
     // Sort
@@ -110,7 +156,7 @@ export function GameHub() {
     }
 
     return games;
-  }, [searchQuery, selectedCategory, sortBy, favorites, recentGames]);
+  }, [searchQuery, selectedCategory, sortBy, favorites, recentGames, showAiRecommendations, aiRecommendations, enhancedSearchResults]);
 
   const handlePlayGame = useCallback((game: Game) => {
     setSelectedGame(game);
@@ -135,6 +181,199 @@ export function GameHub() {
     setSelectedGame(null);
   }, []);
 
+  // AI-powered game recommendations
+  const generateAiRecommendations = useCallback(async () => {
+    if (isLoadingRecommendations) return;
+    
+    setIsLoadingRecommendations(true);
+    try {
+      const allGames = gameCatalog.games as Game[];
+      
+      // Build context from user preferences
+      const context: any = {
+        mode: 'games',
+        favoriteGames: Array.from(favorites).slice(0, 10),
+        recentGames: recentGames.slice(0, 10),
+        favoriteCategories: Array.from(favorites)
+          .map(id => allGames.find(g => g.id === id)?.category)
+          .filter(Boolean),
+      };
+
+      // Fetch relevant gaming memories
+      let relevantMemories: any[] = [];
+      try {
+        const memoryMatches = await semanticSearchMemories(
+          `game recommendations ${Array.from(favorites).slice(0, 3).join(' ')}`,
+          { limit: 3, minSimilarity: 0.5 }
+        );
+        relevantMemories = memoryMatches.map((m) => ({
+          value: m.event.value,
+          metadata: m.event.metadata,
+          similarity: m.similarity,
+        }));
+      } catch (error) {
+        console.warn('[GameHub] Failed to fetch memory context:', error);
+      }
+
+      if (relevantMemories.length > 0) {
+        context.memories = relevantMemories;
+      }
+
+      // Build game catalog summary for AI
+      const gameSummary = allGames.slice(0, 50).map(g => ({
+        id: g.id,
+        title: g.title,
+        description: g.description,
+        category: g.category,
+        tags: g.tags,
+      }));
+
+      context.availableGames = gameSummary;
+
+      const recommendationPrompt = `Based on the user's gaming preferences:
+- Favorite games: ${Array.from(favorites).slice(0, 5).map(id => allGames.find(g => g.id === id)?.title).filter(Boolean).join(', ') || 'none'}
+- Recent games: ${recentGames.slice(0, 5).map(id => allGames.find(g => g.id === id)?.title).filter(Boolean).join(', ') || 'none'}
+- Favorite categories: ${[...new Set(Array.from(favorites).map(id => allGames.find(g => g.id === id)?.category).filter(Boolean))].join(', ') || 'none'}
+
+Recommend 5-8 games from the available catalog that match their preferences. Consider:
+1. Similar gameplay mechanics
+2. Genre preferences
+3. Game complexity/style
+4. Diversity (mix of categories)
+
+Return a list of game IDs (one per line) that you recommend. Format: "Recommended game IDs:\nID1\nID2\nID3..."`;
+
+      const aiResult = await aiEngine.runTask({
+        kind: 'agent',
+        prompt: recommendationPrompt,
+        context,
+        mode: 'games',
+        metadata: {
+          favoriteCount: favorites.size,
+          recentCount: recentGames.length,
+        },
+        llm: {
+          temperature: 0.7,
+          maxTokens: 500,
+        },
+      });
+
+      // Parse game IDs from AI response
+      const text = aiResult?.text || '';
+      const idLines = text
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => {
+          // Extract potential game IDs
+          const match = line.match(/^(?:-|\d+\.|•)?\s*([a-z0-9-_]+)/i);
+          return match && allGames.some(g => g.id === match[1] || g.title.toLowerCase().includes(match[1].toLowerCase()));
+        })
+        .map(line => {
+          const match = line.match(/^(?:-|\d+\.|•)?\s*([a-z0-9-_]+)/i);
+          if (match) {
+            // Try to find game by ID or title
+            const found = allGames.find(
+              g => g.id === match[1] || g.title.toLowerCase().includes(match[1].toLowerCase())
+            );
+            return found?.id;
+          }
+          return null;
+        })
+        .filter(Boolean) as string[];
+
+      // If no IDs parsed, use AI analysis to find similar games
+      let recommendations: string[] = [];
+      if (idLines.length > 0) {
+        recommendations = idLines.slice(0, 8);
+      } else {
+        // Fallback: Use favorite games to find similar ones
+        const favoriteGameIds = Array.from(favorites).slice(0, 5);
+        favoriteGameIds.forEach(favId => {
+          const favGame = allGames.find(g => g.id === favId);
+          if (favGame) {
+            // Find games with similar tags/category
+            const similar = allGames
+              .filter(g => 
+                g.id !== favId &&
+                !favorites.has(g.id) &&
+                (g.category === favGame.category || 
+                 g.tags.some(tag => favGame.tags.includes(tag)))
+              )
+              .slice(0, 2);
+            recommendations.push(...similar.map(g => g.id));
+          }
+        });
+        recommendations = [...new Set(recommendations)].slice(0, 8);
+      }
+
+      setAiRecommendations(recommendations);
+      setShowAiRecommendations(true);
+    } catch (error) {
+      console.error('[GameHub] AI recommendation failed:', error);
+    } finally {
+      setIsLoadingRecommendations(false);
+    }
+  }, [favorites, recentGames, isLoadingRecommendations]);
+
+  // Enhanced AI-powered search
+  const enhancedSearch = useCallback(async (query: string) => {
+    if (!query.trim() || query.length < 3) return [];
+
+    try {
+      const allGames = gameCatalog.games as Game[];
+      const gameSummary = allGames.slice(0, 100).map(g => ({
+        id: g.id,
+        title: g.title,
+        description: g.description,
+        category: g.category,
+        tags: g.tags,
+      }));
+
+      const searchPrompt = `Find games matching this search query: "${query}"
+
+Available games:
+${gameSummary.map(g => `- ${g.title} (${g.category}): ${g.description} [${g.tags.join(', ')}]`).join('\n')}
+
+Return game IDs that match the query, considering:
+1. Title similarity
+2. Description relevance
+3. Tag matches
+4. Category relevance
+
+Format: "Matching game IDs:\nID1\nID2\nID3..."`;
+
+      const aiResult = await aiEngine.runTask({
+        kind: 'agent',
+        prompt: searchPrompt,
+        context: { mode: 'games', query },
+        mode: 'games',
+        llm: { temperature: 0.3, maxTokens: 400 },
+      });
+
+      const text = aiResult?.text || '';
+      const idLines = text
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line && !line.startsWith('Matching'))
+        .map(line => {
+          const match = line.match(/^(?:-|\d+\.|•)?\s*([a-z0-9-_]+)/i);
+          if (match) {
+            const found = allGames.find(
+              g => g.id === match[1] || g.title.toLowerCase().includes(match[1].toLowerCase())
+            );
+            return found?.id;
+          }
+          return null;
+        })
+        .filter(Boolean) as string[];
+
+      return idLines;
+    } catch (error) {
+      console.warn('[GameHub] Enhanced search failed:', error);
+      return [];
+    }
+  }, []);
+
   return (
     <div className="h-full w-full bg-[#0f111a] text-gray-100 flex flex-col overflow-hidden">
       {/* Header */}
@@ -151,6 +390,33 @@ export function GameHub() {
           </div>
           <div className="flex items-center gap-2">
             <button
+              onClick={() => {
+                if (showAiRecommendations) {
+                  setShowAiRecommendations(false);
+                } else {
+                  generateAiRecommendations();
+                }
+              }}
+              disabled={isLoadingRecommendations || favorites.size === 0}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-purple-300 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-sm"
+              title={favorites.size === 0 ? 'Add favorites to get recommendations' : showAiRecommendations ? 'Show all games' : 'Get AI recommendations'}
+            >
+              {isLoadingRecommendations ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <Sparkles size={16} />
+              )}
+              {showAiRecommendations ? 'Show All' : 'AI Recommendations'}
+            </button>
+            {showAiRecommendations && (
+              <button
+                onClick={() => setShowAiRecommendations(false)}
+                className="px-2 py-1 text-xs text-gray-400 hover:text-white"
+              >
+                Clear
+              </button>
+            )}
+            <button
               onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
               className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
               title={viewMode === 'grid' ? 'List view' : 'Grid view'}
@@ -166,10 +432,23 @@ export function GameHub() {
           <input
             type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search games..."
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setShowAiRecommendations(false);
+            }}
+            placeholder="Search games... (AI-powered)"
             className="w-full pl-10 pr-4 py-2.5 bg-[#0f111a] border border-white/10 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/20"
           />
+          {isSearching && (
+            <div className="absolute right-3 top-1/2 -translate-y-1/2">
+              <Loader2 size={16} className="text-purple-400 animate-spin" />
+            </div>
+          )}
+          {enhancedSearchResults.size > 0 && !isSearching && (
+            <div className="absolute right-3 top-1/2 -translate-y-1/2">
+              <Sparkles size={14} className="text-purple-400" title={`${enhancedSearchResults.size} AI-matched games`} />
+            </div>
+          )}
         </div>
 
         {/* Categories & Sort */}

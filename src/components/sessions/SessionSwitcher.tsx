@@ -10,6 +10,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ipc } from '../../lib/ipc-typed';
 import type { BrowserSession } from '../../types/session';
 import { isDevEnv } from '../../lib/env';
+import { useSessionStore } from '../../state/sessionStore';
 
 interface SessionSwitcherProps {
   compact?: boolean;
@@ -28,6 +29,8 @@ export function SessionSwitcher({ compact = false }: SessionSwitcherProps) {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [restoreFeedback, setRestoreFeedback] = useState<string | null>(null);
+  const sessionSnapshot = useSessionStore((state) => state.snapshot);
+  const restoreSessionSnapshot = useSessionStore((state) => state.restoreFromSnapshot);
 
   // Track previous sessions to prevent unnecessary updates
   const previousSessionsRef = useRef<string>('');
@@ -103,27 +106,21 @@ export function SessionSwitcher({ compact = false }: SessionSwitcherProps) {
 
   useEffect(() => {
     if (!open) return;
-    let cancelled = false;
     setSummaryLoading(true);
-    ipc.sessionState.summary()
-      .then((res) => {
-        if (cancelled) return;
-        setSnapshotSummary(res?.summary ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSnapshotSummary(null);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setSummaryLoading(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
+    const timer = window.setTimeout(() => {
+      if (sessionSnapshot) {
+        setSnapshotSummary({
+          updatedAt: sessionSnapshot.updatedAt,
+          windowCount: 1,
+          tabCount: sessionSnapshot.tabCount,
+        });
+      } else {
+        setSnapshotSummary(null);
+      }
+      setSummaryLoading(false);
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [open, sessionSnapshot]);
 
   const handleCreateSession = async () => {
     if (!newSessionName.trim()) return;
@@ -181,15 +178,11 @@ export function SessionSwitcher({ compact = false }: SessionSwitcherProps) {
     setRestoring(true);
     setRestoreFeedback(null);
     try {
-      const result = await ipc.sessionState.restore();
-      if (result?.restored) {
+      const result = await restoreSessionSnapshot();
+      if (result.restored) {
         const restoredCount = result.tabCount ?? 0;
-        setRestoreFeedback(
-          `Restored ${restoredCount} tab${restoredCount === 1 ? '' : 's'} from last session.`,
-        );
+        setRestoreFeedback(`Restored ${restoredCount} tab${restoredCount === 1 ? '' : 's'} from last session.`);
         await loadSessions();
-      } else if (result?.error) {
-        setRestoreFeedback(`Restore failed: ${result.error}`);
       } else {
         setRestoreFeedback('No session snapshot available to restore.');
       }

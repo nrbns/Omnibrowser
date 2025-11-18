@@ -1,0 +1,87 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ReGen Extension Manifest",
+  "type": "object",
+  "required": ["id", "name", "version", "entry"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]{3,64}$",
+      "description": "Unique extension identifier (kebab-case)."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 80
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z-.]+)?$"
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 280
+    },
+    "entry": {
+      "type": "object",
+      "required": ["renderer"],
+      "properties": {
+        "renderer": {
+          "type": "string",
+          "description": "Path to the renderer bundle relative to the extension root (e.g. dist/renderer.js)."
+        },
+        "preload": {
+          "type": "string",
+          "description": "Optional preload script injected into the BrowserView."
+        }
+      },
+      "additionalProperties": false
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "tabs.read",
+          "tabs.write",
+          "history.read",
+          "history.write",
+          "sessions.read",
+          "sessions.write",
+          "network.request",
+          "clipboard.read",
+          "clipboard.write"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "icons": {
+          "type": "object",
+          "patternProperties": {
+            "^[0-9]+$": { "type": "string" }
+          }
+        },
+        "scripts": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "styles": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "featureFlags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "Optional list of feature flags that must be enabled for this extension."
+    }
+  },
+  "additionalProperties": false
+}
+

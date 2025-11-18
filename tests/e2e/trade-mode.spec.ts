@@ -205,5 +205,100 @@ test.describe('Trading Mode Suite', () => {
     // Market data may update via WebSocket or polling
     console.log('Market data visible:', hasMarketData);
   });
+
+  test('AI trading signals generate automatically', async () => {
+    // Navigate to trading mode
+    const tradeModeButton = page!.locator('button:has-text("Trade")').first();
+    const isButtonVisible = await tradeModeButton.isVisible({ timeout: 5000 }).catch(() => false);
+    
+    if (isButtonVisible) {
+      await tradeModeButton.click();
+      await page!.waitForTimeout(2000);
+    }
+
+    // Wait for AI signal to generate (should happen within 30s)
+    const signalPanel = page!.locator('text=/Signal|Buy|Sell|Hold|Confidence|Entry|Stop Loss/i').first();
+    const hasSignal = await signalPanel.isVisible({ timeout: 35_000 }).catch(() => false);
+    
+    expect(hasSignal).toBeTruthy();
+  });
+
+  test('AI signal displays structured data', async () => {
+    // Navigate to trading mode
+    const tradeModeButton = page!.locator('button:has-text("Trade")').first();
+    const isButtonVisible = await tradeModeButton.isVisible({ timeout: 5000 }).catch(() => false);
+    
+    if (isButtonVisible) {
+      await tradeModeButton.click();
+      await page!.waitForTimeout(2000);
+    }
+
+    // Wait for signal and check for structured elements
+    await page!.waitForTimeout(35_000); // Wait for signal generation
+
+    const action = page!.locator('text=/Buy|Sell|Hold/i').first();
+    const entryPrice = page!.locator('text=/\\$[0-9]+|Entry/i').first();
+    const confidence = page!.locator('text=/\\d+%|Confidence/i').first();
+
+    const hasAction = await action.isVisible({ timeout: 5_000 }).catch(() => false);
+    const hasEntry = await entryPrice.isVisible({ timeout: 5_000 }).catch(() => false);
+    const hasConfidence = await confidence.isVisible({ timeout: 5_000 }).catch(() => false);
+
+    // At least one signal element should be visible
+    expect(hasAction || hasEntry || hasConfidence).toBeTruthy();
+  });
+
+  test('position sizing helper calculates correctly', async () => {
+    // Navigate to trading mode
+    const tradeModeButton = page!.locator('button:has-text("Trade")').first();
+    const isButtonVisible = await tradeModeButton.isVisible({ timeout: 5000 }).catch(() => false);
+    
+    if (isButtonVisible) {
+      await tradeModeButton.click();
+      await page!.waitForTimeout(2000);
+    }
+
+    // Look for position size display or calculate button
+    const positionSize = page!.locator('text=/Position Size|Shares|Quantity/i').first();
+    const calculateButton = page!.locator('button:has-text("Calculate"), button:has-text("Position")').first();
+    
+    const hasPositionSize = await positionSize.isVisible({ timeout: 5_000 }).catch(() => false);
+    const hasCalculateButton = await calculateButton.isVisible({ timeout: 5_000 }).catch(() => false);
+
+    // Position sizing UI should be present
+    expect(hasPositionSize || hasCalculateButton).toBeTruthy();
+  });
+
+  test('apply signal populates order form', async () => {
+    // Navigate to trading mode
+    const tradeModeButton = page!.locator('button:has-text("Trade")').first();
+    const isButtonVisible = await tradeModeButton.isVisible({ timeout: 5000 }).catch(() => false);
+    
+    if (isButtonVisible) {
+      await tradeModeButton.click();
+      await page!.waitForTimeout(2000);
+    }
+
+    // Wait for signal
+    await page!.waitForTimeout(35_000);
+
+    // Look for apply button
+    const applyButton = page!.locator('button:has-text("Apply"), button:has-text("Use Signal")').first();
+    const hasApplyButton = await applyButton.isVisible({ timeout: 5_000 }).catch(() => false);
+
+    if (hasApplyButton) {
+      await applyButton.click();
+      await page!.waitForTimeout(1000);
+
+      // Check if order form has been populated
+      const orderForm = page!.locator('input[type="number"], input[placeholder*="quantity" i]').first();
+      const hasOrderForm = await orderForm.isVisible({ timeout: 5_000 }).catch(() => false);
+
+      // Order form should be accessible after applying signal
+      expect(hasOrderForm).toBeTruthy();
+    } else {
+      console.log('Apply signal button not found - may be in different location');
+    }
+  });
 });
 

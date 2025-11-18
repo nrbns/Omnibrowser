@@ -112,3 +112,26 @@ class Download(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
 
+class AITaskMetric(Base):
+    __tablename__ = "ai_task_metrics"
+    
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    status = Column(String, nullable=False, index=True)  # success, error
+    kind = Column(String, nullable=False, index=True)  # search, agent, chat, summary
+    mode = Column(String, nullable=True, index=True)
+    provider = Column(String, nullable=False)
+    model = Column(String, nullable=False)
+    latency_ms = Column(Integer, nullable=False)
+    prompt_tokens = Column(Integer, nullable=True)
+    completion_tokens = Column(Integer, nullable=True)
+    total_tokens = Column(Integer, nullable=True)
+    estimated_cost_usd = Column(Float, nullable=True)
+    cost_tier = Column(String, nullable=True)  # low, medium, high
+    prompt_chars = Column(Integer, nullable=True)
+    has_context = Column(Boolean, default=False)
+    citations_count = Column(Integer, nullable=True)
+    client_id = Column(String, nullable=True, index=True)  # user_id or IP
+    error = Column(Text, nullable=True)
+    metadata_json = Column(JSON, nullable=True)
+

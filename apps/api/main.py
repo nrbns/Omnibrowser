@@ -28,6 +28,8 @@ from apps.api.routes import (
     llm_assistant,
     ai_search,
     search_llm,
+    ai_task,
+    ai_metrics,
 )
 from apps.api.database import init_db
 
@@ -104,6 +106,8 @@ app.include_router(eco.router, prefix="/eco", tags=["eco"])
 app.include_router(llm_assistant.router, prefix="/llm", tags=["llm-assistant"])
 app.include_router(ai_search.router, prefix="/search", tags=["ai-search"])
 app.include_router(search_llm.router, prefix="/api", tags=["search-llm"])
+app.include_router(ai_task.router, prefix="/api", tags=["ai-task"])
+app.include_router(ai_metrics.router, prefix="/api", tags=["ai-metrics"])
 
 @app.get("/")
 async def root():

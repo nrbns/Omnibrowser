@@ -1,17 +1,30 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense, lazy } from 'react';
 import { useAppStore } from '../state/appStore';
 import { ipcEvents } from '../lib/ipc-events';
-import TradePanel from '../modes/trade';
-import GamesPanel from '../modes/games';
-import DocsPanel from '../modes/docs';
-import ImagesPanel from '../modes/images';
-import ThreatsPanel from '../modes/threats';
-import GraphMindPanel from '../modes/graphmind';
-import ResearchPanel from '../modes/research';
 import { MainView } from '../components/layout/MainView';
 import { ResearchSplit } from '../components/Panels/ResearchSplit';
 import { OmniDesk } from '../components/OmniDesk';
 import { ResearchPane } from '../components/research/ResearchPane';
+import { Loader2 } from 'lucide-react';
+
+// Lazy load mode panels for code splitting
+const TradePanel = lazy(() => import('../modes/trade'));
+const GamesPanel = lazy(() => import('../modes/games'));
+const DocsPanel = lazy(() => import('../modes/docs'));
+const ImagesPanel = lazy(() => import('../modes/images'));
+const ThreatsPanel = lazy(() => import('../modes/threats'));
+const GraphMindPanel = lazy(() => import('../modes/graphmind'));
+const ResearchPanel = lazy(() => import('../modes/research'));
+
+// Loading fallback component
+const ModeLoadingFallback = () => (
+  <div className="flex items-center justify-center h-full w-full">
+    <div className="flex items-center gap-2 text-gray-400">
+      <Loader2 className="w-5 h-5 animate-spin" />
+      <span className="text-sm">Loading mode...</span>
+    </div>
+  </div>
+);
 
 export default function Home() {
   const mode = useAppStore(s=>s.mode);
@@ -74,7 +87,9 @@ export default function Home() {
           {/* Top: Research Panel (full width) */}
           {!isFullscreen && (
             <div className="h-96 border-b border-gray-700/30 flex-shrink-0 overflow-hidden">
-              <ResearchPanel />
+              <Suspense fallback={<ModeLoadingFallback />}>
+                <ResearchPanel />
+              </Suspense>
             </div>
           )}
           {/* Bottom: Browser view with ResearchSplit overlay */}
@@ -91,17 +106,29 @@ export default function Home() {
           </div>
         </div>
       ) : mode === 'Trade' ? (
-        <TradePanel />
+        <Suspense fallback={<ModeLoadingFallback />}>
+          <TradePanel />
+        </Suspense>
       ) : mode === 'Games' ? (
-        <GamesPanel />
+        <Suspense fallback={<ModeLoadingFallback />}>
+          <GamesPanel />
+        </Suspense>
       ) : mode === 'Docs' ? (
-        <DocsPanel />
+        <Suspense fallback={<ModeLoadingFallback />}>
+          <DocsPanel />
+        </Suspense>
       ) : mode === 'Images' ? (
-        <ImagesPanel />
+        <Suspense fallback={<ModeLoadingFallback />}>
+          <ImagesPanel />
+        </Suspense>
       ) : mode === 'Threats' ? (
-        <ThreatsPanel />
+        <Suspense fallback={<ModeLoadingFallback />}>
+          <ThreatsPanel />
+        </Suspense>
       ) : mode === 'GraphMind' ? (
-        <GraphMindPanel />
+        <Suspense fallback={<ModeLoadingFallback />}>
+          <GraphMindPanel />
+        </Suspense>
       ) : null}
       
       {/* Research Pane - Available in all modes except Research (which has its own panel) */}

@@ -55,6 +55,66 @@ export default defineConfig({
         'chromium-bidi/lib/cjs/bidiMapper/BidiMapper',
         'chromium-bidi/lib/cjs/cdp/CdpConnection'
       ],
+      output: {
+        manualChunks: (id) => {
+          // Split node_modules into separate chunks
+          if (id.includes('node_modules')) {
+            // Large UI libraries
+            if (id.includes('framer-motion')) {
+              return 'vendor-framer-motion';
+            }
+            if (id.includes('lightweight-charts')) {
+              return 'vendor-charts';
+            }
+            if (id.includes('reactflow')) {
+              return 'vendor-reactflow';
+            }
+            if (id.includes('pdfjs-dist') || id.includes('pdf.worker')) {
+              return 'vendor-pdf';
+            }
+            if (id.includes('mammoth')) {
+              return 'vendor-mammoth';
+            }
+            // React and core deps
+            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) {
+              return 'vendor-react';
+            }
+            // Langchain and AI deps
+            if (id.includes('langchain') || id.includes('@langchain')) {
+              return 'vendor-langchain';
+            }
+            // Zustand state management
+            if (id.includes('zustand')) {
+              return 'vendor-zustand';
+            }
+            // Lucide icons
+            if (id.includes('lucide-react')) {
+              return 'vendor-icons';
+            }
+            // Other large vendors
+            if (id.includes('date-fns') || id.includes('lodash') || id.includes('lunr')) {
+              return 'vendor-utils';
+            }
+            // Everything else from node_modules
+            return 'vendor';
+          }
+          // Split mode components (already handled by lazy loading, but ensure they're in separate chunks)
+          if (id.includes('/modes/')) {
+            const modeMatch = id.match(/\/modes\/([^/]+)/);
+            if (modeMatch) {
+              return `mode-${modeMatch[1]}`;
+            }
+          }
+          // Split core AI components
+          if (id.includes('/core/ai/') || id.includes('/core/agents/')) {
+            return 'core-ai';
+          }
+          // Split SuperMemory components
+          if (id.includes('/core/supermemory/')) {
+            return 'core-memory';
+          }
+        }
+      }
     }
   },
   optimizeDeps: {

@@ -15,8 +15,6 @@ interface TermsAcceptanceProps {
 }
 
 export function TermsAcceptance({ onAccept, onDecline }: TermsAcceptanceProps) {
-  const [hasScrolled, setHasScrolled] = useState(false);
-  const [canAccept, setCanAccept] = useState(false);
   const [showFullTerms, setShowFullTerms] = useState(false);
   const [acceptedVersion, setAcceptedVersion] = useState<string | null>(null);
   
@@ -42,13 +40,8 @@ export function TermsAcceptance({ onAccept, onDecline }: TermsAcceptanceProps) {
   }, [onAccept]);
 
   // Track scrolling to enable accept button
-  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const target = e.currentTarget;
-    const scrolled = target.scrollTop > 100; // Require some scrolling
-    const nearBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 50;
-    
-    setHasScrolled(scrolled);
-    setCanAccept(scrolled && nearBottom);
+  const handleScroll = (_e: React.UIEvent<HTMLDivElement>) => {
+    // Scrolling no longer required to accept, but we keep hook for future metrics
   };
 
   const handleAccept = () => {
@@ -230,44 +223,31 @@ export function TermsAcceptance({ onAccept, onDecline }: TermsAcceptanceProps) {
               </div>
             )}
 
-            {!hasScrolled && showFullTerms && (
-              <div className="mt-4 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-sm text-yellow-200">
-                <p>Please scroll to the bottom to enable the Accept button.</p>
-              </div>
-            )}
           </div>
 
           {/* Footer Actions */}
           <div className="flex items-center justify-between p-6 border-t border-gray-700 gap-4">
-            <button
-              onClick={handleDecline}
-              className="px-6 py-2.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium text-gray-200 transition-colors flex items-center gap-2"
-            >
-              <X size={16} />
-              <span>Decline</span>
-            </button>
-
-            <div className="flex-1 text-xs text-gray-400 text-center">
-              {showFullTerms && !canAccept && (
-                <span>Scroll to the bottom to accept</span>
-              )}
-              {!showFullTerms && (
-                <span>Click "Read Full Terms" or accept to continue</span>
-              )}
+            <div className="flex flex-col gap-3 flex-1">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleDecline}
+                  className="px-6 py-2.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium text-gray-200 transition-colors flex items-center gap-2"
+                >
+                  <X size={16} />
+                  <span>Decline</span>
+                </button>
+                <button
+                  onClick={handleAccept}
+                  className="px-6 py-2.5 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors flex items-center gap-2"
+                >
+                  <Check size={16} />
+                  <span>Accept</span>
+                </button>
+              </div>
+              <p className="text-xs text-gray-400">
+                By clicking Accept you confirm you’ve reviewed the summary or full terms above.
+              </p>
             </div>
-
-            <button
-              onClick={handleAccept}
-              disabled={showFullTerms && !canAccept}
-              className={`px-6 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
-                showFullTerms && !canAccept
-                  ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                  : 'bg-blue-600 hover:bg-blue-700 text-white'
-              }`}
-            >
-              <Check size={16} />
-              <span>Accept</span>
-            </button>
           </div>
         </motion.div>
       </motion.div>

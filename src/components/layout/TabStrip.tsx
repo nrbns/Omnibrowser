@@ -7,9 +7,9 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Plus, Eye, Sparkles } from 'lucide-react';
+import { X, Plus, Eye, Sparkles, RotateCcw } from 'lucide-react';
 import { ipc } from '../../lib/ipc-typed';
-import { useTabsStore } from '../../state/tabsStore';
+import { useTabsStore, type ClosedTab } from '../../state/tabsStore';
 import { useContainerStore } from '../../state/containerStore';
 import { useAppStore } from '../../state/appStore';
 import { ipcEvents } from '../../lib/ipc-events';
@@ -22,6 +22,8 @@ import { useTabGraphStore } from '../../state/tabGraphStore';
 import { PredictiveClusterChip, PredictivePrefetchHint } from './PredictiveClusterChip';
 import { HolographicPreviewOverlay } from '../hologram';
 import { isDevEnv, isElectronRuntime } from '../../lib/env';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuItem } from '../ui/dropdown-menu';
+import { reopenClosedTab } from '../../lib/tabLifecycle';
 
 const TAB_GRAPH_DRAG_MIME = 'application/x-omnibrowser-tab-id';
 const IS_DEV = isDevEnv();
@@ -62,7 +64,13 @@ const mapTabsForStore = (list: Tab[]) =>
   }));
 
 export function TabStrip() {
-  const { setAll: setAllTabs, setActive: setActiveTab, activeId, tabs: storeTabs, updateTab } = useTabsStore();
+  const setAllTabs = useTabsStore((state) => state.setAll);
+  const setActiveTab = useTabsStore((state) => state.setActive);
+  const activeId = useTabsStore((state) => state.activeId);
+  const storeTabs = useTabsStore((state) => state.tabs);
+  const updateTab = useTabsStore((state) => state.updateTab);
+  const rememberClosedTab = useTabsStore((state) => state.rememberClosedTab);
+  const recentlyClosed = useTabsStore((state) => state.recentlyClosed);
   const { activeContainerId } = useContainerStore();
   const { mode: currentMode } = useAppStore();
   const [tabs, setTabs] = useState<Tab[]>([]);
@@ -762,12 +770,23 @@ export function TabStrip() {
     }
   };
 
+  const handleReopenClosedTab = useCallback(
+    async (entry?: ClosedTab) => {
+      await reopenClosedTab(entry);
+    },
+    [],
+  );
+
   const closeTab = async (tabId: string) => {
     if (!IS_ELECTRON) {
       const currentTabs = tabsRef.current.length > 0 ? tabsRef.current : tabs;
       const idx = currentTabs.findIndex((t) => t.id === tabId);
       if (idx === -1) {
         return;
+      }
+      const tabBeingClosed = currentTabs[idx];
+      if (tabBeingClosed) {
+        rememberClosedTab(tabBeingClosed);
       }
       const wasActive = currentTabs[idx]?.active;
       const remaining = currentTabs.filter((t) => t.id !== tabId);
@@ -814,14 +833,16 @@ export function TabStrip() {
 
     // Get current tabs
     const currentTabs = tabsRef.current.length > 0 ? tabsRef.current : tabs;
-    const tabToClose = currentTabs.find(t => t.id === tabId);
+    const tabToClose = currentTabs.find((t) => t.id === tabId);
     if (!tabToClose) {
       return;
     }
+    rememberClosedTab(tabToClose);
 
     const wasActive = tabToClose.active;
-    const tabIndex = currentTabs.findIndex(t => t.id === tabId);
-    const remainingTabs = currentTabs.filter(t => t.id !== tabId);
+    const tabIndex = currentTabs.findIndex((t) => t.id === tabId);
+    const remainingTabs = currentTabs.filter((t) => t.id !== tabId);
+    const closingLastTab = remainingTabs.length === 0;
     const snapshotTabs = currentTabs.map(t => ({ ...t }));
     const previousActiveId = currentActiveIdRef.current;
     
@@ -881,6 +902,11 @@ export function TabStrip() {
         }
 
         await refreshTabsFromMain();
+      } else if (closingLastTab) {
+        // Ensure there is always at least one tab per mode
+        setTimeout(() => {
+          void addTab();
+        }, 50);
       }
     } catch (error) {
       if (IS_DEV) {
@@ -1561,6 +1587,62 @@ export function TabStrip() {
             <div className="hidden lg:block">
               <ContainerQuickSelector compact showLabel={false} />
             </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <motion.button
+                  type="button"
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  disabled={recentlyClosed.length === 0}
+                  className={`
+                    p-2 rounded-lg border transition
+                    ${recentlyClosed.length === 0 ? 'border-transparent text-gray-600 cursor-not-allowed' : 'border-gray-700/40 hover:bg-gray-800/50 text-gray-300 hover:text-gray-100'}
+                  `}
+                  title={recentlyClosed.length === 0 ? 'No recently closed tabs' : 'Reopen closed tab (Ctrl+Shift+T / ⌘⇧T)'}
+                >
+                  <RotateCcw size={16} />
+                </motion.button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-72">
+                <DropdownMenuLabel>Recently closed</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {recentlyClosed.length === 0 ? (
+                  <div className="px-3 py-2 text-xs text-slate-500">No tabs to reopen</div>
+                ) : (
+                  recentlyClosed.map((entry) => {
+                    let hostname = 'about:blank';
+                    if (entry.url) {
+                      try {
+                        hostname = new URL(entry.url).hostname;
+                      } catch {
+                        hostname = entry.url;
+                      }
+                    }
+                    return (
+                      <DropdownMenuItem
+                        key={entry.closedId}
+                        className="flex flex-col items-start gap-1 py-2"
+                        onClick={() => handleReopenClosedTab(entry)}
+                      >
+                        <span className="text-sm text-slate-100">{entry.title || entry.url || 'Untitled tab'}</span>
+                        <span className="text-[11px] text-slate-500">
+                          {hostname} • {new Date(entry.closedAt).toLocaleTimeString()}
+                        </span>
+                      </DropdownMenuItem>
+                    );
+                  })
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  disabled={recentlyClosed.length === 0}
+                  onClick={() => handleReopenClosedTab()}
+                  className="gap-2"
+                >
+                  <RotateCcw size={14} />
+                  Reopen last tab
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <motion.button
               onClick={addTab}
               onKeyDown={(e) => {

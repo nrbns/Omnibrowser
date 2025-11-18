@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Maximize2, Minimize2, RotateCcw, Info, Download } from 'lucide-react';
+import { X, Maximize2, Minimize2, RotateCcw, Info, Download, Save, FileDown } from 'lucide-react';
 
 interface Game {
   id: string;
@@ -33,8 +33,77 @@ export function GamePlayer({ game, onClose }: GamePlayerProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hasSaveState, setHasSaveState] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Load save state on mount
+  useEffect(() => {
+    const saveKey = `gameHub_save_${game.id}`;
+    const saved = localStorage.getItem(saveKey);
+    setHasSaveState(!!saved);
+  }, [game.id]);
+
+  // Save game state
+  const handleSaveState = () => {
+    if (!iframeRef.current) return;
+    
+    try {
+      const saveKey = `gameHub_save_${game.id}`;
+      const timestamp = Date.now();
+      
+      // Try to communicate with the game iframe to get save state
+      // This depends on the game supporting postMessage API
+      const saveData = {
+        gameId: game.id,
+        timestamp,
+        url: iframeRef.current.src,
+      };
+
+      // Store in localStorage (in production, this could be IndexedDB or cloud sync)
+      localStorage.setItem(saveKey, JSON.stringify(saveData));
+      setHasSaveState(true);
+      
+      // Show feedback (you could use a toast here)
+      console.log('[GamePlayer] Save state stored for', game.title);
+    } catch (error) {
+      console.error('[GamePlayer] Failed to save state:', error);
+    }
+  };
+
+  // Load game state
+  const handleLoadState = () => {
+    try {
+      const saveKey = `gameHub_save_${game.id}`;
+      const saved = localStorage.getItem(saveKey);
+      
+      if (!saved) return;
+      
+      const saveData = JSON.parse(saved);
+      
+      // Restore game URL or state if supported
+      if (iframeRef.current && saveData.url) {
+        iframeRef.current.src = saveData.url;
+        setIsLoading(true);
+      }
+      
+      console.log('[GamePlayer] Loaded save state for', game.title);
+    } catch (error) {
+      console.error('[GamePlayer] Failed to load state:', error);
+    }
+  };
+
+  // Clear save state
+  const handleClearState = () => {
+    try {
+      const saveKey = `gameHub_save_${game.id}`;
+      localStorage.removeItem(saveKey);
+      setHasSaveState(false);
+      console.log('[GamePlayer] Cleared save state for', game.title);
+    } catch (error) {
+      console.error('[GamePlayer] Failed to clear state:', error);
+    }
+  };
 
   // Handle fullscreen
   useEffect(() => {
@@ -105,6 +174,35 @@ export function GamePlayer({ game, onClose }: GamePlayerProps) {
             </div>
 
             <div className="flex items-center gap-2">
+              {hasSaveState && (
+                <button
+                  onClick={handleLoadState}
+                  className="p-2 rounded-lg text-purple-400 hover:text-purple-300 hover:bg-purple-500/20 transition-colors"
+                  title="Load saved game state"
+                >
+                  <FileDown size={16} />
+                </button>
+              )}
+              <button
+                onClick={handleSaveState}
+                className={`p-2 rounded-lg transition-colors ${
+                  hasSaveState
+                    ? 'text-green-400 hover:text-green-300 hover:bg-green-500/20'
+                    : 'text-gray-400 hover:text-white hover:bg-white/5'
+                }`}
+                title="Save game state"
+              >
+                <Save size={16} />
+              </button>
+              {hasSaveState && (
+                <button
+                  onClick={handleClearState}
+                  className="p-2 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/20 transition-colors"
+                  title="Clear saved state"
+                >
+                  <X size={14} />
+                </button>
+              )}
               {game.offline_capable && (
                 <button
                   className="p-2 rounded-lg text-gray-400 hover:text-green-400 hover:bg-white/5 transition-colors"

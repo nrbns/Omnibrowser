@@ -3,29 +3,29 @@
  * This is a minimal, working search that returns results immediately
  */
 
-import React, { useState, useEffect } from 'react';
-import { Search, Loader2, Globe, FileText, Sparkles, Brain, ChevronDown, ChevronUp } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Search, Loader2, Globe, FileText, Sparkles, Brain, ChevronDown, ChevronUp, Clock } from 'lucide-react';
 import { fetchDuckDuckGoInstant, formatDuckDuckGoResults } from '../services/duckDuckGoSearch';
 import { searchLocal } from '../utils/lunrIndex';
 import { ipc } from '../lib/ipc-typed';
 import { trackSearch, trackAction } from '../core/supermemory/tracker';
 import { useSuggestions } from '../core/supermemory/useSuggestions';
 import { searchVectors } from '../core/supermemory/vectorStore';
-import { sendPrompt } from '../core/llm/adapter';
+import { semanticSearchMemories } from '../core/supermemory/search';
 import { useTabsStore } from '../state/tabsStore';
 // import { EcoBadge } from './EcoBadge'; // Unused for now
-import { getQueryEngine, QueryResult, detectIntent } from '../core/query-engine';
+import { QueryResult, detectIntent } from '../core/query-engine';
 import { AnswerCard } from './AnswerCard';
 import { useAppStore } from '../state/appStore';
-import { useAgentExecutor } from '../core/agents/useAgentRuntime';
-import { fetchSearchLLM, type SearchLLMResponse } from '../services/searchLLM';
+import type { AppState } from '../state/appStore';
+import { type SearchLLMResponse } from '../services/searchLLM';
 import { MemoryStoreInstance } from '../core/supermemory/store';
 import { showToast } from '../state/toastStore';
+import { aiEngine, type AITaskResult } from '../core/ai';
+import { useHistoryStore, type HistoryEntry } from '../state/historyStore';
 
 // Search proxy base URL (defaults to localhost:3001)
 const SEARCH_PROXY_URL = import.meta.env.VITE_SEARCH_PROXY_URL || 'http://localhost:3001';
-// Redix core base URL (defaults to localhost:8001)
-const REDIX_CORE_URL = import.meta.env.VITE_REDIX_CORE_URL || 'http://localhost:8001';
 
 type SearchResult = {
   id: string;
@@ -59,6 +59,150 @@ function mapLlmResponseToQueryResult(response: SearchLLMResponse, query: string)
   };
 }
 
+type SearchProvider = 'google' | 'duckduckgo';
+
+const SEARCH_PROVIDER_URL: Record<SearchProvider, string> = {
+  google: 'https://www.google.com/search?q=',
+  duckduckgo: 'https://duckduckgo.com/?q=',
+};
+
+type SmartCommand = {
+  id: string;
+  trigger: string;
+  label: string;
+  description: string;
+  sample?: string;
+  targetMode?: AppState['mode'];
+  provider?: SearchProvider;
+};
+
+const SMART_COMMANDS: SmartCommand[] = [
+  {
+    id: 'google',
+    trigger: '/g',
+    label: 'Google search',
+    description: 'Search Google from any mode',
+    sample: '/g regen browser',
+    provider: 'google',
+    targetMode: 'Browse',
+  },
+  {
+    id: 'duck',
+    trigger: '/d',
+    label: 'DuckDuckGo search',
+    description: 'Private search via DuckDuckGo',
+    sample: '/d privacy-first browsers',
+    provider: 'duckduckgo',
+  },
+  {
+    id: 'research',
+    trigger: '/r',
+    label: 'Research mode',
+    description: 'Switch to research mode + ask AI',
+    sample: '/r clean energy market outlook',
+    targetMode: 'Research',
+    provider: 'duckduckgo',
+  },
+  {
+    id: 'trade',
+    trigger: '/t',
+    label: 'Trade mode',
+    description: 'Jump into Trade mode with a ticker',
+    sample: '/t NVDA earnings',
+    targetMode: 'Trade',
+    provider: 'duckduckgo',
+  },
+];
+
+type SuggestionItem = {
+  id: string;
+  value: string;
+  label: string;
+  description?: string;
+  badge?: string;
+  url?: string;
+  kind: 'history' | 'tab' | 'memory' | 'command';
+  onSelect: () => void;
+};
+
+type SuggestionGroup = {
+  key: string;
+  title: string;
+  icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+  accentClass: string;
+  items: SuggestionItem[];
+};
+
+type ParsedInput =
+  | { kind: 'url'; url: string }
+  | { kind: 'search'; query: string; provider: SearchProvider; targetMode?: AppState['mode'] };
+
+const ensureHttpUrl = (value: string) => {
+  if (!value) return 'about:blank';
+  if (/^[a-z]+:\/\//i.test(value) || value.startsWith('about:') || value.startsWith('chrome://')) {
+    return value;
+  }
+  return `https://${value}`;
+};
+
+const looksLikeUrl = (value: string) => {
+  if (!value) return false;
+  if (value.startsWith('http://') || value.startsWith('https://') || value.startsWith('about:') || value.startsWith('chrome://')) {
+    return true;
+  }
+  const domainPattern = /^[a-z0-9]+([-.][a-z0-9]+)+([/?].*)?$/i;
+  return domainPattern.test(value.trim());
+};
+
+const parseCommandInput = (value: string): { match: boolean; provider?: SearchProvider; query: string; targetMode?: AppState['mode'] } => {
+  if (!value.startsWith('/')) return { match: false, query: value };
+  const [command, ...restParts] = value.slice(1).split(' ');
+  const remainder = restParts.join(' ').trim();
+  if (!remainder) {
+    return { match: false, query: value };
+  }
+  switch (command.toLowerCase()) {
+    case 'g':
+    case 'google':
+      return { match: true, provider: 'google', query: remainder };
+    case 'ddg':
+    case 'duck':
+    case 'd':
+      return { match: true, provider: 'duckduckgo', query: remainder };
+    case 'r':
+    case 'research':
+      return { match: true, provider: 'duckduckgo', query: remainder, targetMode: 'Research' };
+    case 'b':
+    case 'browse':
+      return { match: true, provider: 'duckduckgo', query: remainder, targetMode: 'Browse' };
+    default:
+      return { match: false, query: value };
+  }
+};
+
+const interpretInput = (value: string): ParsedInput => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return { kind: 'search', provider: 'duckduckgo', query: '' };
+  }
+
+  if (looksLikeUrl(trimmed)) {
+    return { kind: 'url', url: ensureHttpUrl(trimmed) };
+  }
+
+  const command = parseCommandInput(trimmed);
+  if (command.match) {
+    return {
+      kind: 'search',
+      query: command.query,
+      provider: command.provider ?? 'duckduckgo',
+      targetMode: command.targetMode,
+    };
+  }
+
+  return { kind: 'search', provider: 'duckduckgo', query: trimmed };
+};
+
 export default function SearchBar() {
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(false);
@@ -75,22 +219,61 @@ export default function SearchBar() {
   const [llmResult, setLlmResult] = useState<SearchLLMResponse | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [showSearchResults, setShowSearchResults] = useState(false); // Collapsed by default
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
   
   // Get active tab for "Ask about this page"
   const activeTab = useTabsStore((state) => {
     if (!state.activeId) return null;
     return state.tabs.find((t) => t.id === state.activeId) || null;
   });
+  const allTabs = useTabsStore((state) => state.tabs);
   const mode = useAppStore((state) => state.mode);
-  const runResearchAgent = useAgentExecutor('research.agent');
-  const runTradeAgent = useAgentExecutor('trade.agent');
-  const runDocsAgent = useAgentExecutor('docs.agent');
-  const runImagesAgent = useAgentExecutor('images.agent');
-  const runThreatsAgent = useAgentExecutor('threats.agent');
-  const runGraphMindAgent = useAgentExecutor('graphmind.agent');
+  const setMode = useAppStore((state) => state.setMode);
   
-  // SuperMemory suggestions
+  // SuperMemory + history suggestions
+  const historyEntries = useHistoryStore((state) => state.entries);
+  const addHistoryEntry = useHistoryStore((state) => state.addEntry);
   const suggestions = useSuggestions(q, { types: ['search', 'visit', 'bookmark'], limit: 5 });
+  const historyMatches = useMemo(() => {
+    if (!historyEntries.length) {
+      return [];
+    }
+    const term = q.trim().toLowerCase();
+    const base = historyEntries;
+    if (!term) {
+      return base.slice(0, 6);
+    }
+    return base
+      .filter((entry) => {
+        const hay = `${entry.value ?? ''} ${entry.url ?? ''}`.toLowerCase();
+        return hay.includes(term);
+      })
+      .slice(0, 6);
+  }, [historyEntries, q]);
+  const tabMatches = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    if (!term) return [];
+    const seen = new Set<string>();
+    return allTabs
+      .filter((tab) => (tab.title || tab.url) && tab.id)
+      .filter((tab) => {
+        const hay = `${tab.title ?? ''} ${tab.url ?? ''}`.toLowerCase();
+        return hay.includes(term);
+      })
+      .filter((tab) => {
+        if (seen.has(tab.id)) return false;
+        seen.add(tab.id);
+        return true;
+      })
+      .slice(0, 6);
+  }, [allTabs, q]);
+  const commandMatches = useMemo(() => {
+    if (!q.startsWith('/')) {
+      return [];
+    }
+    const term = q.toLowerCase();
+    return SMART_COMMANDS.filter((command) => command.trigger.startsWith(term) || term.startsWith(command.trigger)).slice(0, 4);
+  }, [q]);
 
   useEffect(() => {
     if (!q || q.trim().length < 2) {
@@ -214,6 +397,12 @@ export default function SearchBar() {
       
       try {
         await ipc.tabs.create(result.url);
+        addHistoryEntry({
+          type: 'url',
+          value: result.title || result.url || 'Result',
+          url: result.url,
+          appMode: mode,
+        });
       } catch (error) {
         console.error('[SearchBar] Failed to open URL:', error);
         // Fallback: open in external browser
@@ -229,6 +418,7 @@ export default function SearchBar() {
     trackSearch(suggestion.value, { url: suggestion.metadata?.url, title: suggestion.metadata?.title }).catch(console.error);
     
     setQ(suggestion.value);
+    setActiveSuggestionIndex(-1);
     
     // If it's a URL, open it
     if (suggestion.metadata?.url) {
@@ -240,26 +430,89 @@ export default function SearchBar() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const query = q.trim();
-    if (!query) return;
-    
-    // Track search
-    trackSearch(query).catch(console.error);
-    
-    // If it's a URL, open it directly
-    if (query.startsWith('http://') || query.startsWith('https://')) {
+  const handleHistorySelect = (entry: HistoryEntry) => {
+    if (entry.type === 'url' && entry.url) {
+      setQ(entry.url);
+      void handleSubmit(undefined, entry.url);
+      setActiveSuggestionIndex(-1);
+      return;
+    }
+    setQ(entry.value);
+    void handleSubmit(undefined, entry.value);
+    setActiveSuggestionIndex(-1);
+  };
+
+  const handleOpenTabSelect = async (tabId: string) => {
+    try {
+      useTabsStore.getState().setActive(tabId);
+      await ipc.tabs.activate({ id: tabId });
+    } catch (error) {
+      console.error('[SearchBar] Failed to activate tab:', error);
+    } finally {
+      setActiveSuggestionIndex(-1);
+    }
+  };
+
+  const handleCommandSelect = (command: SmartCommand) => {
+    const trigger = command.trigger.endsWith(' ') ? command.trigger : `${command.trigger} `;
+    if (!q.startsWith(trigger)) {
+      setQ(trigger);
+    }
+    setActiveSuggestionIndex(-1);
+  };
+
+  const handleSubmit = async (e?: React.FormEvent, overrideValue?: string) => {
+    if (e) {
+      e.preventDefault();
+    }
+    let inputValue = (overrideValue ?? q).trim();
+    if (!inputValue) {
+      return;
+    }
+
+    const parsed = interpretInput(inputValue);
+
+    if (parsed.kind === 'url') {
+      const finalUrl = ensureHttpUrl(parsed.url);
       try {
-        await ipc.tabs.create(query);
+        await ipc.tabs.create(finalUrl);
+        showToast('success', 'Opening link...');
         setQ('');
+        addHistoryEntry({
+          type: 'url',
+          value: finalUrl,
+          url: finalUrl,
+          appMode: mode,
+        });
         return;
       } catch (error) {
         console.error('[SearchBar] Failed to open URL:', error);
+        showToast('error', 'Unable to open that link.');
+        return;
       }
     }
+
+    let activeModeForSearch = mode;
+    if (parsed.targetMode && parsed.targetMode !== mode) {
+      try {
+        await setMode(parsed.targetMode);
+        activeModeForSearch = parsed.targetMode;
+      } catch (error) {
+        console.warn('[SearchBar] Failed to switch mode for search:', error);
+      }
+    }
+
+    const query = parsed.query;
+    setQ(query);
     
-    // Phase 1: Regen search LLM pipeline
+    // Track search and remember in history
+    trackSearch(query).catch(console.error);
+    addHistoryEntry({
+      type: 'search',
+      value: query,
+      appMode: activeModeForSearch,
+    });
+    
     setAiLoading(true);
     setShowAiResponse(true);
     setQueryResult(null);
@@ -267,360 +520,127 @@ export default function SearchBar() {
     setAiResponse('');
     setSaveStatus('idle');
     setError(null);
-    setShowSearchResults(false); // Hide search results by default
-    
+    setShowSearchResults(false);
+
+    // Build enhanced context with tab info and relevant memories
     const tabContext = activeTab
       ? {
-          tabUrl: activeTab.url,
-          tabTitle: activeTab.title,
-          mode,
+          active_tab: {
+            url: activeTab.url,
+            title: activeTab.title,
+          },
+          mode: activeModeForSearch,
         }
-      : { mode };
-    
-    try {
-      const llmData = await fetchSearchLLM(query);
-      const mappedResult = mapLlmResponseToQueryResult(llmData, query);
-      setLlmResult(llmData);
-      setQueryResult(mappedResult);
-      setAiResponse(mappedResult.answer);
-      showToast('success', 'AI answer ready. Saved above search results.');
-      trackAction('search_llm_success', {
-        query,
-        latencyMs: llmData.latency_ms ?? null,
-        citationCount: llmData.citations?.length ?? 0,
-      }).catch(() => {});
+      : { mode: activeModeForSearch };
 
-      if (Array.isArray(llmData.raw_results) && llmData.raw_results.length > 0) {
-        const formatted = llmData.raw_results.map((result, idx) => ({
-          id: `llm-${idx}`,
-          title: result.title || result.url || `Source ${idx + 1}`,
-          url: result.url,
-          snippet: result.snippet || '',
-          type: 'proxy' as const,
-          source: (result.source as SearchResult['source']) || 'fused',
-        }));
-        setProxyResults(formatted);
-      }
+    // Fetch relevant memories for context
+    let relevantMemories: any[] = [];
+    try {
+      const memoryMatches = await semanticSearchMemories(query, { limit: 5, minSimilarity: 0.6 });
+      relevantMemories = memoryMatches.map((m) => ({
+        value: m.event.value,
+        metadata: m.event.metadata,
+        id: m.event.id,
+        type: m.event.type,
+        similarity: m.similarity,
+      }));
+    } catch (error) {
+      console.warn('[SearchBar] Failed to fetch memory context:', error);
+    }
+
+    const enhancedContext = relevantMemories.length > 0 
+      ? { ...tabContext, memories: relevantMemories }
+      : tabContext;
+
+    try {
+      let streamedText = '';
+      let streamedResult: AITaskResult | null = null;
+      const result = await aiEngine.runTask(
+        {
+          kind: 'search',
+          prompt: query,
+          context: enhancedContext,
+          metadata: { mode: activeModeForSearch },
+          llm: {
+            temperature: 0.2,
+            maxTokens: 800,
+          },
+        },
+        (event) => {
+          if (event.type === 'token' && typeof event.data === 'string') {
+            streamedText += event.data;
+            setAiResponse((prev) => `${prev}${event.data}`);
+          } else if (event.type === 'error') {
+            setError(typeof event.data === 'string' ? event.data : 'AI search stream failed.');
+          } else if (event.type === 'done' && event.data && typeof event.data !== 'string') {
+            streamedResult = event.data as AITaskResult;
+          }
+        },
+      );
+
+      const finalResult = streamedResult ?? result;
+      const finalAnswer = streamedText || finalResult.text;
       setAiLoading(false);
+      setAiResponse(finalAnswer);
+
+      const citations =
+        finalResult.citations && finalResult.citations.length > 0
+          ? finalResult.citations.map((citation, idx) => ({
+              title: citation.title || citation.url || `Source ${idx + 1}`,
+              url: citation.url || '',
+              snippet: citation.snippet,
+              source: citation.source,
+            }))
+          : [];
+
+      const syntheticResponse: SearchLLMResponse = {
+        query,
+        answer: finalAnswer,
+        citations,
+        raw_results: citations,
+        timestamp: Date.now() / 1000,
+        latency_ms: finalResult.latency ?? 0,
+      };
+
+      setLlmResult(syntheticResponse);
+      setQueryResult(mapLlmResponseToQueryResult(syntheticResponse, query));
+      showToast('success', 'AI answer ready.');
+      trackAction('ai_task_success', {
+        source: 'SearchBar',
+        kind: 'search',
+        mode: activeModeForSearch,
+        queryLength: query.length,
+        provider: finalResult.provider,
+        model: finalResult.model,
+        latencyMs: finalResult.latency ?? null,
+        promptTokens: finalResult.usage?.promptTokens ?? null,
+        completionTokens: finalResult.usage?.completionTokens ?? null,
+        totalTokens: finalResult.usage?.totalTokens ?? null,
+        citationCount: citations.length,
+        hadContext: Boolean(enhancedContext?.active_tab?.url),
+      }).catch(() => {});
       return;
-    } catch (primaryError) {
-      console.warn('[SearchBar] search_llm failed, falling back to legacy query engine:', primaryError);
-      trackAction('search_llm_error', {
-        query,
-        error: primaryError instanceof Error ? primaryError.message : String(primaryError),
+    } catch (err) {
+      console.warn('[SearchBar] aiEngine.runTask failed, falling back:', err);
+      trackAction('ai_task_error', {
+        source: 'SearchBar',
+        kind: 'search',
+        mode: activeModeForSearch,
+        queryLength: query.length,
+        error: err instanceof Error ? err.message : String(err),
       }).catch(() => {});
-      showToast('error', 'AI search temporarily unavailable. Trying fallback...');
     }
-    
-    // Legacy fallback: QueryEngine + Redix flows
+
+    // Final fallback: open a traditional search tab.
     try {
-      const queryEngine = getQueryEngine();
-      const result = await queryEngine.query(query, tabContext);
-      
-      setQueryResult(result);
-      setAiResponse(result.answer);
-      
-      // Update search results from query result sources
-      if (result.sources.length > 0) {
-        const formatted = result.sources.map((source, idx) => ({
-          id: `source-${idx}`,
-          title: source.title,
-          url: source.url,
-          snippet: source.snippet,
-          type: 'proxy' as const,
-          source: 'fused' as const,
-        }));
-        setProxyResults(formatted);
-      } else {
-        // Fallback: Fetch search results if QueryEngine didn't provide sources
-        try {
-          const searchResponse = await fetch(`${SEARCH_PROXY_URL}/api/search`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              query, 
-              sources: ['duckduckgo'], 
-              limit: 10,
-            }),
-          });
-
-          if (searchResponse.ok) {
-            const searchData = await searchResponse.json();
-            if (searchData.results && Array.isArray(searchData.results)) {
-              const formatted = searchData.results.map((r: any, idx: number) => ({
-                id: `proxy-${idx}`,
-                title: r.title,
-                url: r.url,
-                snippet: r.snippet,
-                type: 'proxy' as const,
-                source: r.source,
-              }));
-              setProxyResults(formatted);
-            }
-          }
-        } catch (searchError) {
-          console.warn('[SearchBar] Fallback search failed:', searchError);
-        }
-      }
-      
-      if (mode === 'Research') {
-        try {
-          const agentResult = await runResearchAgent({
-            prompt: query,
-            context: { mode, tabContext, queryResult: result },
-          });
-          if (agentResult.success && agentResult.output) {
-            setAiResponse((prev) =>
-              prev
-                ? `${prev}\n\nResearch Agent:\n${agentResult.output}`
-                : String(agentResult.output)
-            );
-          }
-        } catch (agentError) {
-          console.warn('[SearchBar] Research agent failed:', agentError);
-        }
-      } else if (mode === 'Trade') {
-        try {
-          const agentResult = await runTradeAgent({
-            prompt: query,
-            context: { mode, tabContext, queryResult: result },
-          });
-          if (agentResult.success && agentResult.output) {
-            setAiResponse((prev) =>
-              prev
-                ? `${prev}\n\nTrade Agent:\n${agentResult.output}`
-                : String(agentResult.output)
-            );
-          }
-        } catch (agentError) {
-          console.warn('[SearchBar] Trade agent failed:', agentError);
-        }
-      } else if (mode === 'Docs') {
-        try {
-          const agentResult = await runDocsAgent({
-            prompt: query,
-            context: { mode, tabContext, queryResult: result },
-          });
-          if (agentResult.success && agentResult.output) {
-            setAiResponse((prev) =>
-              prev
-                ? `${prev}\n\nDocs Agent:\n${agentResult.output}`
-                : String(agentResult.output)
-            );
-          }
-        } catch (agentError) {
-          console.warn('[SearchBar] Docs agent failed:', agentError);
-        }
-      } else if (mode === 'Images') {
-        try {
-          const agentResult = await runImagesAgent({
-            prompt: query,
-            context: { mode, tabContext, queryResult: result },
-          });
-          if (agentResult.success && agentResult.output) {
-            setAiResponse((prev) =>
-              prev
-                ? `${prev}\n\nImages Agent:\n${agentResult.output}`
-                : String(agentResult.output)
-            );
-          }
-        } catch (agentError) {
-          console.warn('[SearchBar] Images agent failed:', agentError);
-        }
-      } else if (mode === 'Threats') {
-        try {
-          const agentResult = await runThreatsAgent({
-            prompt: query,
-            context: { mode, tabContext, queryResult: result },
-          });
-          if (agentResult.success && agentResult.output) {
-            setAiResponse((prev) =>
-              prev
-                ? `${prev}\n\nThreats Agent:\n${agentResult.output}`
-                : String(agentResult.output)
-            );
-          }
-        } catch (agentError) {
-          console.warn('[SearchBar] Threats agent failed:', agentError);
-        }
-      } else if (mode === 'GraphMind') {
-        try {
-          const agentResult = await runGraphMindAgent({
-            prompt: query,
-            context: { mode, tabContext, queryResult: result },
-          });
-          if (agentResult.success && agentResult.output) {
-            setAiResponse((prev) =>
-              prev
-                ? `${prev}\n\nGraphMind Agent:\n${agentResult.output}`
-                : String(agentResult.output)
-            );
-          }
-        } catch (agentError) {
-          console.warn('[SearchBar] GraphMind agent failed:', agentError);
-        }
-      }
-
-      setAiLoading(false);
-      return; // Success - exit early
-      
-    } catch (queryError) {
-      console.error('[SearchBar] QueryEngine failed:', queryError);
-      
-      // Fallback to original search flow
-      try {
-        // Fallback: try Redix /ask endpoint with SSE streaming (preferred)
-        try {
-          // Try streaming first for better UX
-          // Use fetch with manual SSE parsing
-          const streamResponse = await fetch(`${REDIX_CORE_URL}/ask`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              query,
-              context: activeTab ? { url: activeTab.url, title: activeTab.title } : undefined,
-              options: { provider: 'auto', maxTokens: 500 },
-              stream: true,
-            }),
-          });
-
-          if (streamResponse.ok && streamResponse.body) {
-            // Parse SSE stream
-            const reader = streamResponse.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-            let fullResponse = '';
-            let streamCancelled = false;
-
-            try {
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done || streamCancelled) break;
-
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-
-                for (const line of lines) {
-                  if (line.trim() === '') continue; // Skip empty lines
-                  
-                  if (line.startsWith('data: ')) {
-                    try {
-                      const jsonStr = line.slice(6).trim();
-                      if (!jsonStr) continue;
-                      
-                      const data = JSON.parse(jsonStr);
-                      if (data.type === 'token' && data.text) {
-                        fullResponse += data.text;
-                        setAiResponse(fullResponse);
-                      } else if (data.type === 'done') {
-                        console.debug(`[SearchBar] Redix stream complete (green score: ${data.greenScore}, latency: ${data.latency}ms)`);
-                        streamCancelled = true;
-                        break;
-                      } else if (data.type === 'error') {
-                        throw new Error(data.error || 'Streaming error');
-                      }
-                    } catch (e) {
-                      // If JSON parse fails, it might be a partial chunk - continue
-                      if (e instanceof SyntaxError) {
-                        console.debug('[SearchBar] Partial SSE chunk, waiting for more data');
-                        continue;
-                      }
-                      console.warn('[SearchBar] Failed to parse SSE chunk:', e);
-                    }
-                  } else if (line.startsWith('event: ')) {
-                    // Handle SSE event types if needed
-                    continue;
-                  }
-                }
-              }
-            } catch (streamReadError) {
-              console.error('[SearchBar] SSE stream error:', streamReadError);
-              throw streamReadError;
-            } finally {
-              reader.releaseLock();
-            }
-            
-            // Set final response if streaming completed successfully
-            if (fullResponse) {
-              setAiResponse(fullResponse);
-            }
-          } else {
-            throw new Error(`Redix streaming failed: ${streamResponse.statusText}`);
-          }
-        } catch (streamError) {
-          console.warn('[SearchBar] Redix streaming failed, trying non-streaming:', streamError);
-          // Fallback to non-streaming /ask endpoint
-          try {
-            const redixResponse = await fetch(`${REDIX_CORE_URL}/ask`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                query,
-                context: activeTab ? { url: activeTab.url, title: activeTab.title } : undefined,
-                options: { provider: 'auto', maxTokens: 500 },
-              }),
-            }).catch(() => {
-              // Network error - show user-friendly message
-              throw new Error('Search service temporarily unavailable. Please try again.');
-            });
-            
-            if (!redixResponse.ok) {
-              const errorData = await redixResponse.json().catch(() => ({}));
-              throw new Error(errorData.error || `Search failed: ${redixResponse.statusText}`);
-            }
-
-            const redixData = await redixResponse.json();
-            setAiResponse(redixData.text || 'No response from Redix');
-
-            // Log eco metrics if available
-            if (redixData.greenScore !== undefined) {
-              console.debug(
-                `[SearchBar] Redix /ask response (green score: ${redixData.greenScore}%, tier: ${redixData.greenTier}, CO2 saved: ${redixData.co2SavedG}g, latency: ${redixData.latency}ms)`
-              );
-
-              // Store eco data for UI display
-              if (redixData.greenTier && redixData.tierColor) {
-                // Can be used to show eco badge in search results
-                (window as any).__lastEcoScore = {
-                  score: redixData.greenScore,
-                  tier: redixData.greenTier,
-                  color: redixData.tierColor,
-                  co2Saved: redixData.co2SavedG,
-                  recommendation: redixData.recommendation,
-                };
-              }
-            }
-          } catch (redixError) {
-            console.warn('[SearchBar] Redix /ask fallback failed:', redixError);
-            // Final fallback: use LLM adapter directly
-            try {
-              const llmResponse = await sendPrompt(query, {
-                systemPrompt: 'You are a helpful search assistant. Provide a concise answer.',
-                maxTokens: 500,
-              });
-              setAiResponse(llmResponse.text || 'No response');
-            } catch (llmError) {
-              console.error('[SearchBar] LLM adapter fallback failed:', llmError);
-              setError('AI services unavailable. Please check your API keys.');
-            }
-          }
-        }
-      } catch (fallbackError) {
-        console.error('[SearchBar] All fallbacks failed:', fallbackError);
-        // Final fallback: open search results in a tab
-        try {
-          const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
-          await ipc.tabs.create(searchUrl);
-        } catch (error) {
-          console.error('[SearchBar] Failed to open search URL:', error);
-        }
-        setError('Search service unavailable. Please try again.');
-        showToast('error', 'Search service unavailable. Opening Google instead.');
-      } finally {
-        setAiLoading(false);
-      }
+      const fallbackUrl = `${SEARCH_PROVIDER_URL.duckduckgo}${encodeURIComponent(query)}`;
+      await ipc.tabs.create(fallbackUrl);
+    } catch (error) {
+      console.error('[SearchBar] Failed to open fallback search URL:', error);
     }
+    setAiLoading(false);
+    setError('AI search unavailable. Opened DuckDuckGo instead.');
+    showToast('error', 'AI search unavailable. Opening DuckDuckGo.');
   };
 
   const allResults = [...memoryResults, ...proxyResults, ...duckResults, ...localResults];
@@ -642,14 +662,40 @@ export default function SearchBar() {
       // Use LLM adapter to ask about the page
       const prompt = `Based on the page "${activeTab.title}" (${activeTab.url}), answer the user's question: ${q || 'What is this page about?'}`;
       
-      const response = await sendPrompt(prompt, {
-        systemPrompt: 'You are a helpful assistant that answers questions about web pages based on their title and URL.',
-        maxTokens: 500,
+      const response = await aiEngine.runTask({
+        kind: 'agent',
+        prompt,
+        context: { tabUrl: activeTab.url, tabTitle: activeTab.title },
+        llm: { maxTokens: 500 },
+      }, (event) => {
+        if (event.type === 'token' && typeof event.data === 'string') {
+          setAiResponse((prev) => `${prev}${event.data}`);
+        }
       });
 
       setAiResponse(response.text);
+      trackAction('ai_task_success', {
+        source: 'SearchBar',
+        kind: 'agent',
+        mode: mode,
+        queryLength: prompt.length,
+        provider: response.provider,
+        model: response.model,
+        latencyMs: response.latency ?? null,
+        promptTokens: response.usage?.promptTokens ?? null,
+        completionTokens: response.usage?.completionTokens ?? null,
+        totalTokens: response.usage?.totalTokens ?? null,
+        hadContext: true,
+      }).catch(() => {});
     } catch (err: any) {
       setError(err.message || 'Failed to get AI response about page');
+      trackAction('ai_task_error', {
+        source: 'SearchBar',
+        kind: 'agent',
+        mode: mode,
+        queryLength: (q || '').length,
+        error: err instanceof Error ? err.message : String(err),
+      }).catch(() => {});
     } finally {
       setAskingAboutPage(false);
     }
@@ -692,19 +738,173 @@ export default function SearchBar() {
     }
   };
 
+  const suggestionGroups = useMemo<SuggestionGroup[]>(() => {
+    const groups: SuggestionGroup[] = [];
+    if (historyMatches.length > 0) {
+      groups.push({
+        key: 'history',
+        title: 'Recent search & visits',
+        icon: Clock,
+        accentClass: 'text-amber-400',
+        items: historyMatches.map((entry) => ({
+          id: entry.id,
+          value: entry.value,
+          label: entry.value,
+          description: entry.url,
+          badge: entry.appMode,
+          url: entry.url,
+          kind: 'history',
+          onSelect: () => handleHistorySelect(entry),
+        })),
+      });
+    }
+    if (tabMatches.length > 0) {
+      groups.push({
+        key: 'tabs',
+        title: 'Open tabs',
+        icon: Globe,
+        accentClass: 'text-sky-400',
+        items: tabMatches.map((tab) => ({
+          id: `tab-${tab.id}`,
+          value: tab.url || tab.title || '',
+          label: tab.title || tab.url || 'Tab',
+          description: tab.url || undefined,
+          badge: tab.appMode,
+          url: tab.url,
+          kind: 'tab',
+          onSelect: () => handleOpenTabSelect(tab.id),
+        })),
+      });
+    }
+    if (commandMatches.length > 0) {
+      groups.push({
+        key: 'commands',
+        title: 'Commands',
+        icon: FileText,
+        accentClass: 'text-purple-300',
+        items: commandMatches.map((command) => ({
+          id: `command-${command.id}`,
+          value: command.trigger,
+          label: `${command.trigger} — ${command.label}`,
+          description: command.description,
+          badge: command.sample,
+          kind: 'command',
+          onSelect: () => handleCommandSelect(command),
+        })),
+      });
+    }
+    if (suggestions.length > 0) {
+      groups.push({
+        key: 'memory',
+        title: 'Suggested for you',
+        icon: Sparkles,
+        accentClass: 'text-purple-400',
+        items: suggestions.map((suggestion, idx) => ({
+          id: `memory-${idx}-${suggestion.value}`,
+          value: suggestion.value,
+          label: suggestion.value,
+          description: suggestion.metadata?.title,
+          badge: suggestion.count > 1 ? `Used ${suggestion.count}×` : 'Recently used',
+          kind: 'memory',
+          onSelect: () => handleSuggestionClick(suggestion),
+        })),
+      });
+    }
+    return groups;
+  }, [commandMatches, handleCommandSelect, handleHistorySelect, handleOpenTabSelect, handleSuggestionClick, historyMatches, suggestions, tabMatches]);
+
+  const flatSuggestions = useMemo(() => suggestionGroups.flatMap((group) => group.items), [suggestionGroups]);
+  const inlineCandidate = useMemo(() => {
+    const term = q;
+    if (!term) return null;
+    const lower = term.toLowerCase();
+    return flatSuggestions.find(
+      (item) => item.value && item.value.toLowerCase().startsWith(lower) && item.value.toLowerCase() !== lower,
+    );
+  }, [flatSuggestions, q]);
+  const inlineCompletion =
+    inlineCandidate && inlineCandidate.value.length > q.length
+      ? inlineCandidate.value.slice(q.length)
+      : '';
+  const showAssistPanel = q.trim().length > 0 && suggestionGroups.some((group) => group.items.length > 0);
+
+  useEffect(() => {
+    setActiveSuggestionIndex(-1);
+  }, [q]);
+
+  useEffect(() => {
+    if (activeSuggestionIndex >= flatSuggestions.length) {
+      setActiveSuggestionIndex(flatSuggestions.length ? flatSuggestions.length - 1 : -1);
+    }
+  }, [activeSuggestionIndex, flatSuggestions.length]);
+
+  const handleInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Tab' && inlineCandidate) {
+      event.preventDefault();
+      setQ(inlineCandidate.value);
+      setActiveSuggestionIndex(-1);
+      return;
+    }
+    if (flatSuggestions.length === 0) {
+      return;
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActiveSuggestionIndex((prev) => {
+        const next = prev + 1;
+        if (next >= flatSuggestions.length) {
+          return 0;
+        }
+        return next;
+      });
+      return;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveSuggestionIndex((prev) => {
+        if (prev <= 0) {
+          return flatSuggestions.length - 1;
+        }
+        return prev - 1;
+      });
+      return;
+    }
+    if (event.key === 'Enter' && activeSuggestionIndex >= 0 && flatSuggestions[activeSuggestionIndex]) {
+      event.preventDefault();
+      flatSuggestions[activeSuggestionIndex].onSelect();
+      setActiveSuggestionIndex(-1);
+      return;
+    }
+    if (event.key === 'Escape' && activeSuggestionIndex !== -1) {
+      event.preventDefault();
+      setActiveSuggestionIndex(-1);
+    }
+  };
+
+  let suggestionRowCursor = -1;
+
   return (
     <div className="w-full max-w-2xl mx-auto">
       <form onSubmit={handleSubmit} className="relative">
         <div className="flex items-center gap-3 rounded-xl border border-gray-700/50 bg-gray-900/60 px-4 py-3 shadow-inner focus-within:border-blue-500/50 focus-within:ring-1 focus-within:ring-blue-500/20 transition-all">
           <Search size={18} className="text-gray-500 flex-shrink-0" />
-          <input
-            type="text"
-            placeholder="Search the web or docs..."
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            className="flex-1 bg-transparent text-base text-white placeholder:text-gray-500 focus:outline-none"
-            autoFocus
-          />
+          <div className="relative flex-1">
+            {inlineCompletion && (
+              <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center text-base text-white/30 select-none">
+                <span className="opacity-0">{q}</span>
+                <span>{inlineCompletion}</span>
+              </span>
+            )}
+            <input
+              type="text"
+              placeholder="Search the web or docs..."
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={handleInputKeyDown}
+              className="relative z-10 w-full bg-transparent text-base text-white placeholder:text-gray-500 focus:outline-none"
+              autoFocus
+            />
+          </div>
           {loading && (
             <Loader2 size={16} className="text-gray-400 animate-spin flex-shrink-0" />
           )}
@@ -722,33 +922,57 @@ export default function SearchBar() {
           )}
         </div>
 
-        {/* SuperMemory Suggestions */}
-        {suggestions.length > 0 && q.length >= 2 && (
-          <div className="absolute top-full left-0 right-0 mt-2 rounded-xl border border-purple-700/50 bg-gray-900/95 backdrop-blur-xl shadow-2xl z-50">
-            <div className="p-3 border-b border-gray-800/50">
-              <div className="flex items-center gap-2 mb-2">
-                <Sparkles size={14} className="text-purple-400" />
-                <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Suggested for you</h3>
-              </div>
-              <div className="space-y-1">
-                {suggestions.map((suggestion, idx) => (
-                  <button
-                    key={`suggestion-${idx}-${suggestion.value}`}
-                    type="button"
-                    onClick={() => handleSuggestionClick(suggestion)}
-                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-purple-500/10 transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500/50"
-                  >
-                    <div className="text-sm font-medium text-purple-200 line-clamp-1">{suggestion.value}</div>
-                    {suggestion.metadata?.title && (
-                      <div className="text-xs text-gray-400 mt-0.5 line-clamp-1">{suggestion.metadata.title}</div>
-                    )}
-                    <div className="text-xs text-gray-500 mt-1">
-                      {suggestion.count > 1 ? `Used ${suggestion.count} times` : 'Recently used'}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
+        {/* Unified suggestions */}
+        {showAssistPanel && (
+          <div className="absolute top-full left-0 right-0 mt-2 rounded-2xl border border-slate-800/80 bg-slate-950/95 backdrop-blur-xl shadow-2xl z-50">
+            {suggestionGroups.map((group, groupIdx) => {
+              if (group.items.length === 0) return null;
+              const borderClass = groupIdx !== suggestionGroups.length - 1 ? 'border-b border-slate-800/70' : '';
+              return (
+                <div key={`${group.key}-${groupIdx}`} className={`px-4 py-3 ${borderClass}`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <group.icon width={14} height={14} className={group.accentClass} />
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">{group.title}</h3>
+                  </div>
+                  <div className="space-y-1.5">
+                    {group.items.map((item) => {
+                      suggestionRowCursor += 1;
+                      const isActive = suggestionRowCursor === activeSuggestionIndex;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => item.onSelect()}
+                          onMouseEnter={() => setActiveSuggestionIndex(suggestionRowCursor)}
+                          className={`w-full rounded-xl px-3 py-2 text-left transition-colors focus:outline-none ${
+                            isActive
+                              ? 'bg-slate-800/70 border border-slate-700 text-white'
+                              : 'border border-transparent hover:bg-slate-800/40 text-slate-200'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium text-slate-100 line-clamp-1">{item.label}</div>
+                              {item.description && (
+                                <div className="text-xs text-slate-400 mt-0.5 line-clamp-1">{item.description}</div>
+                              )}
+                              {item.url && (
+                                <div className="text-xs text-slate-500 mt-0.5 truncate">{item.url}</div>
+                              )}
+                            </div>
+                            {item.badge && (
+                              <span className="text-[11px] uppercase tracking-wide text-slate-400 bg-slate-900/80 px-2 py-0.5 rounded-full">
+                                {item.badge}
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 

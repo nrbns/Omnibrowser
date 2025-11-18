@@ -38,6 +38,12 @@ class OpenAIClient:
             self._client = httpx.AsyncClient(
                 timeout=self.timeout,
                 headers=headers,
+                limits=httpx.Limits(
+                    max_keepalive_connections=10,
+                    max_connections=20,
+                    keepalive_expiry=30.0,
+                ),
+                http2=True,  # Use HTTP/2 for better performance
             )
         return self._client
 

@@ -32,6 +32,13 @@
   --text-primary: #e2e8f0;
   --text-muted: #94a3b8;
   --accent: #60a5fa;
+  --regen-panel-gap: 1.25rem;
+  --regen-surface-padding: 1.25rem;
+}
+
+:root[data-compact='true'] {
+  --regen-panel-gap: 0.75rem;
+  --regen-surface-padding: 0.7rem;
 }
 
 :root[data-theme='light'] {

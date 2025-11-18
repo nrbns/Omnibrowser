@@ -1,4 +1,5 @@
 import type { MemoryEvent } from '../supermemory/event-types';
+import type { AgentMemoryEntry } from '../../state/agentMemoryStore';
 
 export type AgentCapability =
   | 'memory:read'
@@ -52,6 +53,7 @@ export interface AgentEnvironment {
   dispatchEvent: (type: string, payload?: any) => void;
   capabilities: AgentCapability[];
   signal?: AbortSignal;
+  recentRuns: AgentMemoryEntry[];
 }
 
 export interface AgentExecutionResult {

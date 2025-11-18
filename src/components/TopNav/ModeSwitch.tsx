@@ -15,8 +15,10 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 import { trackModeSwitch } from '../../core/supermemory/tracker';
+import { getModeFlag, ModeAvailability } from '../../config/featureFlags';
+import { showToast } from '../../state/toastStore';
 
-type ModeStatus = 'ready' | 'soon';
+type ModeStatus = ModeAvailability;
 
 type ModeConfig<T extends string> = {
   id: T;
@@ -46,38 +48,62 @@ const secondaryModes: ModeConfig<'Games' | 'Docs' | 'Images' | 'Threats' | 'Grap
 
 type ModeId = typeof primaryModes[number]['id'] | typeof secondaryModes[number]['id'];
 
+const resolveModeConfig = <T extends ModeId>(config: ModeConfig<T>): ModeConfig<T> => {
+  const flag = getModeFlag(config.id);
+  return {
+    ...config,
+    status: flag.status ?? config.status,
+    description: flag.description ?? config.description,
+  };
+};
+
 export function ModeSwitch() {
   const { mode, setMode } = useAppStore();
   const navigate = useNavigate();
 
-  const handleModeChange = (newModeId: ModeId) => {
-    setMode(newModeId);
-    // Track mode switch for analytics
-    trackModeSwitch(newModeId).catch(console.error);
-    // All modes stay on home page, agent is accessed separately
+  const handleModeChange = (modeConfig: ModeConfig<ModeId>) => {
+    const flag = getModeFlag(modeConfig.id);
+    if (flag.status === 'hidden') {
+      showToast('error', `${modeConfig.label} mode is disabled in this build.`);
+      return;
+    }
+    if (flag.status === 'soon') {
+      showToast('info', `${modeConfig.label} mode is coming soon.`);
+      return;
+    }
+    setMode(modeConfig.id);
+    trackModeSwitch(modeConfig.id).catch(console.error);
     navigate('/');
+    if (flag.status === 'beta') {
+      showToast('info', `${modeConfig.label} mode is in beta.`);
+    }
   };
 
+  const resolvedPrimary = primaryModes
+    .map(resolveModeConfig)
+    .filter((mode) => mode.status !== 'hidden');
+  const resolvedSecondary = secondaryModes
+    .map(resolveModeConfig)
+    .filter((mode) => mode.status !== 'hidden');
+
   const currentMode = mode || 'Browse';
-  // const isPrimaryMode = primaryModes.some(m => m.id === currentMode); // Unused for now
-  const isSecondaryMode = secondaryModes.some(m => m.id === currentMode);
-  
-  // Find current mode config
-  const currentModeConfig = [...primaryModes, ...secondaryModes].find(m => m.id === currentMode);
-  const activeSecondaryMode = secondaryModes.find(m => m.id === currentMode);
+  const isSecondaryMode = resolvedSecondary.some(m => m.id === currentMode);
+  const currentModeConfig = [...resolvedPrimary, ...resolvedSecondary].find(m => m.id === currentMode);
+  const activeSecondaryMode = resolvedSecondary.find(m => m.id === currentMode);
 
   return (
     <div className="flex items-center gap-1 bg-gray-800/60 rounded-lg p-1 border border-gray-700/50 shadow-sm">
       {/* Primary modes - always visible */}
-      {primaryModes.map((m) => {
+      {resolvedPrimary.map((m) => {
         const Icon = m.icon;
         const isActive = currentMode === m.id;
-        const isDisabled = m.status !== 'ready';
+        const isDisabled = m.status === 'soon';
+        const isBeta = m.status === 'beta';
         
         return (
           <motion.button
             key={m.id}
-            onClick={() => !isDisabled && handleModeChange(m.id)}
+            onClick={() => handleModeChange(m)}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             className={`
@@ -95,6 +121,11 @@ export function ModeSwitch() {
           >
             <Icon size={14} className={isActive ? 'text-white' : m.color} />
             <span className="hidden md:inline">{m.label}</span>
+            {isBeta && !isDisabled && (
+              <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-200">
+                Beta
+              </span>
+            )}
             {isDisabled && (
               <span className="hidden lg:inline text-[10px] uppercase tracking-wide text-slate-400/80">
                 Soon
@@ -154,15 +185,16 @@ export function ModeSwitch() {
             Additional Modes
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
-          {secondaryModes.map((m) => {
+            {resolvedSecondary.map((m) => {
             const Icon = m.icon;
             const isActive = currentMode === m.id;
-            const isDisabled = m.status !== 'ready';
+              const isDisabled = m.status === 'soon';
+              const isBeta = m.status === 'beta';
             
             return (
               <DropdownMenuItem
                 key={m.id}
-                onClick={() => !isDisabled && handleModeChange(m.id)}
+                  onClick={() => handleModeChange(m)}
                 className={`
                   flex items-center gap-2 cursor-pointer
                   ${isActive ? 'bg-slate-800/60' : ''}
@@ -173,6 +205,11 @@ export function ModeSwitch() {
                 <Icon size={14} className={isActive ? m.color : 'text-slate-400'} />
                 <div className="flex flex-col">
                   <span className={isActive ? 'font-semibold' : ''}>{m.label}</span>
+                    {isBeta && !isDisabled && (
+                      <span className="text-[10px] uppercase text-amber-300 tracking-wide">
+                        Beta
+                      </span>
+                    )}
                   {isDisabled && (
                     <span className="text-[10px] uppercase text-slate-500 tracking-wide">
                       Coming soon

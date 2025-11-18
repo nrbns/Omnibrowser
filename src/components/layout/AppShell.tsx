@@ -3,7 +3,7 @@
  */
 
 import React, { useState, useEffect, Suspense, useMemo, useCallback, useRef } from 'react';
-import { AlertTriangle, RotateCcw, Loader2 } from 'lucide-react';
+import { AlertTriangle, RotateCcw, Loader2, PanelsTopLeft, PanelRightOpen } from 'lucide-react';
 import { Outlet } from 'react-router-dom';
 import { PermissionRequest, ConsentRequest, ipcEvents } from '../../lib/ipc-events';
 import { useIPCEvent } from '../../lib/use-ipc-event';
@@ -28,12 +28,16 @@ import { initNightlySummarization } from '../../core/supermemory/summarizer';
 import { RedixDebugPanel } from '../redix/RedixDebugPanel';
 import { autoTogglePrivacy } from '../../core/privacy/auto-toggle';
 import { useAppStore } from '../../state/appStore';
+import { useSessionStore } from '../../state/sessionStore';
+import { useHistoryStore } from '../../state/historyStore';
+import { useSettingsStore } from '../../state/settingsStore';
 // import { ModeManager } from '../../core/modes/manager'; // Unused for now
 import { useTradeStore } from '../../state/tradeStore';
 import { TradeSidebar } from '../trade/TradeSidebar';
 import { TermsAcceptance } from '../Onboarding/TermsAcceptance';
 import { CookieConsent, useCookieConsent } from '../Onboarding/CookieConsent';
 import { ToastHost } from '../common/ToastHost';
+import { reopenMostRecentClosedTab } from '../../lib/tabLifecycle';
 
 type ErrorBoundaryState = {
   hasError: boolean;
@@ -231,6 +235,9 @@ export function AppShell() {
   const memorySidebarOpen = useAppStore((state) => state.memorySidebarOpen);
   const setMemorySidebarOpen = useAppStore((state) => state.setMemorySidebarOpen);
   const [redixDebugOpen, setRedixDebugOpen] = useState(false);
+  const themePreference = useSettingsStore((state) => state.appearance.theme);
+  const compactUI = useSettingsStore((state) => state.appearance.compactUI);
+  const clearOnExit = useSettingsStore((state) => state.privacy.clearOnExit);
   const { crashedTab, setCrashedTab, handleReload } = useCrashRecovery();
   
   // Initialize fullscreen state on mount - ensure it starts as false
@@ -304,16 +311,77 @@ export function AppShell() {
   const [restoreSummary, setRestoreSummary] = useState<{ updatedAt: number; windowCount: number; tabCount: number } | null>(null);
   const [restoreDismissed, setRestoreDismissed] = useState(false);
   const [restoreStatus, setRestoreStatus] = useState<'idle' | 'restoring'>('idle');
+  const [viewportWidth, setViewportWidth] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1920));
+  const isDesktopLayout = viewportWidth >= 1280;
+  const [, setToolsDrawerOpen] = useState(false);
+  const sessionSnapshot = useSessionStore((state) => state.snapshot);
+  const saveSessionSnapshot = useSessionStore((state) => state.saveSnapshot);
+  const restoreSessionSnapshot = useSessionStore((state) => state.restoreFromSnapshot);
+  const clearSessionSnapshot = useSessionStore((state) => state.clearSnapshot);
+  const clearHistoryEntries = useHistoryStore((state) => state.clear);
+  const tabsState = useTabsStore();
   const [showTOS, setShowTOS] = useState(false);
   const [showCookieConsent, setShowCookieConsent] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    return !localStorage.getItem('omnibrowser:onboarding-seen');
-  });
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const seen = window.localStorage.getItem('omnibrowser:onboarding-seen');
+    setShowOnboarding(!seen);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleResize = () => {
+      setViewportWidth(window.innerWidth);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      saveSessionSnapshot(tabsState.tabs, tabsState.activeId);
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [tabsState.tabs, tabsState.activeId, saveSessionSnapshot]);
+
+  useEffect(() => {
+    if (!clearOnExit) return;
+    const handleBeforeUnload = () => {
+      clearSessionSnapshot();
+      clearHistoryEntries();
+      useTabsStore.getState().clearRecentlyClosed();
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [clearOnExit, clearHistoryEntries, clearSessionSnapshot]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const root = document.documentElement;
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+
+    const applyPreferences = () => {
+      const resolvedTheme = themePreference === 'system' ? (media.matches ? 'dark' : 'light') : themePreference;
+      root.dataset.theme = resolvedTheme;
+      root.dataset.compact = compactUI ? 'true' : 'false';
+    };
+
+    applyPreferences();
+
+    if (themePreference === 'system') {
+      const handler = () => applyPreferences();
+      media.addEventListener('change', handler);
+      return () => media.removeEventListener('change', handler);
+    }
+
+    return undefined;
+  }, [themePreference, compactUI]);
 
   const dismissOnboarding = () => {
     if (typeof window !== 'undefined') {
-      localStorage.setItem('omnibrowser:onboarding-seen', '1');
+      window.localStorage.setItem('omnibrowser:onboarding-seen', '1');
     }
     setShowOnboarding(false);
   };
@@ -432,7 +500,43 @@ export function AppShell() {
   }, []);
   const consentVisible = useConsentOverlayStore((state) => state.visible);
   const trustDashboardVisible = useTrustDashboardStore((state) => state.visible);
-  const tabsState = useTabsStore();
+
+  const cycleTab = useCallback((direction: number) => {
+    const { tabs, activeId, setActive } = useTabsStore.getState();
+    const currentMode = useAppStore.getState().mode;
+    const scopedTabs = tabs.filter((tab) => !currentMode || !tab.appMode || tab.appMode === currentMode);
+    if (scopedTabs.length === 0) {
+      return false;
+    }
+    const currentIndex = scopedTabs.findIndex((tab) => tab.id === activeId);
+    const baseIndex = currentIndex >= 0 ? currentIndex : 0;
+    const nextIndex = (baseIndex + direction + scopedTabs.length) % scopedTabs.length;
+    const target = scopedTabs[nextIndex];
+    if (target && target.id !== activeId) {
+      setActive(target.id);
+      void ipc.tabs.activate({ id: target.id });
+      return true;
+    }
+    return false;
+  }, []);
+
+  const jumpToTabIndex = useCallback((position: number, snapToEnd = false) => {
+    const { tabs, setActive } = useTabsStore.getState();
+    const currentMode = useAppStore.getState().mode;
+    const scopedTabs = tabs.filter((tab) => !currentMode || !tab.appMode || tab.appMode === currentMode);
+    if (scopedTabs.length === 0) {
+      return false;
+    }
+
+    const index = snapToEnd ? Math.max(scopedTabs.length - 1, 0) : Math.min(Math.max(position, 0), scopedTabs.length - 1);
+    const target = scopedTabs[index];
+    if (target) {
+      setActive(target.id);
+      void ipc.tabs.activate({ id: target.id });
+      return true;
+    }
+    return false;
+  }, []);
   const activeTab = useMemo(() => tabsState.tabs.find(tab => tab.id === tabsState.activeId), [tabsState.tabs, tabsState.activeId]);
   const mode = useAppStore((state) => state.mode);
   const researchPaneOpen = useAppStore((state) => state.researchPaneOpen);
@@ -486,6 +590,12 @@ export function AppShell() {
     !activeTabUrl.startsWith('chrome://') &&
     !activeTabUrl.startsWith('edge://') &&
     !activeTabUrl.startsWith('app://');
+  useEffect(() => {
+    if (isDesktopLayout || !showWebContent) {
+      setToolsDrawerOpen(false);
+    }
+  }, [isDesktopLayout, showWebContent]);
+  const shouldShowInlineToolsPanel = showWebContent && isDesktopLayout;
   const handleResizeStart = useCallback(() => {
     if (!showWebContent) return;
     setIsResizingContent(true);
@@ -666,26 +776,20 @@ export function AppShell() {
   }, [activeTab?.url, mode]);
 
   useEffect(() => {
-    if (restoreDismissed) return;
-    let cancelled = false;
-    ipc.sessionState
-      .summary()
-      .then((res) => {
-        if (cancelled) return;
-        const summary = res?.summary;
-        if (summary && summary.tabCount > 0) {
-          setRestoreSummary(summary);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setRestoreSummary(null);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [restoreDismissed]);
+    if (!sessionSnapshot) {
+      setRestoreSummary(null);
+      return;
+    }
+    if (restoreSummary && restoreSummary.updatedAt === sessionSnapshot.updatedAt) {
+      return;
+    }
+    setRestoreSummary({
+      updatedAt: sessionSnapshot.updatedAt,
+      windowCount: 1,
+      tabCount: sessionSnapshot.tabCount,
+    });
+    setRestoreDismissed(false);
+  }, [sessionSnapshot, restoreSummary]);
 
   useEffect(() => {
     if (!restoreToast) return;
@@ -793,6 +897,10 @@ export function AppShell() {
         e.preventDefault();
         const state = useTabsStore.getState();
         if (state.activeId) {
+          const tab = state.tabs.find((t) => t.id === state.activeId);
+          if (tab) {
+            state.rememberClosedTab(tab);
+          }
           ipc.tabs.close({ id: state.activeId }).catch(console.error);
         }
         return;
@@ -801,11 +909,7 @@ export function AppShell() {
       // ⌘⇧T / Ctrl+Shift+T: Reopen Closed Tab
       if (modifier && e.shiftKey && !e.altKey && e.key.toLowerCase() === 't') {
         e.preventDefault();
-        ipc.tabs.reopenClosed(0).catch((err) => {
-          if (isDevEnv()) {
-            console.warn('Failed to reopen closed tab:', err);
-          }
-        });
+        void reopenMostRecentClosedTab();
         return;
       }
 
@@ -855,6 +959,29 @@ export function AppShell() {
         return;
       }
 
+      // Ctrl/Cmd + Tab to cycle through tabs
+      if (modifier && !e.altKey && e.key === 'Tab') {
+        const moved = cycleTab(e.shiftKey ? -1 : 1);
+        if (moved) {
+          e.preventDefault();
+        }
+        return;
+      }
+
+      // Ctrl/Cmd + number keys to jump to tab
+      if (modifier && !e.altKey && !e.shiftKey) {
+        const digit = Number(e.key);
+        if (!Number.isNaN(digit) && digit >= 1 && digit <= 9) {
+          e.preventDefault();
+          if (digit === 9) {
+            jumpToTabIndex(0, true);
+          } else {
+            jumpToTabIndex(digit - 1);
+          }
+          return;
+        }
+      }
+
       // Alt+← / ⌘←: Go back (handled by TopNav)
       // Alt+→ / ⌘→: Go forward (handled by TopNav)
       // Ctrl+R / ⌘R: Refresh (handled by TopNav)
@@ -880,7 +1007,7 @@ export function AppShell() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [commandPaletteOpen, permissionRequest, consentRequest, rightPanelOpen, clipperActive, memorySidebarOpen]);
+  }, [commandPaletteOpen, permissionRequest, consentRequest, rightPanelOpen, clipperActive, memorySidebarOpen, cycleTab, jumpToTabIndex]);
   
   // Sync memory sidebar state with TopNav and listen for external changes
   useEffect(() => {
@@ -921,20 +1048,14 @@ export function AppShell() {
     if (!restoreSummary || restoreStatus === 'restoring') return;
     setRestoreStatus('restoring');
     try {
-      const result = await ipc.sessionState.restore();
-      if (result?.restored) {
+      const result = await restoreSessionSnapshot();
+      if (result.restored) {
         const restoredCount = result.tabCount ?? restoreSummary.tabCount ?? 0;
         setRestoreToast({
           message: `Restored ${restoredCount} tab${restoredCount === 1 ? '' : 's'} from last session.`,
           variant: 'success',
         });
-        setRestoreSummary(null);
         setRestoreDismissed(true);
-      } else if (result?.error) {
-        setRestoreToast({
-          message: `Restore failed: ${result.error}`,
-          variant: 'error',
-        });
       } else {
         setRestoreToast({
           message: 'No saved session snapshot available to restore.',
@@ -1004,7 +1125,6 @@ export function AppShell() {
             <button
               type="button"
               onClick={() => {
-                // Open settings to Ollama section or show local AI dialog
                 const settingsButton = document.querySelector('[data-settings-button]') as HTMLElement;
                 settingsButton?.click();
               }}
@@ -1058,35 +1178,58 @@ export function AppShell() {
           )}
           {/* Tab Strip - Always visible and above overlays */}
           {!isFullscreen && (
-        <Suspense fallback={null}>
-          <ErrorBoundary componentName="TabStrip">
-            <div className="relative z-50" style={{ pointerEvents: 'auto' }}>
-              <TabStrip />
-            </div>
-          </ErrorBoundary>
-        </Suspense>
+            <>
+              <Suspense fallback={null}>
+                <ErrorBoundary componentName="TabStrip">
+                  <div className="relative z-50 w-full" style={{ pointerEvents: 'auto' }}>
+                    <TabStrip />
+                  </div>
+                </ErrorBoundary>
+              </Suspense>
+              {showWebContent && !isDesktopLayout && (
+                <div className="flex items-center justify-end gap-2 px-3 py-2 text-xs text-slate-300 sm:px-4">
+                  <button
+                    type="button"
+                    onClick={() => setToolsDrawerOpen(true)}
+                    className="inline-flex items-center gap-2 rounded-full border border-slate-700/60 bg-slate-900/70 px-3 py-1.5 font-medium text-slate-100 shadow-sm transition hover:border-slate-500/70"
+                  >
+                    <PanelsTopLeft size={14} />
+                    <span>Workspace tools</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRightPanelOpen(true)}
+                    className="inline-flex items-center gap-2 rounded-full border border-slate-700/60 bg-slate-900/70 px-3 py-1.5 font-medium text-slate-100 shadow-sm transition hover:border-slate-500/70"
+                  >
+                    <PanelRightOpen size={14} />
+                    <span>Agent console</span>
+                  </button>
+                </div>
+              )}
+            </>
           )}
 
           {/* Route/Web Content */}
           {showWebContent ? (
             <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
-              {/* Main browser viewport - fills all available space */}
-              <div className="flex-1 min-w-0 min-h-0 overflow-hidden relative flex">
+              <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
                 <TabContentSurface tab={activeTab} overlayActive={overlayActive} />
               </div>
-              {/* Resizer handle - hidden on small screens */}
-              <div
-                onMouseDown={handleResizeStart}
-                className="hidden sm:flex z-20 h-full w-[6px] cursor-col-resize items-center justify-center bg-slate-900/50 transition-colors hover:bg-slate-800 flex-shrink-0"
-              >
-                <div className="h-24 w-[2px] rounded-full bg-slate-700/80" />
-              </div>
-              {/* Right panel (optional) - hidden on small screens, uses display:none so doesn't affect layout */}
-              <div className="hidden sm:block relative min-w-[260px] w-[260px] flex-shrink-0 overflow-hidden border-l border-slate-800/60">
-                <div className="h-full min-h-0 overflow-y-auto bg-slate-950/40">
-                  <Outlet />
-                </div>
-              </div>
+              {shouldShowInlineToolsPanel && (
+                <>
+                  <div
+                    onMouseDown={handleResizeStart}
+                    className="z-20 h-full w-[6px] cursor-col-resize items-center justify-center bg-slate-900/50 transition-colors hover:bg-slate-800 flex-shrink-0"
+                  >
+                    <div className="h-24 w-[2px] rounded-full bg-slate-700/80" />
+                  </div>
+                  <div className="relative min-w-[300px] w-[320px] max-w-sm flex-shrink-0 overflow-hidden border-l border-slate-800/60 bg-slate-950/40">
+                    <div className="h-full min-h-0 overflow-y-auto">
+                      <Outlet />
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           ) : (
             <div className={`flex-1 min-h-0 min-w-0 overflow-hidden ${isFullscreen ? 'absolute inset-0' : ''}`}>
@@ -1097,18 +1240,18 @@ export function AppShell() {
           )}
         </div>
 
-        {/* Right Panel (Agent Console) - Hidden in fullscreen */}
-        {!isFullscreen && (
-        <Suspense fallback={null}>
-          <ErrorBoundary componentName="RightPanel">
-            <div className="h-full min-h-0 w-[340px] max-w-[380px] overflow-y-auto border-l border-slate-800/60">
-              <RightPanel 
-                open={rightPanelOpen}
-                onClose={() => setRightPanelOpen(false)}
-              />
-            </div>
-          </ErrorBoundary>
-        </Suspense>
+        {/* Right Panel (Agent Console) */}
+        {!isFullscreen && isDesktopLayout && rightPanelOpen && (
+          <Suspense fallback={null}>
+            <ErrorBoundary componentName="RightPanel">
+              <div className="h-full min-h-0 w-[340px] max-w-[380px] overflow-y-auto border-l border-slate-800/60">
+                <RightPanel 
+                  open={rightPanelOpen}
+                  onClose={() => setRightPanelOpen(false)}
+                />
+              </div>
+            </ErrorBoundary>
+          </Suspense>
         )}
       </div>
 

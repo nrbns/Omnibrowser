@@ -12,16 +12,16 @@ export declare const SettingsSchema: z.ZodObject<{
         showBookmarksBar: z.ZodDefault<z.ZodBoolean>;
         showStatusBar: z.ZodDefault<z.ZodBoolean>;
     }, "strip", z.ZodTypeAny, {
+        startupBehavior: "newTab" | "continueSession" | "customPages";
         language: string;
         defaultSearchEngine: "google" | "duckduckgo" | "bing" | "yahoo";
-        startupBehavior: "newTab" | "continueSession" | "customPages";
         customStartupPages: string[];
         showBookmarksBar: boolean;
         showStatusBar: boolean;
     }, {
+        startupBehavior?: "newTab" | "continueSession" | "customPages" | undefined;
         language?: string | undefined;
         defaultSearchEngine?: "google" | "duckduckgo" | "bing" | "yahoo" | undefined;
-        startupBehavior?: "newTab" | "continueSession" | "customPages" | undefined;
         customStartupPages?: string[] | undefined;
         showBookmarksBar?: boolean | undefined;
         showStatusBar?: boolean | undefined;
@@ -36,18 +36,18 @@ export declare const SettingsSchema: z.ZodObject<{
         blockAds: z.ZodDefault<z.ZodBoolean>;
         blockFingerprinting: z.ZodDefault<z.ZodBoolean>;
     }, "strip", z.ZodTypeAny, {
-        burnOnClose: boolean;
-        telemetry: "on" | "off";
         doNotTrack: boolean;
+        telemetry: "off" | "on";
+        burnOnClose: boolean;
         autoPurgeCookies: boolean;
         purgeAfterDays: number;
         blockTrackers: boolean;
         blockAds: boolean;
         blockFingerprinting: boolean;
     }, {
-        burnOnClose?: boolean | undefined;
-        telemetry?: "on" | "off" | undefined;
         doNotTrack?: boolean | undefined;
+        telemetry?: "off" | "on" | undefined;
+        burnOnClose?: boolean | undefined;
         autoPurgeCookies?: boolean | undefined;
         purgeAfterDays?: number | undefined;
         blockTrackers?: boolean | undefined;
@@ -61,15 +61,15 @@ export declare const SettingsSchema: z.ZodObject<{
         perTabProxy: z.ZodDefault<z.ZodBoolean>;
         quic: z.ZodDefault<z.ZodBoolean>;
     }, "strip", z.ZodTypeAny, {
+        proxy: string | null;
         doh: boolean;
         dohProvider: "cloudflare" | "quad9";
-        proxy: string | null;
         perTabProxy: boolean;
         quic: boolean;
     }, {
+        proxy?: string | null | undefined;
         doh?: boolean | undefined;
         dohProvider?: "cloudflare" | "quad9" | undefined;
-        proxy?: string | null | undefined;
         perTabProxy?: boolean | undefined;
         quic?: boolean | undefined;
     }>>;
@@ -101,20 +101,20 @@ export declare const SettingsSchema: z.ZodObject<{
         temperature: z.ZodDefault<z.ZodNumber>;
         enableStreaming: z.ZodDefault<z.ZodBoolean>;
     }, "strip", z.ZodTypeAny, {
-        provider: "openai" | "huggingface" | "ollama" | "local";
+        provider: "local" | "openai" | "ollama" | "huggingface";
+        temperature: number;
+        maxTokens: number;
         openaiModel: string;
         huggingfaceModel: string;
         ollamaModel: string;
-        maxTokens: number;
-        temperature: number;
         enableStreaming: boolean;
     }, {
-        provider?: "openai" | "huggingface" | "ollama" | "local" | undefined;
+        provider?: "local" | "openai" | "ollama" | "huggingface" | undefined;
+        temperature?: number | undefined;
+        maxTokens?: number | undefined;
         openaiModel?: string | undefined;
         huggingfaceModel?: string | undefined;
         ollamaModel?: string | undefined;
-        maxTokens?: number | undefined;
-        temperature?: number | undefined;
         enableStreaming?: boolean | undefined;
     }>>;
     appearance: z.ZodDefault<z.ZodObject<{
@@ -126,17 +126,17 @@ export declare const SettingsSchema: z.ZodObject<{
         animations: z.ZodDefault<z.ZodBoolean>;
     }, "strip", z.ZodTypeAny, {
         theme: "light" | "dark" | "auto";
+        fontFamily: string;
+        fontSize: "small" | "medium" | "large";
         compactMode: boolean;
         showProxyBadge: boolean;
-        fontSize: "small" | "medium" | "large";
-        fontFamily: string;
         animations: boolean;
     }, {
         theme?: "light" | "dark" | "auto" | undefined;
+        fontFamily?: string | undefined;
+        fontSize?: "small" | "medium" | "large" | undefined;
         compactMode?: boolean | undefined;
         showProxyBadge?: boolean | undefined;
-        fontSize?: "small" | "medium" | "large" | undefined;
-        fontFamily?: string | undefined;
         animations?: boolean | undefined;
     }>>;
     performance: z.ZodDefault<z.ZodObject<{
@@ -181,13 +181,39 @@ export declare const SettingsSchema: z.ZodObject<{
         behavior: z.ZodDefault<z.ZodEnum<["newTab", "continueSession", "customPages"]>>;
         customPages: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
     }, "strip", z.ZodTypeAny, {
-        customPages: string[];
         behavior: "newTab" | "continueSession" | "customPages";
+        customPages: string[];
     }, {
-        customPages?: string[] | undefined;
         behavior?: "newTab" | "continueSession" | "customPages" | undefined;
+        customPages?: string[] | undefined;
     }>>;
 }, "strip", z.ZodTypeAny, {
+    general: {
+        startupBehavior: "newTab" | "continueSession" | "customPages";
+        language: string;
+        defaultSearchEngine: "google" | "duckduckgo" | "bing" | "yahoo";
+        customStartupPages: string[];
+        showBookmarksBar: boolean;
+        showStatusBar: boolean;
+    };
+    privacy: {
+        doNotTrack: boolean;
+        telemetry: "off" | "on";
+        burnOnClose: boolean;
+        autoPurgeCookies: boolean;
+        purgeAfterDays: number;
+        blockTrackers: boolean;
+        blockAds: boolean;
+        blockFingerprinting: boolean;
+    };
+    appearance: {
+        theme: "light" | "dark" | "auto";
+        fontFamily: string;
+        fontSize: "small" | "medium" | "large";
+        compactMode: boolean;
+        showProxyBadge: boolean;
+        animations: boolean;
+    };
     performance: {
         tabSleepMins: number;
         memoryCapMB: number;
@@ -196,30 +222,14 @@ export declare const SettingsSchema: z.ZodObject<{
         enablePrefetch: boolean;
         efficiencyMode: "performance" | "balanced" | "eco";
     };
-    general: {
-        language: string;
-        defaultSearchEngine: "google" | "duckduckgo" | "bing" | "yahoo";
-        startupBehavior: "newTab" | "continueSession" | "customPages";
-        customStartupPages: string[];
-        showBookmarksBar: boolean;
-        showStatusBar: boolean;
-    };
-    privacy: {
-        burnOnClose: boolean;
-        telemetry: "on" | "off";
-        doNotTrack: boolean;
-        autoPurgeCookies: boolean;
-        purgeAfterDays: number;
-        blockTrackers: boolean;
-        blockAds: boolean;
-        blockFingerprinting: boolean;
-    };
-    network: {
-        doh: boolean;
-        dohProvider: "cloudflare" | "quad9";
-        proxy: string | null;
-        perTabProxy: boolean;
-        quic: boolean;
+    ai: {
+        provider: "local" | "openai" | "ollama" | "huggingface";
+        temperature: number;
+        maxTokens: number;
+        openaiModel: string;
+        huggingfaceModel: string;
+        ollamaModel: string;
+        enableStreaming: boolean;
     };
     downloads: {
         requireConsent: boolean;
@@ -228,22 +238,12 @@ export declare const SettingsSchema: z.ZodObject<{
         autoOpen: boolean;
         showNotifications: boolean;
     };
-    ai: {
-        provider: "openai" | "huggingface" | "ollama" | "local";
-        openaiModel: string;
-        huggingfaceModel: string;
-        ollamaModel: string;
-        maxTokens: number;
-        temperature: number;
-        enableStreaming: boolean;
-    };
-    appearance: {
-        theme: "light" | "dark" | "auto";
-        compactMode: boolean;
-        showProxyBadge: boolean;
-        fontSize: "small" | "medium" | "large";
-        fontFamily: string;
-        animations: boolean;
+    network: {
+        proxy: string | null;
+        doh: boolean;
+        dohProvider: "cloudflare" | "quad9";
+        perTabProxy: boolean;
+        quic: boolean;
     };
     diagnostics: {
         telemetryOptIn: boolean;
@@ -252,10 +252,36 @@ export declare const SettingsSchema: z.ZodObject<{
         analyticsOptIn: boolean;
     };
     startup: {
-        customPages: string[];
         behavior: "newTab" | "continueSession" | "customPages";
+        customPages: string[];
     };
 }, {
+    general?: {
+        startupBehavior?: "newTab" | "continueSession" | "customPages" | undefined;
+        language?: string | undefined;
+        defaultSearchEngine?: "google" | "duckduckgo" | "bing" | "yahoo" | undefined;
+        customStartupPages?: string[] | undefined;
+        showBookmarksBar?: boolean | undefined;
+        showStatusBar?: boolean | undefined;
+    } | undefined;
+    privacy?: {
+        doNotTrack?: boolean | undefined;
+        telemetry?: "off" | "on" | undefined;
+        burnOnClose?: boolean | undefined;
+        autoPurgeCookies?: boolean | undefined;
+        purgeAfterDays?: number | undefined;
+        blockTrackers?: boolean | undefined;
+        blockAds?: boolean | undefined;
+        blockFingerprinting?: boolean | undefined;
+    } | undefined;
+    appearance?: {
+        theme?: "light" | "dark" | "auto" | undefined;
+        fontFamily?: string | undefined;
+        fontSize?: "small" | "medium" | "large" | undefined;
+        compactMode?: boolean | undefined;
+        showProxyBadge?: boolean | undefined;
+        animations?: boolean | undefined;
+    } | undefined;
     performance?: {
         tabSleepMins?: number | undefined;
         memoryCapMB?: number | undefined;
@@ -264,30 +290,14 @@ export declare const SettingsSchema: z.ZodObject<{
         enablePrefetch?: boolean | undefined;
         efficiencyMode?: "performance" | "balanced" | "eco" | undefined;
     } | undefined;
-    general?: {
-        language?: string | undefined;
-        defaultSearchEngine?: "google" | "duckduckgo" | "bing" | "yahoo" | undefined;
-        startupBehavior?: "newTab" | "continueSession" | "customPages" | undefined;
-        customStartupPages?: string[] | undefined;
-        showBookmarksBar?: boolean | undefined;
-        showStatusBar?: boolean | undefined;
-    } | undefined;
-    privacy?: {
-        burnOnClose?: boolean | undefined;
-        telemetry?: "on" | "off" | undefined;
-        doNotTrack?: boolean | undefined;
-        autoPurgeCookies?: boolean | undefined;
-        purgeAfterDays?: number | undefined;
-        blockTrackers?: boolean | undefined;
-        blockAds?: boolean | undefined;
-        blockFingerprinting?: boolean | undefined;
-    } | undefined;
-    network?: {
-        doh?: boolean | undefined;
-        dohProvider?: "cloudflare" | "quad9" | undefined;
-        proxy?: string | null | undefined;
-        perTabProxy?: boolean | undefined;
-        quic?: boolean | undefined;
+    ai?: {
+        provider?: "local" | "openai" | "ollama" | "huggingface" | undefined;
+        temperature?: number | undefined;
+        maxTokens?: number | undefined;
+        openaiModel?: string | undefined;
+        huggingfaceModel?: string | undefined;
+        ollamaModel?: string | undefined;
+        enableStreaming?: boolean | undefined;
     } | undefined;
     downloads?: {
         requireConsent?: boolean | undefined;
@@ -296,22 +306,12 @@ export declare const SettingsSchema: z.ZodObject<{
         autoOpen?: boolean | undefined;
         showNotifications?: boolean | undefined;
     } | undefined;
-    ai?: {
-        provider?: "openai" | "huggingface" | "ollama" | "local" | undefined;
-        openaiModel?: string | undefined;
-        huggingfaceModel?: string | undefined;
-        ollamaModel?: string | undefined;
-        maxTokens?: number | undefined;
-        temperature?: number | undefined;
-        enableStreaming?: boolean | undefined;
-    } | undefined;
-    appearance?: {
-        theme?: "light" | "dark" | "auto" | undefined;
-        compactMode?: boolean | undefined;
-        showProxyBadge?: boolean | undefined;
-        fontSize?: "small" | "medium" | "large" | undefined;
-        fontFamily?: string | undefined;
-        animations?: boolean | undefined;
+    network?: {
+        proxy?: string | null | undefined;
+        doh?: boolean | undefined;
+        dohProvider?: "cloudflare" | "quad9" | undefined;
+        perTabProxy?: boolean | undefined;
+        quic?: boolean | undefined;
     } | undefined;
     diagnostics?: {
         telemetryOptIn?: boolean | undefined;
@@ -320,8 +320,8 @@ export declare const SettingsSchema: z.ZodObject<{
         analyticsOptIn?: boolean | undefined;
     } | undefined;
     startup?: {
-        customPages?: string[] | undefined;
         behavior?: "newTab" | "continueSession" | "customPages" | undefined;
+        customPages?: string[] | undefined;
     } | undefined;
 }>;
 export type Settings = z.infer<typeof SettingsSchema>;

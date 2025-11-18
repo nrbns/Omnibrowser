@@ -46,7 +46,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       
       // Update the tab with the appMode
       if (newTab && typeof newTab === 'object' && 'id' in newTab) {
-        tabsStore.updateTab(newTab.id, { appMode: mode });
+        tabsStore.updateTab((newTab as { id: string }).id, { appMode: mode });
       } else if (typeof newTab === 'string') {
         // Fallback: if it returns just an ID string
         tabsStore.updateTab(newTab, { appMode: mode });
@@ -55,7 +55,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       // Switch to the first tab of this mode
       if (modeTabs[0]?.id) {
         tabsStore.setActive(modeTabs[0].id);
-        await (await import('../lib/ipc-typed')).ipc.tabs.activate(modeTabs[0].id);
+        await (await import('../lib/ipc-typed')).ipc.tabs.activate({ id: modeTabs[0].id });
       }
     }
     

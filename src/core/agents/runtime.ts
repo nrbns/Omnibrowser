@@ -1,6 +1,8 @@
 import { nanoid } from '../utils/nanoid';
 import { dispatch } from '../redix/runtime';
 import { agentTools } from './tools';
+import { MemoryStoreInstance } from '../supermemory/store';
+import { useAgentMemoryStore } from '../../state/agentMemoryStore';
 import type {
   AgentConfig,
   AgentExecutionInput,
@@ -59,11 +61,14 @@ class AgentRuntime {
     };
     this.updateRun(runRecord);
 
+    const recentRuns = useAgentMemoryStore.getState().getRecentForAgent(agent.id, 5);
+
     const env: AgentEnvironment = {
       tools: this.buildToolset(agent),
       dispatchEvent: (type, payload) => dispatch({ type, payload, source: `agent:${agent.id}` }),
       capabilities: agent.capabilities,
       signal: request.signal,
+      recentRuns,
     };
 
     try {
@@ -83,6 +88,15 @@ class AgentRuntime {
       runRecord.result = result;
       this.updateRun(runRecord);
 
+      await this.persistAgentMemory({
+        agentId: agent.id,
+        runId,
+        prompt: request.prompt,
+        success: true,
+        output: result.output,
+        durationMs: (runRecord.finishedAt ?? 0) - (runRecord.startedAt ?? 0),
+      });
+
       dispatch({
         type: 'redix:agent:finished',
         payload: { runId, agentId: agent.id, success: result.success },
@@ -93,8 +107,18 @@ class AgentRuntime {
     } catch (error) {
       runRecord.status = 'failed';
       runRecord.finishedAt = Date.now();
-      runRecord.result = { success: false, error: error instanceof Error ? error.message : String(error) };
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      runRecord.result = { success: false, error: errorMessage };
       this.updateRun(runRecord);
+
+      await this.persistAgentMemory({
+        agentId: agent.id,
+        runId,
+        prompt: request.prompt,
+        success: false,
+        error: errorMessage,
+        durationMs: (runRecord.finishedAt ?? 0) - (runRecord.startedAt ?? 0),
+      });
 
       dispatch({
         type: 'redix:agent:error',
@@ -448,6 +472,54 @@ Provide a concise analysis with:
         };
       },
     });
+  }
+
+  private async persistAgentMemory(params: {
+    agentId: string;
+    runId: string;
+    prompt: string;
+    success: boolean;
+    output?: string;
+    error?: string;
+    durationMs?: number;
+  }) {
+    try {
+      useAgentMemoryStore
+        .getState()
+        .addEntry({
+          agentId: params.agentId,
+          runId: params.runId,
+          prompt: params.prompt,
+          response: params.output,
+          error: params.error,
+          success: params.success,
+          tokens: undefined,
+        });
+    } catch (storeError) {
+      console.warn('[AgentRuntime] Failed to update agent memory store:', storeError);
+    }
+
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      await MemoryStoreInstance.saveEvent({
+        type: 'agent',
+        value: params.output || params.error || params.prompt,
+        metadata: {
+          action: params.prompt,
+          runId: params.runId,
+          skill: params.agentId,
+          result: params.output,
+          error: params.error,
+          duration: params.durationMs,
+          success: params.success,
+        },
+      });
+    } catch (error) {
+      console.warn('[AgentRuntime] Failed to persist run in SuperMemory:', error);
+    }
   }
 
   private createToolContext(overrides?: Partial<AgentToolContext>): AgentToolContext {

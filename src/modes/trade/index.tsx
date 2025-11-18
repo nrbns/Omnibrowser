@@ -6,6 +6,8 @@ import AISignalPanel, { AISignal } from '../../components/trade/AISignalPanel';
 import SafeExitControls, { SafeExitConfig } from '../../components/trade/SafeExitControls';
 import OrderBlotter from '../../components/trade/OrderBlotter';
 import { ipc } from '../../lib/ipc-typed';
+import { aiEngine, type AITaskResult } from '../../core/ai';
+import { semanticSearchMemories } from '../../core/supermemory/search';
 
 export default function TradePanel() {
   const [, setBalance] = useState({ cash: 100000, buyingPower: 200000, portfolioValue: 100000 });
@@ -111,64 +113,156 @@ export default function TradePanel() {
     return () => clearInterval(interval);
   }, [symbol]);
 
-  // Mode-aware Redix: Live stock integration with privacy
+  // AI-powered trading signals using unified AI engine
   useEffect(() => {
     if (!symbol) return;
-
-    const redixUrl = import.meta.env.VITE_REDIX_CORE_URL || 'http://localhost:8001';
     
     // Periodically fetch AI insights for current symbol
     const fetchAISignal = async () => {
       try {
-        const response = await fetch(`${redixUrl}/workflow`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query: `Analyze ${symbol} stock: current price ${currentPrice}, provide trading signal`,
-            workflowType: 'research',
-            tools: ['web_search'],
-            options: { maxIterations: 2, maxTokens: 500 },
-          }),
-        });
+        setIsGeneratingSignal(true);
+        
+        // Build trading context
+        const context: any = {
+          mode: 'trade',
+          symbol,
+          currentPrice,
+          timeframe,
+          riskMetrics: {
+            totalExposure: riskMetrics.totalExposure,
+            portfolioValue: riskMetrics.portfolioValue,
+            riskScore: riskMetrics.riskScore,
+          },
+          openPositions: openPositions.length,
+        };
 
-        if (response.ok) {
-          const data = await response.json();
-          // Update AI signal with Redix insights
-          if (data.result) {
-            setAiSignal({
-              id: `redix-signal-${Date.now()}`,
-              symbol,
-              action: 'hold', // Would parse from Redix response
-              confidence: 0.75,
-              entryPrice: currentPrice,
-              stopLoss: currentPrice * 0.98,
-              takeProfit: currentPrice * 1.05,
-              positionSize: 100,
-              rationale: data.result.substring(0, 200),
-              contributingFactors: [
-                {
-                  factor: 'redix_ai_analysis',
-                  weight: 0.5,
-                  value: 0.75,
-                  impact: 'positive' as const,
-                  description: 'Redix AI analysis',
-                },
-              ],
-              modelVersion: 'redix-v1',
-              generatedAt: new Date().toISOString(),
-              expiresAt: new Date(Date.now() + 3600000).toISOString(),
-              riskMetrics: {
-                maxLoss: 200,
-                maxGain: 500,
-                riskRewardRatio: 2.5,
-                winProbability: 0.65,
-                portfolioRiskPercent: 2.0,
-              },
-            });
-          }
+        // Fetch relevant trading memories
+        let relevantMemories: any[] = [];
+        try {
+          const memoryMatches = await semanticSearchMemories(
+            `${symbol} trading analysis ${currentPrice}`,
+            { limit: 3, minSimilarity: 0.6 }
+          );
+          relevantMemories = memoryMatches.map((m) => ({
+            value: m.event.value,
+            metadata: m.event.metadata,
+            similarity: m.similarity,
+          }));
+        } catch (error) {
+          console.warn('[Trade] Failed to fetch memory context:', error);
         }
+
+        if (relevantMemories.length > 0) {
+          context.memories = relevantMemories;
+        }
+
+        // Use unified AI engine for trading analysis
+        const tradingPrompt = `Analyze ${symbol} stock trading opportunity. Current price: $${currentPrice.toFixed(2)}. 
+Provide a trading signal (buy/sell/hold) with:
+1. Entry price recommendation
+2. Stop loss level (risk management)
+3. Take profit target
+4. Position size suggestion
+5. Confidence level (0-100)
+6. Rationale based on technical and fundamental analysis
+7. Risk/reward ratio
+8. Key contributing factors
+
+Format the response as structured trading analysis.`;
+
+        let streamedText = '';
+        let streamedResult: AITaskResult | null = null;
+        
+        const aiResult = await aiEngine.runTask(
+          {
+            kind: 'agent',
+            prompt: tradingPrompt,
+            context,
+            mode: 'trade',
+            metadata: {
+              symbol,
+              currentPrice,
+              timeframe,
+            },
+            llm: {
+              temperature: 0.3, // Lower temperature for more consistent trading signals
+              maxTokens: 800,
+            },
+          },
+          (event) => {
+            if (event.type === 'token' && typeof event.data === 'string') {
+              streamedText += event.data;
+            } else if (event.type === 'done' && typeof event.data !== 'string') {
+              streamedResult = event.data as AITaskResult;
+            }
+          },
+        );
+
+        const finalResult = streamedResult ?? aiResult;
+        const analysis = streamedText || finalResult?.text || '';
+
+        // Parse AI response to extract trading signal
+        // Try to extract structured data from the response
+        const actionMatch = analysis.match(/(?:signal|action|recommendation):\s*(buy|sell|hold)/i);
+        const confidenceMatch = analysis.match(/(?:confidence|certainty):\s*(\d+)/i);
+        const stopLossMatch = analysis.match(/(?:stop\s*loss|stop):\s*\$?([\d.]+)/i);
+        const takeProfitMatch = analysis.match(/(?:take\s*profit|target):\s*\$?([\d.]+)/i);
+        const riskRewardMatch = analysis.match(/(?:risk[-\s]?reward|r:r):\s*([\d.]+)/i);
+
+        const action = actionMatch ? (actionMatch[1].toLowerCase() as 'buy' | 'sell' | 'hold') : 'hold';
+        const confidence = confidenceMatch ? parseInt(confidenceMatch[1], 10) / 100 : 0.7;
+        const stopLoss = stopLossMatch ? parseFloat(stopLossMatch[1]) : currentPrice * 0.98;
+        const takeProfit = takeProfitMatch ? parseFloat(takeProfitMatch[1]) : currentPrice * 1.05;
+        const riskReward = riskRewardMatch ? parseFloat(riskRewardMatch[1]) : 2.5;
+
+        // Calculate position size based on risk metrics
+        const portfolioRisk = riskMetrics.portfolioValue * 0.02; // 2% portfolio risk
+        const riskPerShare = Math.abs(currentPrice - stopLoss);
+        const positionSize = riskPerShare > 0 ? Math.floor(portfolioRisk / riskPerShare) : 100;
+
+        setAiSignal({
+          id: `ai-signal-${Date.now()}`,
+          symbol,
+          action,
+          confidence: Math.round(confidence * 100),
+          entryPrice: currentPrice,
+          stopLoss,
+          takeProfit,
+          positionSize,
+          rationale: analysis.substring(0, 300),
+          contributingFactors: [
+            {
+              factor: 'ai_analysis',
+              weight: 0.6,
+              value: confidence,
+              impact: action === 'buy' ? 'positive' : action === 'sell' ? 'negative' : 'neutral',
+              description: `AI analysis using ${finalResult?.provider || 'unknown'} (${finalResult?.model || 'unknown'})`,
+            },
+            ...(finalResult?.citations?.length ? [{
+              factor: 'source_count',
+              weight: 0.2,
+              value: finalResult.citations.length / 10,
+              impact: 'positive' as const,
+              description: `${finalResult.citations.length} data sources analyzed`,
+            }] : []),
+          ],
+          modelVersion: finalResult?.model || 'unknown',
+          generatedAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 3600000).toISOString(), // 1 hour expiry
+          riskMetrics: {
+            maxLoss: Math.abs(currentPrice - stopLoss) * positionSize,
+            maxGain: Math.abs(takeProfit - currentPrice) * positionSize,
+            riskRewardRatio: riskReward,
+            winProbability: confidence,
+            portfolioRiskPercent: (Math.abs(currentPrice - stopLoss) * positionSize / riskMetrics.portfolioValue) * 100,
+          },
+        });
       } catch (error) {
-        console.debug('[Trade] Redix AI signal failed:', error);
+        console.error('[Trade] AI signal generation failed:', error);
+        // Fallback to mock signal if AI fails
+        generateAISignal(symbol);
+      } finally {
+        setIsGeneratingSignal(false);
       }
     };
 
@@ -176,7 +270,7 @@ export default function TradePanel() {
     fetchAISignal();
     const interval = setInterval(fetchAISignal, 30000);
     return () => clearInterval(interval);
-  }, [symbol, currentPrice]);
+  }, [symbol, currentPrice, timeframe, riskMetrics, openPositions]);
 
   const loadBalance = async () => {
     try {
@@ -406,12 +500,99 @@ export default function TradePanel() {
     }
   };
 
+  // AI-powered position sizing helper
+  const calculatePositionSize = async (
+    entryPrice: number,
+    stopLoss: number,
+    riskAmount: number = riskMetrics.portfolioValue * 0.02, // 2% default
+  ): Promise<number> => {
+    try {
+      const riskPerShare = Math.abs(entryPrice - stopLoss);
+      if (riskPerShare <= 0) return 100; // Default if invalid
+
+      // Basic calculation
+      let positionSize = Math.floor(riskAmount / riskPerShare);
+
+      // Use AI to refine position size if available
+      try {
+        const context: any = {
+          mode: 'trade',
+          symbol,
+          entryPrice,
+          stopLoss,
+          riskAmount,
+          portfolioValue: riskMetrics.portfolioValue,
+          currentExposure: riskMetrics.totalExposure,
+        };
+
+        const sizingPrompt = `Calculate optimal position size for ${symbol}:
+- Entry price: $${entryPrice.toFixed(2)}
+- Stop loss: $${stopLoss.toFixed(2)}
+- Risk amount: $${riskAmount.toFixed(2)} (${((riskAmount / riskMetrics.portfolioValue) * 100).toFixed(2)}% of portfolio)
+- Current portfolio value: $${riskMetrics.portfolioValue.toFixed(2)}
+- Current total exposure: $${riskMetrics.totalExposure.toFixed(2)}
+
+Consider:
+1. Portfolio concentration limits (max 10% per position)
+2. Liquidity constraints
+3. Volatility-adjusted sizing
+4. Correlation with existing positions
+
+Provide the recommended position size (number of shares) and brief rationale.`;
+
+        const aiResult = await aiEngine.runTask({
+          kind: 'agent',
+          prompt: sizingPrompt,
+          context,
+          mode: 'trade',
+          metadata: { symbol, entryPrice, stopLoss },
+          llm: { temperature: 0.2, maxTokens: 300 },
+        });
+
+        // Try to extract position size from AI response
+        const sizeMatch = aiResult.text.match(/(?:position\s*size|shares|quantity):\s*(\d+)/i);
+        if (sizeMatch) {
+          const aiSize = parseInt(sizeMatch[1], 10);
+          // Use AI suggestion if it's reasonable (within 50-200% of calculated)
+          if (aiSize > 0 && aiSize >= positionSize * 0.5 && aiSize <= positionSize * 2) {
+            positionSize = aiSize;
+          }
+        }
+      } catch (aiError) {
+        console.debug('[Trade] AI position sizing failed, using calculated value:', aiError);
+      }
+
+      // Apply portfolio concentration limit (max 10% per position)
+      const maxPositionValue = riskMetrics.portfolioValue * 0.1;
+      const maxSharesByValue = Math.floor(maxPositionValue / entryPrice);
+      positionSize = Math.min(positionSize, maxSharesByValue);
+
+      return Math.max(1, positionSize); // At least 1 share
+    } catch (error) {
+      console.error('[Trade] Position sizing calculation failed:', error);
+      return 100; // Fallback
+    }
+  };
+
   // Handle AI signal application
-  const handleApplySignal = (signal: AISignal) => {
+  const handleApplySignal = async (signal: AISignal) => {
     // Auto-fill order entry with signal data
     setCurrentPrice(signal.entryPrice);
-    // Trigger order entry update (would need state management for this)
-    console.log('Applying signal:', signal);
+    
+    // Calculate optimal position size
+    const optimalSize = await calculatePositionSize(
+      signal.entryPrice,
+      signal.stopLoss ?? signal.entryPrice * 0.98, // Default 2% stop loss if not provided
+      riskMetrics.portfolioValue * 0.02, // 2% risk
+    );
+    
+    // Update signal with calculated position size
+    setAiSignal({
+      ...signal,
+      positionSize: optimalSize,
+    });
+    
+    console.log('Applying signal:', signal, 'with position size:', optimalSize);
   };
 
   // Handle safe exit actions

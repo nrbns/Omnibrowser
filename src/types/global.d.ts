@@ -67,6 +67,18 @@ declare global {
     obHistory?: any;
     downloads?: any;
     research?: any;
+    regenExtensions?: {
+      register: (extension: {
+        id: string;
+        name?: string;
+        version?: string;
+        activate?: () => void | Promise<void>;
+        deactivate?: () => void | Promise<void>;
+        provide?: Record<string, unknown>;
+      }) => void;
+      list?: () => Array<{ id: string; name?: string; version?: string }>;
+    };
+    __OB_API_BASE__?: string;
   }
 }
 
