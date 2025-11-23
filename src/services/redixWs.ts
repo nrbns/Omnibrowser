@@ -55,7 +55,19 @@ export class RedixWS {
     this.isConnecting = true;
 
     try {
+      // Suppress WebSocket connection errors in console by catching them early
       this.ws = new WebSocket(this.url);
+
+      // Immediately suppress error events to prevent console spam
+      this.ws.addEventListener(
+        'error',
+        event => {
+          event.stopPropagation();
+          event.preventDefault();
+          // Don't log - Redix is optional
+        },
+        { once: true }
+      );
 
       this.ws.onopen = () => {
         this.backoff = 1000;

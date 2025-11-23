@@ -854,10 +854,16 @@ export const ipc = {
     async status() {
       try {
         await waitForIPC(3000);
-        return await ipcCall('vpn:status', {});
+        // Add timeout to prevent hanging
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('VPN status timeout')), 4000);
+        });
+        return await Promise.race([ipcCall('vpn:status', {}), timeoutPromise]);
       } catch (error) {
-        if (IS_DEV) {
-          console.warn('[IPC] vpn.status falling back to stub', error);
+        // Silently fall back to stub - VPN status is non-critical
+        // Only log in dev mode if it's not a timeout
+        if (IS_DEV && !(error instanceof Error && error.message.includes('timeout'))) {
+          console.debug('[IPC] vpn.status falling back to stub', error);
         }
         return {
           connected: false,
