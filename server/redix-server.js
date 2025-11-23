@@ -13,7 +13,7 @@ process.on('uncaughtException', err => {
   }
 });
 
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (reason, _promise) => {
   console.error('[FATAL] Unhandled rejection in Redix server:', reason);
   // In dev, log only - don't exit
   if (process.env.NODE_ENV === 'production') {
