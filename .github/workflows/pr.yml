@@ -16,16 +16,16 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-      
+
       - name: Install dependencies
-        run: npm ci
-      
+        run: npm ci --legacy-peer-deps
+
       - name: Type check
         run: npm run build:types
 
@@ -35,16 +35,16 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-      
+
       - name: Install dependencies
-        run: npm ci
-      
+        run: npm ci --legacy-peer-deps
+
       - name: Run ESLint
         run: npm run lint
 
@@ -54,24 +54,24 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-      
+
       - name: Install dependencies
-        run: npm ci
-      
+        run: npm ci --legacy-peer-deps
+
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
-      
+
       - name: Run smoke tests
         run: npx playwright test tests/e2e/electron-smoke.spec.ts tests/e2e/core-flows.spec.ts --config=playwright.config.ts
         env:
           PLAYWRIGHT: '1'
-      
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -94,4 +94,3 @@ jobs:
             echo "One or more checks failed"
             exit 1
           fi
-
