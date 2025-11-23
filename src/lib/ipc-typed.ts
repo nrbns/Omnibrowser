@@ -19,6 +19,7 @@ import type {
 import type { ConsentAction, ConsentRecord } from '../types/consent';
 import { useTabsStore } from '../state/tabsStore';
 import { useContainerStore } from '../state/containerStore';
+import apiClient from './api-client';
 
 const IS_DEV = isDevEnv();
 
@@ -397,6 +398,22 @@ export async function ipcCall<TRequest, TResponse = unknown>(
   const isReady = await waitForIPC(8000);
 
   // Check if IPC bridge is actually available
+  // Migration: Use HTTP API client if not in Electron runtime
+  if (!isElectron) {
+    // Map IPC channels to HTTP API calls
+    try {
+      return await mapIpcToHttp<TRequest, TResponse>(fullChannel, request);
+    } catch (error) {
+      // Fallback to default fallback if HTTP call fails
+      const fallback = getFallback<TResponse>(channel);
+      if (fallback !== undefined) {
+        noteFallback(channel, 'HTTP API unavailable, using fallback');
+        return fallback;
+      }
+      throw error;
+    }
+  }
+
   // Try to use window.ipc first, but also check if we can access ipcRenderer directly
   let ipcBridge = window.ipc;
 
@@ -1481,6 +1498,40 @@ export const ipc = {
       ipcCall<typeof payload, { success: boolean }>('session:saveSetting', payload),
     getSetting: (payload: { key: string }) =>
       ipcCall<{ key: string }, { value: unknown }>('session:getSetting', payload),
+    checkRestore: () =>
+      ipcCall<
+        unknown,
+        {
+          available: boolean;
+          snapshot?: {
+            tabCount: number;
+            mode: string;
+            timestamp: number;
+            activeTabId: string | null;
+          };
+        }
+      >('session:checkRestore', {}),
+    getSnapshot: () =>
+      ipcCall<
+        unknown,
+        {
+          version: number;
+          tabs: Array<{
+            id: string;
+            url: string;
+            title: string;
+            active: boolean;
+            mode?: string;
+            containerId?: string;
+          }>;
+          mode: string;
+          activeTabId: string | null;
+          chromeOffsets?: { top: number; bottom: number; left: number; right: number };
+          rightDockPx?: number;
+          timestamp: number;
+        } | null
+      >('session:getSnapshot', {}),
+    dismissRestore: () => ipcCall<unknown, { success: boolean }>('session:dismissRestore', {}),
   },
   researchStream: {
     start: async (question: string, mode?: 'default' | 'threat' | 'trade') => {
@@ -2477,42 +2528,6 @@ export const ipc = {
           };
         }
       >('system:getStatus', {}),
-  },
-  session: {
-    checkRestore: () =>
-      ipcCall<
-        unknown,
-        {
-          available: boolean;
-          snapshot?: {
-            tabCount: number;
-            mode: string;
-            timestamp: number;
-            activeTabId: string | null;
-          };
-        }
-      >('session:checkRestore', {}),
-    getSnapshot: () =>
-      ipcCall<
-        unknown,
-        {
-          version: number;
-          tabs: Array<{
-            id: string;
-            url: string;
-            title: string;
-            active: boolean;
-            mode?: string;
-            containerId?: string;
-          }>;
-          mode: string;
-          activeTabId: string | null;
-          chromeOffsets?: { top: number; bottom: number; left: number; right: number };
-          rightDockPx?: number;
-          timestamp: number;
-        } | null
-      >('session:getSnapshot', {}),
-    dismissRestore: () => ipcCall<unknown, { success: boolean }>('session:dismissRestore', {}),
   },
   gpu: {
     getStatus: () => ipcCall<unknown, { enabled: boolean }>('gpu:getStatus', {}),

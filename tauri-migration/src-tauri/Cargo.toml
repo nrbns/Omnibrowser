@@ -1,0 +1,37 @@
+[package]
+name = "omnibrowser-tauri"
+version = "0.1.0"
+description = "OmniBrowser - Tauri Desktop App"
+authors = ["OmniBrowser Team"]
+license = "MIT"
+repository = ""
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[build-dependencies]
+tauri-build = { version = "2.5.2", features = [] }
+
+[dependencies]
+tauri = { version = "2.5.2", features = [ 
+  "shell-open",
+  "dialog-open", 
+  "dialog-save",
+  "fs-read-file",
+  "fs-write-file", 
+  "fs-read-dir",
+  "fs-create-dir",
+  "fs-remove-dir",
+  "fs-remove-file",
+  "fs-rename-file",
+  "fs-exists",
+  "clipboard-read",
+  "clipboard-write"
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+# This feature is used for production builds or when `devPath` points to the filesystem
+custom-protocol = ["tauri/custom-protocol"]
+

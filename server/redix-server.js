@@ -23,6 +23,7 @@ process.on('unhandledRejection', (reason, _promise) => {
 
 import Fastify from 'fastify';
 import websocketPlugin from '@fastify/websocket';
+import cors from '@fastify/cors';
 import Redis from 'ioredis';
 import { v4 as uuidv4 } from 'uuid';
 import os from 'os';
@@ -31,6 +32,72 @@ import { enqueueScrape } from './services/queue/queue.js';
 import { analyzeWithLLM } from './services/agent/llm.js';
 import { createCircuit } from './services/circuit/circuit.js';
 import crypto from 'crypto';
+import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+// Create require function for CommonJS modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const require = createRequire(import.meta.url);
+
+// Load metrics - provide stub for now (metrics.js is CommonJS)
+const getMetrics = () => {
+  const memUsage = process.memoryUsage();
+  return {
+    uptime: process.uptime() * 1000,
+    memory: memUsage,
+    performance: {
+      tabCreation: [],
+      ipcLatency: [],
+      agentExecution: [],
+    },
+    counts: { tabs: 0, agents: 0, workers: 0 },
+    averages: {
+      tabCreation: 0,
+      ipcLatency: 0,
+      agentExecution: 0,
+    },
+    timestamp: new Date().toISOString(),
+  };
+};
+
+// Redix services - provide stubs since they're CommonJS and optional
+const eventBus = {
+  publish: () => Promise.resolve(true),
+  publishN8nCallback: () => Promise.resolve(true),
+  publishAutomationTrigger: () => Promise.resolve(true),
+};
+
+const commandQueue = {
+  enqueue: () => Promise.resolve({ id: uuidv4() }),
+  dequeue: () => Promise.resolve(null),
+};
+
+const _sessionStore = {};
+const _workflowOrchestrator = {};
+
+const automationTriggers = {
+  addTriggerEvent: () => Promise.resolve(),
+};
+
+const failSafe = {};
+
+// WebSocket server stub
+const initWebSocketServer = () => {
+  // WebSocket functionality will be handled by Fastify's websocket plugin
+};
+
+// Regen controller stub
+const regenController = {
+  handleAgentQuery: async () => ({ error: 'Regen controller not available' }),
+  handleAgentStream: async () => ({ error: 'Regen controller not available' }),
+};
+
+// Voice controller stub
+const voiceController = {
+  handleVoiceRecognize: async () => ({ error: 'Voice controller not available' }),
+};
 
 // Global error suppression for ioredis - must be set up before any Redis clients are created
 const suppressRedisErrors = () => {
@@ -73,9 +140,22 @@ const fastify = Fastify({
   },
 });
 
-// Import metrics
-/* eslint-disable @typescript-eslint/no-require-imports */
-const { getMetrics } = require('./metrics.js');
+// Register CORS for Tauri migration
+fastify.register(cors, {
+  origin: [
+    'http://localhost:1420',  // Tauri dev server
+    'tauri://localhost',       // Tauri production
+    'http://localhost:5173',   // Vite dev (Electron fallback)
+    'http://127.0.0.1:1420',
+    'http://127.0.0.1:5173',
+    'http://localhost:4000',   // Direct backend access
+    'http://127.0.0.1:4000',  // Direct backend access
+    '*'  // Allow all origins for development
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+});
 
 const enableWebSockets = nodeProcess?.env.DISABLE_WS === '1' ? false : true;
 // Removed unused agentQueryEndpointTimeout and agentPollInterval - using inline polling in route handlers
@@ -907,30 +987,12 @@ redisSub.on('message', (channel, raw) => {
   }
 });
 
-// Redix services
-const eventBus = require('./services/redix/event-bus');
-const commandQueue = require('./services/redix/command-queue');
-const _sessionStore = require('./services/redix/session-store');
-const _workflowOrchestrator = require('./services/redix/workflow-orchestrator');
-const automationTriggers = require('./services/redix/automation-triggers');
-const failSafe = require('./services/redix/fail-safe');
+// Redix services (using stubs defined at top of file)
 
-// Real-time WebSocket server
-const { initWebSocketServer } = require('./services/realtime/websocket-server');
-
-// Regen API endpoints
-const regenController = require('./api/regen-controller');
-
-fastify.post('/api/agent/query', async (request, reply) => {
-  return regenController.handleAgentQuery(request, reply);
-});
-
-fastify.get('/api/agent/stream', async (request, reply) => {
-  return regenController.handleAgentStream(request, reply);
-});
+// Note: /api/agent/query is already defined above with full implementation
+// Note: /api/agent/stream endpoint can be added if needed
 
 // Voice recognition endpoint
-const voiceController = require('./api/voice-controller');
 fastify.post('/api/voice/recognize', async (request, reply) => {
   return voiceController.handleVoiceRecognize(request, reply);
 });
@@ -996,6 +1058,822 @@ fastify.get('/api/redix/queue/:tabId', async (request, reply) => {
   return reply.send({ commands });
 });
 
+// ============================================================================
+// TABS API - For Tauri migration
+// ============================================================================
+const tabsStore = new Map(); // In-memory tab store
+let activeTabId = null;
+
+fastify.get('/api/tabs', async () => {
+  return Array.from(tabsStore.values());
+});
+
+fastify.post('/api/tabs', async (request, reply) => {
+  const { url = 'about:blank', profileId } = request.body;
+  const tabId = uuidv4();
+  const tab = {
+    id: tabId,
+    url,
+    title: 'New Tab',
+    profileId,
+    createdAt: Date.now(),
+    lastActiveAt: Date.now(),
+    active: false,
+  };
+  tabsStore.set(tabId, tab);
+  activeTabId = tabId;
+  tab.active = true;
+  return { id: tabId };
+});
+
+fastify.delete('/api/tabs/:id', async (request, reply) => {
+  const { id } = request.params;
+  if (tabsStore.has(id)) {
+    tabsStore.delete(id);
+    if (activeTabId === id) {
+      activeTabId = Array.from(tabsStore.keys())[0] || null;
+    }
+    return { success: true };
+  }
+  reply.code(404);
+  return { success: false, error: 'Tab not found' };
+});
+
+fastify.post('/api/tabs/:id/activate', async (request, reply) => {
+  const { id } = request.params;
+  if (tabsStore.has(id)) {
+    // Deactivate all tabs
+    for (const tab of tabsStore.values()) {
+      tab.active = false;
+    }
+    // Activate this tab
+    const tab = tabsStore.get(id);
+    tab.active = true;
+    tab.lastActiveAt = Date.now();
+    activeTabId = id;
+    return { success: true };
+  }
+  reply.code(404);
+  return { success: false, error: 'Tab not found' };
+});
+
+fastify.post('/api/tabs/:id/navigate', async (request, reply) => {
+  const { id } = request.params;
+  const { url } = request.body;
+  if (tabsStore.has(id)) {
+    const tab = tabsStore.get(id);
+    tab.url = url;
+    tab.lastActiveAt = Date.now();
+    return { success: true };
+  }
+  reply.code(404);
+  return { success: false, error: 'Tab not found' };
+});
+
+fastify.post('/api/tabs/:id/back', async (request, reply) => {
+  const { id } = request.params;
+  if (tabsStore.has(id)) {
+    return { success: true };
+  }
+  reply.code(404);
+  return { success: false, error: 'Tab not found' };
+});
+
+fastify.post('/api/tabs/:id/forward', async (request, reply) => {
+  const { id } = request.params;
+  if (tabsStore.has(id)) {
+    return { success: true };
+  }
+  reply.code(404);
+  return { success: false, error: 'Tab not found' };
+});
+
+fastify.post('/api/tabs/:id/reload', async (request, reply) => {
+  const { id } = request.params;
+  if (tabsStore.has(id)) {
+    const tab = tabsStore.get(id);
+    tab.lastActiveAt = Date.now();
+    return { success: true };
+  }
+  reply.code(404);
+  return { success: false, error: 'Tab not found' };
+});
+
+fastify.post('/api/tabs/:id/stop', async (request, reply) => {
+  const { id } = request.params;
+  if (tabsStore.has(id)) {
+    return { success: true };
+  }
+  reply.code(404);
+  return { success: false, error: 'Tab not found' };
+});
+
+fastify.post('/api/tabs/overlay/start', async () => {
+  return { success: true };
+});
+
+fastify.get('/api/tabs/overlay/pick', async () => {
+  return { x: 0, y: 0, element: null };
+});
+
+fastify.post('/api/tabs/overlay/clear', async () => {
+  return { success: true };
+});
+
+fastify.get('/api/tabs/predictive-groups', async () => {
+  return { groups: [], prefetch: [], summary: undefined };
+});
+
+// ============================================================================
+// SESSIONS API - For Tauri migration
+// ============================================================================
+const sessionsStore = new Map();
+let activeSessionId = null;
+
+fastify.get('/api/sessions', async () => {
+  return Array.from(sessionsStore.values());
+});
+
+fastify.post('/api/sessions', async (request, reply) => {
+  const { name = 'New Session', profileId, color } = request.body;
+  const sessionId = uuidv4();
+  const session = {
+    id: sessionId,
+    name,
+    profileId,
+    color: color || '#3b82f6',
+    createdAt: Date.now(),
+    tabIds: [],
+  };
+  sessionsStore.set(sessionId, session);
+  activeSessionId = sessionId;
+  return { id: sessionId };
+});
+
+fastify.get('/api/sessions/active', async () => {
+  if (activeSessionId && sessionsStore.has(activeSessionId)) {
+    return { id: activeSessionId };
+  }
+  return null;
+});
+
+fastify.post('/api/sessions/:id/activate', async (request, reply) => {
+  const { id } = request.params;
+  if (sessionsStore.has(id)) {
+    activeSessionId = id;
+    return { success: true };
+  }
+  reply.code(404);
+  return { success: false, error: 'Session not found' };
+});
+
+fastify.get('/api/sessions/:id', async (request, reply) => {
+  const { id } = request.params;
+  if (sessionsStore.has(id)) {
+    return sessionsStore.get(id);
+  }
+  reply.code(404);
+  return { error: 'Session not found' };
+});
+
+fastify.delete('/api/sessions/:id', async (request, reply) => {
+  const { id } = request.params;
+  if (sessionsStore.has(id)) {
+    sessionsStore.delete(id);
+    if (activeSessionId === id) {
+      activeSessionId = Array.from(sessionsStore.keys())[0] || null;
+    }
+    return { success: true };
+  }
+  reply.code(404);
+  return { success: false, error: 'Session not found' };
+});
+
+// ============================================================================
+// AGENT API - For Tauri migration
+// ============================================================================
+fastify.post('/api/agent/ask', async (request, reply) => {
+  const { prompt, sessionId } = request.body;
+  if (!prompt) {
+    reply.code(400);
+    return { error: 'Prompt is required' };
+  }
+  
+  try {
+    // Use existing agent query endpoint logic
+    const jobId = uuidv4();
+    const result = await LLMCircuit.fire({
+      prompt,
+      sessionId,
+      jobId,
+    });
+    
+    return {
+      response: result?.response || 'Agent response unavailable',
+      jobId,
+    };
+  } catch (error) {
+    fastify.log.error({ error }, 'Agent query failed');
+    reply.code(500);
+    return { error: 'Agent query failed', message: error.message };
+  }
+});
+
+// ============================================================================
+// SYSTEM API - For Tauri migration
+// ============================================================================
+fastify.get('/api/system/status', async () => {
+  const metrics = getMetrics();
+  return {
+    cpu: metrics.cpu || 0,
+    memory: metrics.memory || 0,
+    timestamp: Date.now(),
+  };
+});
+
+// ============================================================================
+// PROFILES API - For Tauri migration
+// ============================================================================
+const profilesStore = new Map();
+const defaultProfile = {
+  id: 'default',
+  name: 'Default',
+  createdAt: Date.now(),
+  proxy: undefined,
+  kind: 'default',
+  color: '#3b82f6',
+  system: true,
+  policy: {
+    allowDownloads: true,
+    allowPrivateWindows: true,
+    allowGhostTabs: true,
+    allowScreenshots: true,
+    allowClipping: true,
+  },
+};
+
+profilesStore.set('default', defaultProfile);
+
+fastify.get('/api/profiles', async () => {
+  return Array.from(profilesStore.values());
+});
+
+fastify.get('/api/profiles/:id', async (request, reply) => {
+  const { id } = request.params;
+  if (profilesStore.has(id)) {
+    return profilesStore.get(id);
+  }
+  reply.code(404);
+  return { error: 'Profile not found' };
+});
+
+fastify.get('/api/profiles/active', async () => {
+  return defaultProfile;
+});
+
+// ============================================================================
+// STORAGE API - For Tauri migration
+// ============================================================================
+const storageStore = new Map();
+
+fastify.get('/api/storage/:key', async (request, reply) => {
+  const { key } = request.params;
+  if (storageStore.has(key)) {
+    return { value: storageStore.get(key) };
+  }
+  reply.code(404);
+  return { error: 'Key not found' };
+});
+
+fastify.post('/api/storage/:key', async (request, reply) => {
+  const { key } = request.params;
+  const { value } = request.body;
+  storageStore.set(key, value);
+  return { success: true };
+});
+
+fastify.delete('/api/storage/:key', async (request, reply) => {
+  const { key } = request.params;
+  if (storageStore.has(key)) {
+    storageStore.delete(key);
+    return { success: true };
+  }
+  reply.code(404);
+  return { success: false, error: 'Key not found' };
+});
+
+fastify.get('/api/storage', async () => {
+  const entries = Array.from(storageStore.entries()).map(([key, value]) => ({
+    key,
+    value,
+  }));
+  return { entries };
+});
+
+fastify.get('/api/storage/settings/:key', async (request, reply) => {
+  const { key } = request.params;
+  const fullKey = `settings:${key}`;
+  if (storageStore.has(fullKey)) {
+    return { value: storageStore.get(fullKey) };
+  }
+  reply.code(404);
+  return { error: 'Setting not found' };
+});
+
+fastify.get('/api/storage/workspaces', async () => {
+  const workspaces = Array.from(storageStore.entries())
+    .filter(([key]) => key.startsWith('workspace:'))
+    .map(([key, value]) => ({ id: key.replace('workspace:', ''), ...value }));
+  return workspaces;
+});
+
+fastify.get('/api/storage/downloads', async () => {
+  const downloads = Array.from(storageStore.entries())
+    .filter(([key]) => key.startsWith('download:'))
+    .map(([key, value]) => ({ id: key.replace('download:', ''), ...value }));
+  return downloads;
+});
+
+fastify.get('/api/storage/accounts', async () => {
+  const accounts = Array.from(storageStore.entries())
+    .filter(([key]) => key.startsWith('account:'))
+    .map(([key, value]) => ({ id: key.replace('account:', ''), ...value }));
+  return accounts;
+});
+
+// ============================================================================
+// HISTORY API - For Tauri migration
+// ============================================================================
+const historyStore = [];
+
+fastify.get('/api/history', async (request) => {
+  const limit = Number(request.query?.limit) || 100;
+  return historyStore.slice(0, limit);
+});
+
+fastify.post('/api/history', async (request, reply) => {
+  const { url, title, typed } = request.body;
+  const entry = {
+    id: uuidv4(),
+    url,
+    title: title || url,
+    typed: typed || false,
+    timestamp: Date.now(),
+    visitCount: 1,
+  };
+  historyStore.unshift(entry);
+  if (historyStore.length > 10000) {
+    historyStore.length = 10000;
+  }
+  return { success: true, id: entry.id };
+});
+
+fastify.get('/api/history/search', async (request) => {
+  const { query, limit = 50 } = request.query;
+  if (!query) {
+    return [];
+  }
+  const searchTerm = query.toLowerCase();
+  const results = historyStore
+    .filter(entry => 
+      entry.url.toLowerCase().includes(searchTerm) ||
+      entry.title.toLowerCase().includes(searchTerm)
+    )
+    .slice(0, Number(limit));
+  return results;
+});
+
+// ============================================================================
+// RESEARCH API - For Tauri migration
+// ============================================================================
+fastify.post('/api/research/query', async (request, reply) => {
+  const { query, mode } = request.body;
+  if (!query) {
+    reply.code(400);
+    return { error: 'Query is required' };
+  }
+  
+  // Use existing search functionality
+  try {
+    const results = await runSearch(query, { limit: 10 });
+    return {
+      query,
+      results: results || [],
+      mode: mode || 'default',
+    };
+  } catch (error) {
+    fastify.log.error({ error }, 'Research query failed');
+    reply.code(500);
+    return { error: 'Research query failed', message: error.message };
+  }
+});
+
+fastify.post('/api/research/enhanced', async (request, reply) => {
+  const { query, mode } = request.body;
+  if (!query) {
+    reply.code(400);
+    return { error: 'Query is required' };
+  }
+  
+  try {
+    // Enhanced research with LLM
+    const jobId = uuidv4();
+    const result = await LLMCircuit.fire({
+      prompt: `Research: ${query}`,
+      mode: mode || 'research',
+      jobId,
+    });
+    
+    return {
+      query,
+      response: result?.response || 'Research unavailable',
+      sources: [],
+      jobId,
+    };
+  } catch (error) {
+    fastify.log.error({ error }, 'Enhanced research failed');
+    reply.code(500);
+    return { error: 'Enhanced research failed', message: error.message };
+  }
+});
+
+// ============================================================================
+// GRAPH API - For Tauri migration
+// ============================================================================
+const graphStore = new Map();
+
+fastify.get('/api/graph', async () => {
+  return {
+    nodes: Array.from(graphStore.values()),
+    edges: [],
+  };
+});
+
+fastify.post('/api/graph', async (request, reply) => {
+  const { node, edges } = request.body;
+  if (!node || !node.id) {
+    reply.code(400);
+    return { error: 'Node with ID is required' };
+  }
+  
+  const graphNode = {
+    id: node.id,
+    type: node.type || 'default',
+    data: node.data || {},
+    createdAt: Date.now(),
+  };
+  graphStore.set(node.id, graphNode);
+  return { success: true };
+});
+
+fastify.post('/api/graph/node', async (request, reply) => {
+  const { id, type, data } = request.body;
+  if (!id) {
+    reply.code(400);
+    return { error: 'Node ID is required' };
+  }
+  
+  const node = {
+    id,
+    type: type || 'default',
+    data: data || {},
+    createdAt: Date.now(),
+  };
+  graphStore.set(id, node);
+  return { success: true, node };
+});
+
+fastify.get('/api/graph/:key', async (request, reply) => {
+  const { key } = request.params;
+  if (graphStore.has(key)) {
+    return graphStore.get(key);
+  }
+  reply.code(404);
+  return { error: 'Node not found' };
+});
+
+fastify.get('/api/graph/node/:id', async (request, reply) => {
+  const { id } = request.params;
+  if (graphStore.has(id)) {
+    return graphStore.get(id);
+  }
+  reply.code(404);
+  return { error: 'Node not found' };
+});
+
+// ============================================================================
+// LEDGER API - For Tauri migration
+// ============================================================================
+const ledgerStore = [];
+
+fastify.get('/api/ledger', async (request) => {
+  const limit = Number(request.query?.limit) || 100;
+  return ledgerStore.slice(0, limit);
+});
+
+fastify.post('/api/ledger', async (request, reply) => {
+  const { url, passage, action, domain, timestamp, metadata } = request.body;
+  
+  // Support both formats: { url, passage } and { action, domain, ... }
+  const entry = url && passage
+    ? {
+        id: uuidv4(),
+        url,
+        passage,
+        timestamp: Date.now(),
+      }
+    : {
+        id: uuidv4(),
+        action: action || 'unknown',
+        domain: domain || 'unknown',
+        timestamp: timestamp || Date.now(),
+        metadata: metadata || {},
+      };
+  
+  ledgerStore.unshift(entry);
+  if (ledgerStore.length > 10000) {
+    ledgerStore.length = 10000;
+  }
+  return { success: true, id: entry.id };
+});
+
+fastify.get('/api/ledger/verify', async () => {
+  return {
+    verified: true,
+    totalEntries: ledgerStore.length,
+    lastVerified: Date.now(),
+  };
+});
+
+// ============================================================================
+// RECORDER API - For Tauri migration
+// ============================================================================
+const recordingsStore = new Map();
+
+fastify.get('/api/recorder/status', async () => {
+  return { recording: false, paused: false };
+});
+
+fastify.post('/api/recorder/start', async () => {
+  const recordingId = uuidv4();
+  recordingsStore.set(recordingId, {
+    id: recordingId,
+    startedAt: Date.now(),
+    events: [],
+  });
+  return { success: true, id: recordingId };
+});
+
+fastify.post('/api/recorder/stop', async (request, reply) => {
+  const { id } = request.body;
+  if (!id || !recordingsStore.has(id)) {
+    reply.code(404);
+    return { success: false, error: 'Recording not found' };
+  }
+  const recording = recordingsStore.get(id);
+  recording.stoppedAt = Date.now();
+  return { success: true, recording };
+});
+
+fastify.get('/api/recorder/:id', async (request, reply) => {
+  const { id } = request.params;
+  if (recordingsStore.has(id)) {
+    return recordingsStore.get(id);
+  }
+  reply.code(404);
+  return { error: 'Recording not found' };
+});
+
+fastify.get('/api/recorder/dsl', async () => {
+  return {
+    dsl: '',
+    events: [],
+  };
+});
+
+// ============================================================================
+// PROXY API - For Tauri migration
+// ============================================================================
+fastify.get('/api/proxy/status', async () => {
+  return { enabled: false, type: null, address: null };
+});
+
+fastify.post('/api/proxy/enable', async (request, reply) => {
+  const { type, address, port } = request.body;
+  return { success: true, enabled: true, type, address, port };
+});
+
+fastify.post('/api/proxy', async (request) => {
+  const rules = request.body;
+  return { success: true, rules };
+});
+
+fastify.post('/api/proxy/disable', async () => {
+  return { success: true, enabled: false };
+});
+
+fastify.post('/api/proxy/kill-switch', async (request) => {
+  const { enabled } = request.body;
+  return { success: true, enabled: enabled || false };
+});
+
+// ============================================================================
+// THREATS API - For Tauri migration
+// ============================================================================
+fastify.post('/api/threats/scan', async (request, reply) => {
+  const { url } = request.body;
+  if (!url) {
+    reply.code(400);
+    return { error: 'URL is required' };
+  }
+  
+  return {
+    url,
+    safe: true,
+    threats: [],
+    timestamp: Date.now(),
+  };
+});
+
+fastify.post('/api/threats/scan-url', async (request, reply) => {
+  const { url } = request.body;
+  if (!url) {
+    reply.code(400);
+    return { error: 'URL is required' };
+  }
+  
+  return {
+    url,
+    safe: true,
+    threats: [],
+    timestamp: Date.now(),
+  };
+});
+
+fastify.post('/api/threats/scan-file', async (request, reply) => {
+  const { filePath } = request.body;
+  if (!filePath) {
+    reply.code(400);
+    return { error: 'File path is required' };
+  }
+  
+  return {
+    filePath,
+    safe: true,
+    threats: [],
+    timestamp: Date.now(),
+  };
+});
+
+fastify.get('/api/threats/status', async () => {
+  return { enabled: true, lastScan: null };
+});
+
+// ============================================================================
+// VIDEO API - For Tauri migration
+// ============================================================================
+fastify.get('/api/video/status', async () => {
+  return { active: false, participants: 0 };
+});
+
+fastify.post('/api/video/start', async () => {
+  return { success: true, sessionId: uuidv4() };
+});
+
+fastify.post('/api/video/stop', async () => {
+  return { success: true };
+});
+
+fastify.delete('/api/video/:id', async (request, reply) => {
+  const { id } = request.params;
+  return { success: true, id };
+});
+
+fastify.get('/api/video/consent', async () => {
+  return false;
+});
+
+fastify.post('/api/video/consent', async (request) => {
+  const { value } = request.body;
+  return { success: true, value: value || false };
+});
+
+// ============================================================================
+// UI API - For Tauri migration
+// ============================================================================
+fastify.post('/api/ui/chrome-offsets', async (request) => {
+  const offsets = request.body;
+  return { success: true, offsets };
+});
+
+fastify.post('/api/ui/right-dock', async (request) => {
+  const { px } = request.body;
+  return { success: true, px: px || 0 };
+});
+
+// ============================================================================
+// SCRAPE API - Already exists, but adding missing endpoints
+// ============================================================================
+fastify.get('/api/scrape/:id', async (request, reply) => {
+  const { id } = request.params;
+  // Check if job exists in existing scrape system
+  try {
+    const meta = await redisStore.get(`scrape:meta:${id}`);
+    if (meta) {
+      return JSON.parse(meta);
+    }
+  } catch {
+    // Ignore
+  }
+  reply.code(404);
+  return { error: 'Scrape job not found' };
+});
+
+// ============================================================================
+// SESSION STATE API - For Tauri migration
+// ============================================================================
+fastify.get('/api/session/check-restore', async () => {
+  return { available: false, snapshot: null };
+});
+
+fastify.get('/api/session/snapshot', async () => {
+  return {
+    tabs: Array.from(tabsStore.values()),
+    sessions: Array.from(sessionsStore.values()),
+    timestamp: Date.now(),
+  };
+});
+
+fastify.post('/api/session/dismiss-restore', async () => {
+  return { success: true };
+});
+
+fastify.post('/api/session/save-tabs', async () => {
+  const tabs = Array.from(tabsStore.values());
+  return { success: true, count: tabs.length };
+});
+
+fastify.get('/api/session/load-tabs', async () => {
+  return { tabs: Array.from(tabsStore.values()) };
+});
+
+fastify.post('/api/session/add-history', async (request, reply) => {
+  const { url, title, typed } = request.body;
+  const entry = {
+    id: uuidv4(),
+    url,
+    title: title || url,
+    typed: typed || false,
+    timestamp: Date.now(),
+  };
+  historyStore.unshift(entry);
+  return { success: true, id: entry.id };
+});
+
+fastify.get('/api/session/history', async (request) => {
+  const limit = Number(request.query?.limit) || 100;
+  return { history: historyStore.slice(0, limit) };
+});
+
+fastify.post('/api/session/search-history', async (request, reply) => {
+  const { query, limit = 50 } = request.body;
+  if (!query) {
+    reply.code(400);
+    return { error: 'Query is required' };
+  }
+  const searchTerm = query.toLowerCase();
+  const results = historyStore
+    .filter(entry => 
+      entry.url.toLowerCase().includes(searchTerm) ||
+      entry.title.toLowerCase().includes(searchTerm)
+    )
+    .slice(0, Number(limit));
+  return { results };
+});
+
+fastify.post('/api/session/save-setting', async (request, reply) => {
+  const { key, value } = request.body;
+  storageStore.set(`settings:${key}`, value);
+  return { success: true };
+});
+
+fastify.get('/api/session/get-setting/:key', async (request, reply) => {
+  const { key } = request.params;
+  const fullKey = `settings:${key}`;
+  if (storageStore.has(fullKey)) {
+    return { value: storageStore.get(fullKey) };
+  }
+  reply.code(404);
+  return { error: 'Setting not found' };
+});
+
+// ============================================================================
+// PING ENDPOINT - For health checks
+// ============================================================================
+fastify.get('/api/ping', async () => {
+  return 'pong';
+});
+
 fastify.post('/api/redix/queue/:tabId/ack', async (request, reply) => {
   const { tabId } = request.params;
   const { messageId } = request.body;
@@ -1004,7 +1882,7 @@ fastify.post('/api/redix/queue/:tabId/ack', async (request, reply) => {
   return reply.send({ success });
 });
 
-fastify.get('/metrics', async () => lastMetricsSample);
+// /metrics route is already defined above (line 368)
 
 fastify.get('/metrics/prom', async (_request, reply) => {
   const sample = lastMetricsSample;

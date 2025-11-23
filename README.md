@@ -35,7 +35,7 @@ it's a **world-class AI automation platform** designed for productivity, researc
 
 ## Technical Stack
 
-Electron + React + TypeScript + Vite multi-mode desktop browser with:
+Tauri + React + TypeScript + Vite multi-mode desktop browser with:
 
 - 🛡️ **Brave + Tor + VPN** unified privacy stack 🧪 _Experimental / in progress_
 - 🤖 **Unified AI Engine** ✅ _Complete_ - Multi-provider (OpenAI, Anthropic, Ollama), streaming, caching, telemetry
@@ -59,8 +59,17 @@ Electron + React + TypeScript + Vite multi-mode desktop browser with:
 ## Quick Start
 
 ```bash
+# Install dependencies
+cd tauri-migration
 npm install
-npm run dev
+
+# Start backend (Terminal 1)
+cd ../server
+node redix-server.js
+
+# Start Tauri (Terminal 2)
+cd ../tauri-migration
+npm run tauri dev
 ```
 
 ## Key Features
@@ -129,23 +138,30 @@ npm run dev
 ## Development
 
 ```bash
+# Start backend
+cd server
+node redix-server.js
+
+# Start Tauri (in new terminal)
+cd tauri-migration
 npm install
-npm run dev
+npm run tauri dev
 ```
 
-Vite runs on 5173; Electron loads the renderer.
+Tauri dev server runs on 5173; backend runs on 4000.
 
 ## Build
 
 ```bash
-npm run build
+cd tauri-migration
+npm run tauri build
 ```
 
-Outputs platform installers via electron-builder.
+Outputs platform installers via Tauri.
 
 ## Testing
 
-Playwright-based Electron smoke tests cover the tab strip and critical UI ergonomics. Run them with:
+Playwright-based tests cover the tab strip and critical UI ergonomics. Run them with:
 
 ```bash
 npm run test:e2e

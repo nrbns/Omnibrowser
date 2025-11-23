@@ -96,7 +96,7 @@ const mapTabsForStore = (list: Tab[]) =>
   }));
 
 export function TabStrip() {
-  const { handleError } = useAppError();
+  const { handleError: _handleError } = useAppError();
   const setAllTabs = useTabsStore(state => state.setAll);
   const setActiveTab = useTabsStore(state => state.setActive);
   const activeId = useTabsStore(state => state.activeId);
@@ -482,9 +482,11 @@ export function TabStrip() {
             });
           }}
           onMouseEnter={() => {
-            if (tab === tabs[tabs.length - 1]) {
+            // Defensive: Check if tab is last in filteredTabs
+            const validFilteredTabs = Array.isArray(filteredTabs) ? filteredTabs.filter(t => t && t.id) : [];
+            if (validFilteredTabs.length > 0 && tab === validFilteredTabs[validFilteredTabs.length - 1]) {
               setHolographicPreviewTabId(tab.id);
-              setPreviewMetadata({ url: tab.url, title: tab.title });
+              setPreviewMetadata({ url: tab.url || '', title: tab.title || 'Untitled' });
             }
           }}
           onMouseLeave={() => {

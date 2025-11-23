@@ -33,10 +33,10 @@ function spawnCommand(name, cmd, args, env) {
   child.spawnTime = Date.now();
   child.on('exit', (code) => {
     console.log(`[${name}] exited with code ${code}`);
-    // Only shutdown on critical process failures (Vite or Electron)
+    // Only shutdown on critical process failures (Vite)
     // Engine and Redix are optional and can fail without crashing the app
     if (code !== 0) {
-      if (name === 'renderer' || name.includes('electron')) {
+      if (name === 'renderer') {
         console.error(`[${name}] Critical process exited with code ${code}, shutting down...`);
         shutdown();
       } else {
@@ -48,7 +48,7 @@ function spawnCommand(name, cmd, args, env) {
   child.on('error', (err) => {
     console.error(`[${name}] spawn error:`, err);
     // Only shutdown on critical process errors
-    if (name === 'renderer' || name.includes('electron')) {
+    if (name === 'renderer') {
       console.error(`[${name}] Critical process error, shutting down...`);
       shutdown();
     } else {
@@ -250,8 +250,8 @@ setTimeout(() => {
   spawnCommand('redix-worker', nodeExe, [path.resolve('server/redix-worker.js')], { REDIS_URL: redisUrl });
 }, 200);
 
-// Start main dev environment (Vite + Electron + Engine)
-// This uses the basic dev script which runs vite, electron-dev, and engine
+// Start main dev environment (Vite + Engine)
+// Electron removed - using Tauri now
 // Add delay to ensure Redix services start first
 setTimeout(() => {
   spawnCommand('renderer', npmCmd, ['run', 'dev:basic'], {});

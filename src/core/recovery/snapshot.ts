@@ -111,3 +111,4 @@ export function clearSnapshot(): void {
   localStorage.removeItem(SNAPSHOT_KEY);
   log.info('Session snapshot cleared');
 }
+

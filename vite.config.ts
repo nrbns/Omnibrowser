@@ -1,6 +1,5 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import electron from 'vite-plugin-electron/simple';
 import { resolve } from 'path';
 
 export default defineConfig({
@@ -12,37 +11,7 @@ export default defineConfig({
         },
       },
     }),
-    electron({
-      main: {
-        entry: 'electron/main.ts',
-        vite: {
-          build: {
-            rollupOptions: {
-              external: [
-                'electron',
-                'electron-updater',
-                'jsdom',
-                'canvas',
-                'bufferutil',
-                'utf-8-validate',
-                'better-sqlite3',
-              ],
-              output: {
-                entryFileNames: 'main.js',
-                format: 'cjs',
-              },
-            },
-          },
-        },
-      },
-      preload: {
-        input: {
-          index: resolve(__dirname, 'electron/preload.ts'),
-        },
-      },
-      // Use existing preload.cjs as fallback for compatibility
-      renderer: {},
-    }),
+    // Electron plugin removed - using Tauri now
   ],
   root: resolve(__dirname),
   publicDir: 'public',
@@ -139,7 +108,6 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    exclude: ['electron'],
     include: ['lightweight-charts'],
   },
   server: {
