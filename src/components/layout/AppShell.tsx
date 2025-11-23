@@ -647,11 +647,16 @@ export function AppShell() {
   // Show cookie consent after TOS is accepted
   useEffect(() => {
     if (!showTOS && !hasConsented) {
+      console.log('[AppShell] Showing cookie consent - TOS accepted, cookie consent needed');
       // Small delay to ensure TOS modal is fully closed
       const timer = setTimeout(() => {
         setShowCookieConsent(true);
+        console.log('[AppShell] Cookie consent modal shown');
       }, 300);
       return () => clearTimeout(timer);
+    } else if (!showTOS && hasConsented) {
+      console.log('[AppShell] Cookie consent already given, skipping cookie consent modal');
+      setShowCookieConsent(false);
     }
   }, [showTOS, hasConsented]);
   useEffect(() => {
@@ -1950,11 +1955,15 @@ export function AppShell() {
       {showCookieConsent && !showTOS && !onboardingVisible && (
         <CookieConsent
           onAccept={preferences => {
+            console.log('[AppShell] Cookie consent accepted:', preferences);
             localStorage.setItem('omnibrowser:cookie-consent', JSON.stringify(preferences));
             setShowCookieConsent(false);
+            console.log('[AppShell] Cookie consent modal closed, onboarding should start now');
           }}
           onDecline={() => {
+            console.log('[AppShell] Cookie consent declined');
             setShowCookieConsent(false);
+            console.log('[AppShell] Cookie consent modal closed, onboarding should start now');
           }}
         />
       )}

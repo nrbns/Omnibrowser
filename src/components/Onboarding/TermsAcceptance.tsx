@@ -77,9 +77,11 @@ export function TermsAcceptance({ onAccept, onDecline }: TermsAcceptanceProps) {
       if (typeof onAccept === 'function') {
         console.log('[TermsAcceptance] Calling onAccept callback');
         // Use setTimeout to ensure React state updates are processed
+        // Use a slightly longer delay to ensure state is fully updated
         setTimeout(() => {
+          console.log('[TermsAcceptance] Executing onAccept callback now');
           onAccept();
-        }, 0);
+        }, 100);
       } else {
         console.warn('[TermsAcceptance] onAccept callback is not a function:', typeof onAccept);
       }
