@@ -111,17 +111,11 @@ export class RedixWS {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
           this.ws.close();
         }
-        // Suppress all WebSocket errors - Redix is optional
-        // The browser will still log the error, but we prevent it from being shown
+        // Completely suppress WebSocket errors - Redix is optional
         event.stopPropagation();
-        // Only log error once to avoid console spam, and only in dev mode
-        if (!this.errorLogged && import.meta.env.DEV) {
-          this.errorLogged = true;
-          // Use console.debug instead of console.warn to reduce noise
-          console.debug(
-            '[RedixWS] WebSocket connection unavailable - Redix server may not be running. This is expected if Redix is not configured.'
-          );
-        }
+        event.preventDefault();
+        // Don't log at all - Redix WebSocket errors are expected if server isn't running
+        // The browser console will still show the error, but we prevent it from propagating
       };
     } catch {
       this.isConnecting = false;
