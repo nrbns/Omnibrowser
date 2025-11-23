@@ -50,6 +50,7 @@ import {
   DropdownMenuItem,
 } from '../ui/dropdown-menu';
 import { reopenClosedTab } from '../../lib/tabLifecycle';
+import { useAppError } from '../../hooks/useAppError';
 
 const TAB_GRAPH_DRAG_MIME = 'application/x-omnibrowser-tab-id';
 const IS_DEV = isDevEnv();
@@ -95,10 +96,14 @@ const mapTabsForStore = (list: Tab[]) =>
   }));
 
 export function TabStrip() {
+  const { handleError } = useAppError();
   const setAllTabs = useTabsStore(state => state.setAll);
   const setActiveTab = useTabsStore(state => state.setActive);
   const activeId = useTabsStore(state => state.activeId);
   const storeTabs = useTabsStore(state => state.tabs);
+
+  // Defensive: Ensure tabs is always an array
+  const safeTabs = Array.isArray(storeTabs) ? storeTabs : [];
   const updateTab = useTabsStore(state => state.updateTab);
   const rememberClosedTab = useTabsStore(state => state.rememberClosedTab);
   const recentlyClosed = useTabsStore(state => state.recentlyClosed);
@@ -352,7 +357,7 @@ export function TabStrip() {
           role="tab"
           aria-selected={tab.active}
           aria-controls={`tabpanel-${tab.id}`}
-          aria-label={`Tab: ${tab.title}${tab.mode === 'ghost' ? ' (Ghost tab)' : tab.mode === 'private' ? ' (Private tab)' : ''}${tab.sleeping ? ' (Hibernating)' : ''}${group ? ` (Group: ${group.name})` : ''}`}
+          aria-label={`Tab: ${tab.title || 'Untitled'}${tab.mode === 'ghost' ? ' (Ghost tab)' : tab.mode === 'private' ? ' (Private tab)' : ''}${tab.sleeping ? ' (Hibernating)' : ''}${group ? ` (Group: ${group.name})` : ''}`}
           tabIndex={tab.active ? 0 : -1}
           layout
           initial={{ opacity: 0, scale: 0.8 }}
@@ -424,7 +429,9 @@ export function TabStrip() {
               e.preventDefault();
               e.stopPropagation();
 
-              const currentIndex = tabs.findIndex(t => t.id === tab.id);
+              // Defensive: Use filteredTabs for keyboard navigation
+              const validTabs = filteredTabs.filter(t => t && t.id);
+              const currentIndex = validTabs.findIndex(t => t.id === tab.id);
               if (currentIndex === -1) {
                 return;
               }
@@ -435,18 +442,18 @@ export function TabStrip() {
                   nextIndex = 0;
                   break;
                 case 'End':
-                  nextIndex = tabs.length - 1;
+                  nextIndex = validTabs.length - 1;
                   break;
                 case 'ArrowLeft':
-                  nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+                  nextIndex = (currentIndex - 1 + validTabs.length) % validTabs.length;
                   break;
                 case 'ArrowRight':
-                  nextIndex = (currentIndex + 1) % tabs.length;
+                  nextIndex = (currentIndex + 1) % validTabs.length;
                   break;
               }
 
-              const nextTab = tabs[nextIndex];
-              if (nextTab) {
+              const nextTab = validTabs[nextIndex];
+              if (nextTab && nextTab.id) {
                 void activateTab(nextTab.id);
               }
             }
@@ -681,11 +688,13 @@ export function TabStrip() {
   };
 
   const filteredTabs = useMemo(() => {
-    if (!tabs || tabs.length === 0) {
+    // Defensive: Use safeTabs and filter invalid entries
+    const validTabs = safeTabs.filter(tab => tab && tab.id);
+    if (validTabs.length === 0) {
       return [];
     }
-    return tabs.filter(tab => !tab.appMode || tab.appMode === currentMode);
-  }, [tabs, currentMode]);
+    return validTabs.filter(tab => !tab.appMode || tab.appMode === currentMode);
+  }, [safeTabs, currentMode]);
 
   const tabElements = useMemo(() => {
     const elements: React.ReactNode[] = [];

@@ -70,6 +70,7 @@ import { ToastHost } from '../common/ToastHost';
 import { reopenMostRecentClosedTab } from '../../lib/tabLifecycle';
 import { toast } from '../../utils/toast';
 import { startSnapshotting } from '../../core/recovery';
+import { useAppError } from '../../hooks/useAppError';
 
 declare global {
   interface Window {
@@ -520,6 +521,7 @@ export function AppShell() {
   const clearSessionSnapshot = useSessionStore(state => state.clearSnapshot);
   const clearHistoryEntries = useHistoryStore(state => state.clear);
   const tabsState = useTabsStore();
+  const { handleError, safeExecute } = useAppError();
   const [showTOS, setShowTOS] = useState(false);
   const [showCookieConsent, setShowCookieConsent] = useState(false);
   const [restoreToast, setRestoreToast] = useState<{
@@ -783,10 +785,11 @@ export function AppShell() {
     }
     return false;
   }, []);
-  const activeTab = useMemo(
-    () => tabsState.tabs.find(tab => tab.id === tabsState.activeId),
-    [tabsState.tabs, tabsState.activeId]
-  );
+  const activeTab = useMemo(() => {
+    // Defensive: Ensure tabs is an array and filter invalid entries
+    const safeTabs = Array.isArray(tabsState.tabs) ? tabsState.tabs.filter(t => t && t.id) : [];
+    return safeTabs.find(tab => tab.id === tabsState.activeId) || undefined;
+  }, [tabsState.tabs, tabsState.activeId]);
   const mode = useAppStore(state => state.mode);
 
   useEffect(() => {
