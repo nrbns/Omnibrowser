@@ -111,7 +111,7 @@ export class RedixWS {
           );
         }
       };
-    } catch (_error) {
+    } catch {
       this.isConnecting = false;
       // Suppress connection errors - Redix is optional
       if (!this.errorLogged && import.meta.env.DEV) {
