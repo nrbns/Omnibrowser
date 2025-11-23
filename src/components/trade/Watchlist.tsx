@@ -142,29 +142,60 @@ export default function Watchlist({ activeSymbol, onSelectSymbol }: WatchlistPro
         </button>
       </div>
 
-      <form onSubmit={handleAddSymbol} className="mb-3 flex gap-2">
+      <form
+        onSubmit={e => {
+          e.preventDefault();
+          e.stopPropagation();
+          void handleAddSymbol(e);
+        }}
+        className="mb-3 flex gap-2"
+        onMouseDown={e => {
+          // Don't interfere with form submission
+          const target = e.target as HTMLElement;
+          if (target.closest('button[type="submit"]') || target.closest('input')) {
+            return;
+          }
+        }}
+        onClick={e => {
+          // Don't interfere with form submission
+          const target = e.target as HTMLElement;
+          if (target.closest('button[type="submit"]') || target.closest('input')) {
+            return;
+          }
+        }}
+      >
         <div className="relative flex-1">
           <input
             type="text"
             value={input}
             placeholder="Add symbol (AAPL, BTC-USD)…"
             onChange={event => setInput(event.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !isAdding && input.trim()) {
+                e.preventDefault();
+                void handleAddSymbol(e as any);
+              }
+            }}
             className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500/60"
           />
         </div>
         <button
           type="submit"
-          disabled={isAdding}
+          disabled={isAdding || !input.trim()}
           onClick={e => {
-            (e as any).stopImmediatePropagation();
+            e.preventDefault();
             e.stopPropagation();
+            (e as any).stopImmediatePropagation();
+            if (!isAdding && input.trim()) {
+              void handleAddSymbol(e as any);
+            }
           }}
           onMouseDown={e => {
-            (e as any).stopImmediatePropagation();
+            // Allow mousedown to proceed normally for form submission
             e.stopPropagation();
           }}
-          className="inline-flex items-center gap-1 rounded-xl bg-indigo-500/80 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50"
-          style={{ zIndex: 10011, isolation: 'isolate' }}
+          className="inline-flex items-center gap-1 rounded-xl bg-indigo-500/80 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          style={{ zIndex: 10011, isolation: 'isolate', pointerEvents: 'auto' }}
         >
           <Plus size={14} />
           Add

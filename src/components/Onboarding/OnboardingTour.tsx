@@ -499,7 +499,7 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
       if (currentStep?.type === 'persona') {
         console.log('[Onboarding] Persona step - selectedPersona:', selectedPersona, 'mode:', mode);
         if (!selectedPersona) {
-          console.warn('[Onboarding] Cannot advance: no persona selected');
+          console.warn('[Onboarding] No persona selected, trying to auto-select...');
           // Try to get selected persona from DOM if state is out of sync
           const selectedPersonaCard = document.querySelector(
             '[aria-pressed="true"]'
@@ -511,19 +511,25 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
             if (personaId) {
               console.log('[Onboarding] Found selected persona from DOM:', personaId);
               handlePersonaSelect(personaId as PersonaOption['id']);
-              // Continue with the selected persona
+              // Continue with the selected persona - don't return
             } else {
-              console.warn('[Onboarding] No persona selected, cannot advance');
-              return;
+              // Auto-select default persona if none selected
+              const defaultPersona = personaFromMode || 'Browse';
+              console.log('[Onboarding] Auto-selecting default persona:', defaultPersona);
+              handlePersonaSelect(defaultPersona);
             }
           } else {
-            console.warn('[Onboarding] No persona selected, cannot advance');
-            return;
+            // Auto-select default persona if none selected
+            const defaultPersona = personaFromMode || 'Browse';
+            console.log('[Onboarding] Auto-selecting default persona:', defaultPersona);
+            handlePersonaSelect(defaultPersona);
           }
         }
-        if (selectedPersona && mode !== selectedPersona) {
-          console.log('[Onboarding] Setting mode to:', selectedPersona);
-          setMode(selectedPersona);
+        // Always sync mode with selected persona
+        const finalPersona = selectedPersona || personaFromMode || 'Browse';
+        if (mode !== finalPersona) {
+          console.log('[Onboarding] Setting mode to:', finalPersona);
+          setMode(finalPersona);
         }
       }
 
@@ -1364,38 +1370,15 @@ export function OnboardingTour({ onClose }: { onClose: () => void }) {
                     e.stopPropagation();
                     (e as any).stopImmediatePropagation();
 
-                    if (!isNextDisabled) {
-                      goNext();
-                    } else {
-                      console.warn('[Onboarding] ⚠️ Button disabled, but trying anyway...', {
-                        isNextDisabled,
-                        stepIndex,
-                        selectedPersona,
-                      });
-                      // Force proceed if disabled (might be state sync issue)
-                      if (stepIndex === 0 && isPersonaStep) {
-                        const defaultPersona = personaFromMode || 'Browse';
-                        console.log('[Onboarding] Auto-selecting default persona:', defaultPersona);
-                        handlePersonaSelect(defaultPersona);
-                        setTimeout(() => goNext(), 50);
-                      } else {
-                        // Try to proceed anyway
-                        goNext();
-                      }
-                    }
+                    // Always try to proceed - goNext handles validation internally
+                    goNext();
                   }}
                   onMouseDown={e => {
-                    console.log('[Onboarding] ✅ Next/Finish button mousedown!', {
-                      isNextDisabled,
-                    });
+                    console.log('[Onboarding] ✅ Next/Finish button mousedown!');
                     e.preventDefault();
                     e.stopPropagation();
-                    if (!isNextDisabled) {
-                      goNext();
-                    } else {
-                      // Force proceed on mousedown too
-                      goNext();
-                    }
+                    // Always try to proceed
+                    goNext();
                   }}
                   disabled={false} // Never disable - always allow click
                   className="rounded-lg border border-emerald-500/60 bg-emerald-500/10 px-4 py-2 font-medium text-emerald-100 transition hover:bg-emerald-500/20 cursor-pointer active:scale-95 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
