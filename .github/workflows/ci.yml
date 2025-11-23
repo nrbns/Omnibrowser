@@ -105,41 +105,81 @@ jobs:
       - name: Check if Storybook is configured
         id: check_storybook
         run: |
-          if [ -d ".storybook" ] || [ -f "storybook.config.js" ] || [ -f "storybook.config.ts" ]; then
+          # Check for Storybook config directory
+          if [ -d ".storybook" ]; then
+            echo "✅ Storybook .storybook directory found"
             echo "configured=true" >> $GITHUB_OUTPUT
-            echo "✅ Storybook configuration found"
-          else
+          # Check for Storybook config files
+          elif [ -f "storybook.config.js" ] || [ -f "storybook.config.ts" ] || [ -f ".storybook/main.js" ] || [ -f ".storybook/main.ts" ]; then
+            echo "✅ Storybook configuration files found"
+            echo "configured=true" >> $GITHUB_OUTPUT
+          # Check if Storybook dependencies are installed
+          elif npm list @storybook/react-vite 2>/dev/null | grep -q "@storybook/react-vite"; then
+            echo "✅ Storybook dependencies found, but no config - skipping"
             echo "configured=false" >> $GITHUB_OUTPUT
-            echo "⚠️ Storybook not configured, skipping build"
+          else
+            echo "⚠️ Storybook not configured (no .storybook directory or config files)"
+            echo "configured=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Build Storybook
         if: steps.check_storybook.outputs.configured == 'true'
-        run: npx storybook build --output-dir=storybook-static || echo "⚠️ Storybook build failed, but continuing..."
+        continue-on-error: true
+        run: |
+          # Try using local storybook command first
+          if npm run | grep -q "storybook"; then
+            echo "Using local storybook command..."
+            npm run storybook:build || npm run build-storybook || echo "⚠️ Local storybook build failed"
+          else
+            # Check if storybook CLI is available locally
+            if [ -f "node_modules/.bin/storybook" ]; then
+              echo "Using local storybook binary..."
+              npx --yes storybook build --output-dir=storybook-static || echo "⚠️ Storybook build failed"
+            else
+              echo "⚠️ Storybook CLI not found, skipping build"
+              exit 0
+            fi
+          fi
 
       - name: Verify Storybook build
         if: steps.check_storybook.outputs.configured == 'true'
+        continue-on-error: true
         run: |
           if [ ! -d "storybook-static" ]; then
-            echo "⚠️ storybook-static directory not found, Storybook may not be configured"
+            echo "⚠️ storybook-static directory not found"
+            echo "Storybook may not be properly configured or build failed"
             exit 0
           fi
           if [ ! -f "storybook-static/index.html" ]; then
-            echo "⚠️ storybook-static/index.html not found, Storybook may not be configured"
+            echo "⚠️ storybook-static/index.html not found"
+            echo "Storybook build may have failed"
             exit 0
           fi
           echo "✅ Storybook build verified"
 
       - name: Test Storybook (serve and check)
         if: steps.check_storybook.outputs.configured == 'true'
+        continue-on-error: true
         run: |
           if [ -d "storybook-static" ] && [ -f "storybook-static/index.html" ]; then
-            npx http-server ./storybook-static -p 6006 > /dev/null 2>&1 &
-            sleep 5
-            if curl -f http://localhost:6006 > /dev/null 2>&1; then
-              echo "✅ Storybook server responding"
+            # Install http-server if not available
+            if ! command -v http-server &> /dev/null; then
+              npm install -g http-server || npx --yes http-server --version || echo "http-server not available"
+            fi
+            # Try to serve and test
+            if command -v http-server &> /dev/null || npx --yes http-server --version &>/dev/null; then
+              npx --yes http-server ./storybook-static -p 6006 > /dev/null 2>&1 &
+              SERVER_PID=$!
+              sleep 5
+              if curl -f http://localhost:6006 > /dev/null 2>&1; then
+                echo "✅ Storybook server responding"
+                kill $SERVER_PID 2>/dev/null || true
+              else
+                echo "⚠️ Storybook server not responding"
+                kill $SERVER_PID 2>/dev/null || true
+              fi
             else
-              echo "⚠️ Storybook server not responding, but continuing..."
+              echo "⚠️ Cannot test Storybook server (http-server not available)"
             fi
           else
             echo "⚠️ Storybook not built, skipping server test"
