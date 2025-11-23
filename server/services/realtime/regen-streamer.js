@@ -47,7 +47,6 @@ async function handleMessageSafe(input) {
     // Stream response text in chunks (optimized for real-time)
     const text = response.text || '';
     const chunkSize = 100; // Increased chunk size for better performance
-    let accumulatedText = '';
 
     // Send entire message if small, otherwise chunk it
     if (text.length <= chunkSize) {
