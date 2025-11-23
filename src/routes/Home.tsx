@@ -99,7 +99,7 @@ export default function Home() {
         </div>
       ) : mode === 'Research' ? (
         <div className="flex-1 w-full relative flex flex-col min-h-0 overflow-hidden">
-          {/* Top: Research Panel (full width) */}
+          {/* Top: Research Panel (full width) - Only load when Research mode is active */}
           {!isFullscreen && (
             <div className="h-96 border-b border-gray-700/30 flex-shrink-0 overflow-hidden">
               <ErrorBoundary componentName="ResearchPanel" retryable={true}>

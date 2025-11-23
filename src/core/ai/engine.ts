@@ -24,7 +24,10 @@ export interface AITaskResult {
   estimated_cost_usd?: number;
 }
 
-type StreamHandler = (event: { type: 'token' | 'done' | 'error'; data?: string | AITaskResult }) => void;
+type StreamHandler = (event: {
+  type: 'token' | 'done' | 'error';
+  data?: string | AITaskResult;
+}) => void;
 
 /**
  * Sprint 2 placeholder AI Engine.
@@ -53,12 +56,28 @@ export class AIEngine {
 
   private async callBackendTask(
     request: AITaskRequest,
-    onStream?: StreamHandler,
+    onStream?: StreamHandler
   ): Promise<AITaskResult | null> {
     if (!this.apiBase || typeof fetch === 'undefined') {
       return null;
     }
     const base = this.apiBase.replace(/\/$/, '');
+
+    // Create AbortController with timeout (30 seconds default, 60 for streaming)
+    const timeoutMs = request.stream ? 60000 : 30000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    // Combine user signal with timeout signal
+    const combinedSignal = request.signal
+      ? (() => {
+          const combined = new AbortController();
+          request.signal!.addEventListener('abort', () => combined.abort());
+          controller.signal.addEventListener('abort', () => combined.abort());
+          return combined.signal;
+        })()
+      : controller.signal;
+
     try {
       const response = await fetch(`${base}/api/ai/task`, {
         method: 'POST',
@@ -74,7 +93,7 @@ export class AIEngine {
           temperature: request.llm?.temperature ?? 0.2,
           max_tokens: request.llm?.maxTokens ?? 800,
         }),
-        signal: request.signal ?? undefined,
+        signal: combinedSignal,
       });
 
       if (!response.ok) {
@@ -92,6 +111,11 @@ export class AIEngine {
         let buffer = '';
         const tokens: string[] = [];
         while (true) {
+          // Check if aborted before reading
+          if (combinedSignal.aborted) {
+            onStream?.({ type: 'error', data: 'Request timeout - please try again' });
+            break;
+          }
           const { value, done } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
@@ -138,21 +162,29 @@ export class AIEngine {
             }
           }
         }
+        clearTimeout(timeoutId);
       }
 
       const data = (await response.json()) as AITaskResult;
+      clearTimeout(timeoutId);
       this.trackTelemetry(data, request);
       onStream?.({ type: 'done', data: data });
       return data;
     } catch (error) {
-      console.warn('[AIEngine] Backend request error', error);
+      clearTimeout(timeoutId);
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.warn('[AIEngine] Request timeout after', timeoutMs, 'ms');
+        onStream?.({ type: 'error', data: 'Request timeout - please try again' });
+      } else {
+        console.warn('[AIEngine] Backend request error', error);
+      }
       return null;
     }
   }
 
   private async runLocalLLM(
     request: AITaskRequest,
-    onStream?: StreamHandler,
+    onStream?: StreamHandler
   ): Promise<AITaskResult> {
     const response = await sendPrompt(request.prompt, {
       ...request.llm,
@@ -199,4 +231,3 @@ export class AIEngine {
 }
 
 export const aiEngine = new AIEngine();
-

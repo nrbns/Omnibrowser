@@ -7,8 +7,12 @@ import { ipcMain, IpcMainInvokeEvent } from 'electron';
 import { z } from 'zod';
 import { checkRateLimit } from '../../services/ipc-rate-limit';
 import { createLogger } from '../../services/utils/logger';
+import PQueue from 'p-queue';
 
 const log = createLogger('ipc-router');
+
+// Global queue for IPC handlers (max 10 concurrent to prevent overload)
+const ipcQueue = new PQueue({ concurrency: 10 });
 
 export type IPCChannel = string;
 export type IPCRequest = unknown;
@@ -96,8 +100,50 @@ export function registerHandler<TRequest, TResponse>(
         } as IPCResponse;
       }
 
-      // Call handler
-      const response = await handlerEntry.handler(event, parsed.data);
+      // Call handler with queue and retry logic
+      const response = await ipcQueue.add(async () => {
+        let lastError: Error | null = null;
+        const maxRetries = 2; // Retry up to 2 times (3 total attempts)
+        const retryDelay = 500; // 500ms delay between retries
+
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+          try {
+            // Add timeout (30 seconds)
+            const timeoutPromise = new Promise<never>((_, reject) => {
+              setTimeout(() => reject(new Error(`Handler timeout after 30s`)), 30000);
+            });
+
+            const result = await Promise.race([
+              handlerEntry.handler(event, parsed.data),
+              timeoutPromise,
+            ]);
+
+            return result;
+          } catch (error) {
+            lastError = error instanceof Error ? error : new Error(String(error));
+
+            // Don't retry on certain errors
+            if (error instanceof Error) {
+              if (error.message.includes('abort') || error.message.includes('cancelled')) {
+                throw error; // Don't retry aborted requests
+              }
+              if (error.message.includes('validation') || error.message.includes('Invalid')) {
+                throw error; // Don't retry validation errors
+              }
+            }
+
+            // Last attempt - throw error
+            if (attempt === maxRetries) {
+              throw lastError;
+            }
+
+            // Wait before retry with exponential backoff
+            await new Promise(resolve => setTimeout(resolve, retryDelay * Math.pow(2, attempt)));
+          }
+        }
+
+        throw lastError || new Error('Handler failed after retries');
+      });
 
       // Record IPC latency
       const duration = performance.now() - startTime;
