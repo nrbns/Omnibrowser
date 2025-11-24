@@ -7,7 +7,7 @@ import { useState, useRef } from 'react';
 import { Send, Loader, Sparkles, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PageExtractor, ExtractedContent } from './PageExtractor';
-import { sendPrompt } from '../../core/llm/adapter';
+import { aiEngine } from '../../core/ai';
 
 interface AskAboutPageProps {
   url: string;
@@ -32,55 +32,30 @@ export function AskAboutPage({ url, onClose }: AskAboutPageProps) {
     setIsStreaming(true);
 
     try {
-      // Use LLM adapter instead of direct API call
       const prompt = extractedContent?.content
         ? `Based on the following page content from ${url}:\n\n${extractedContent.content}\n\nQuestion: ${question}\n\nAnswer:`
         : `Based on the page at ${url}, answer the following question: ${question}`;
 
-      // Try LLM adapter first, fallback to API if it fails
-      try {
-        const response = await sendPrompt(prompt, {
-          systemPrompt: 'You are a helpful assistant that answers questions about web pages. Provide clear, concise answers based on the page content provided.',
+      const response = await aiEngine.runTask({
+        kind: 'search',
+        prompt,
+        context: {
+          url,
+          title: extractedContent?.title ?? url,
+          snippet: extractedContent?.content?.slice(0, 500),
+        },
+        llm: {
+          systemPrompt:
+            'You are a helpful assistant that answers questions about web pages. Provide clear, concise answers based on the page content provided.',
           maxTokens: 500,
-        });
-        
-        setAnswer(response.text);
-        setIsStreaming(false);
-        
-        // Auto-scroll to bottom
-        if (answerRef.current) {
-          answerRef.current.scrollTop = answerRef.current.scrollHeight;
-        }
-      } catch (llmError) {
-        // Fallback to API if LLM adapter fails
-        try {
-          const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-          const response = await fetch(`${apiUrl}/llm/ask-about-page`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              prompt: question,
-              url: url,
-              context: extractedContent?.content,
-            }),
-          });
-          
-          if (!response.ok) {
-            throw new Error(`Failed to get answer: ${response.statusText}`);
-          }
-          
-          const data = await response.json();
-          setAnswer(data.answer || data.text || '');
-          setIsStreaming(false);
-          
-          // Auto-scroll to bottom
-          if (answerRef.current) {
-            answerRef.current.scrollTop = answerRef.current.scrollHeight;
-          }
-        } catch {
-          // If both fail, throw the original LLM error
-          throw llmError;
-        }
+        },
+      });
+
+      setAnswer(response.text);
+      setIsStreaming(false);
+
+      if (answerRef.current) {
+        answerRef.current.scrollTop = answerRef.current.scrollHeight;
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to get answer';

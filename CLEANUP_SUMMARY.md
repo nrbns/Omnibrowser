@@ -74,6 +74,13 @@
   1. Split pdf.js worker into separate Tauri asset to keep web bundle lean.
   2. Audit `services/multiSourceSearch` + langchain imports for tree-shaking (currently bundled in `core-ai` chunk).
 
+## 🤖 AI Bundle Trim (2025-11-24)
+
+- Removed the client-side LLM adapter fallback (`src/core/llm/adapter.ts`) and routed all tasks through the Redix backend `AIEngine`, which now surfaces errors if the backend is unreachable instead of silently falling back to browser keys.
+- Updated AskAboutPage, ReaderOverlay, and BottomStatus to reuse `aiEngine` instead of importing the adapter directly. This keeps AI logic consolidated and lets us tree-shake the heavy multi-provider code.
+- Result: `core-ai` chunk shrank from ~36.1 kB gzip → ~30.6 kB gzip during `npm run analyze`, and the client no longer ships OpenAI/Anthropic/Mistral request code.
+- Follow-up: monitor `core-ai` chunk; next savings come from lazy-loading the Agent Console route’s AI helpers or progressively loading `core/agent/tools`.
+
 Re-run `npm run analyze` after each refinement to track deltas.
 
 

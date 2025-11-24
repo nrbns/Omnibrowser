@@ -53,9 +53,10 @@ export default defineConfig({
         assetFileNames: 'assets/[name]-[hash].[ext]',
         // Optimize chunk splitting for better loading performance
         manualChunks: id => {
-          // Split node_modules into separate chunks
+          if (id.includes('langchain') || id.includes('@langchain')) {
+            return 'vendor-langchain';
+          }
           if (id.includes('node_modules')) {
-            // Large UI libraries - split into separate chunks
             if (id.includes('framer-motion')) {
               return 'vendor-framer-motion';
             }
@@ -65,55 +66,41 @@ export default defineConfig({
             if (id.includes('reactflow')) {
               return 'vendor-reactflow';
             }
-            // React and React DOM - core, load first
             if (id.includes('react-dom')) {
               return 'vendor-react-dom';
             }
             if (id.includes('react') && !id.includes('react-dom')) {
               return 'vendor-react';
             }
-            // Router - load early
             if (id.includes('react-router')) {
               return 'vendor-router';
             }
-            // Large libraries - lazy load
             if (id.includes('pdfjs-dist') || id.includes('pdf.worker')) {
               return 'vendor-pdf';
             }
             if (id.includes('mammoth')) {
               return 'vendor-mammoth';
             }
-            // Langchain and AI deps
-            if (id.includes('langchain') || id.includes('@langchain')) {
-              return 'vendor-langchain';
-            }
-            // Zustand state management
             if (id.includes('zustand')) {
               return 'vendor-zustand';
             }
-            // Lucide icons
             if (id.includes('lucide-react')) {
               return 'vendor-icons';
             }
-            // Other large vendors
             if (id.includes('date-fns') || id.includes('lodash') || id.includes('lunr')) {
               return 'vendor-utils';
             }
-            // Everything else from node_modules
             return 'vendor';
           }
-          // Split mode components (already handled by lazy loading, but ensure they're in separate chunks)
           if (id.includes('/modes/')) {
             const modeMatch = id.match(/\/modes\/([^/]+)/);
             if (modeMatch) {
               return `mode-${modeMatch[1]}`;
             }
           }
-          // Split core AI components
           if (id.includes('/core/ai/') || id.includes('/core/agents/')) {
             return 'core-ai';
           }
-          // Split SuperMemory components
           if (id.includes('/core/supermemory/')) {
             return 'core-memory';
           }
