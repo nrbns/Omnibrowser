@@ -693,6 +693,7 @@ fastify.post('/api/agent/query', async (request, reply) => {
       summary: llmResult.summary,
       highlights: llmResult.highlights,
       model: llmResult.model,
+      diagnostics: llmResult.diagnostics,
       sources: [
         {
           url: url || 'text-input',
@@ -728,15 +729,22 @@ fastify.post('/api/agent/query', async (request, reply) => {
     });
   } catch (error) {
     request.log.error({ error }, 'LLM analysis failed');
+    const providerUnavailable =
+      error?.code === 'LLM_PROVIDER_UNAVAILABLE' || error?.name === 'LLMProviderUnavailableError';
     // Check if circuit is open
-    if (LLMCircuit.opened) {
+    if (LLMCircuit.opened || providerUnavailable) {
       return reply.status(503).send({
         error: 'llm-circuit-open',
-        message: 'LLM service temporarily unavailable',
+        message: providerUnavailable
+          ? 'All AI providers are temporarily unavailable'
+          : 'LLM service temporarily unavailable',
         jobId,
+        attempts: error?.attempts || error?.metadata?.attempts,
       });
     }
-    return reply.status(500).send({ error: 'analysis-failed', jobId });
+    return reply
+      .status(500)
+      .send({ error: 'analysis-failed', jobId, message: error?.message ?? 'analysis failed' });
   }
 });
 

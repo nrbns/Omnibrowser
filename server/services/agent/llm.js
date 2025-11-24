@@ -8,7 +8,10 @@ const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-3-haiku-20240307';
 const LLM_PROVIDER = process.env.LLM_PROVIDER || (OPENAI_API_KEY ? 'openai' : 'ollama');
+const LLM_FALLBACKS = process.env.LLM_FALLBACKS || '';
 
 /**
  * Extract plain text from HTML
@@ -130,6 +133,97 @@ async function callOpenAI(messages, options = {}) {
 }
 
 /**
+ * Prepare Anthropic payload
+ */
+function formatAnthropicMessages(messages) {
+  let systemPrompt = 'You are a helpful assistant.';
+  const chatMessages = [];
+  for (const message of messages) {
+    if (message.role === 'system') {
+      if (message.content) {
+        systemPrompt = message.content;
+      }
+      continue;
+    }
+    chatMessages.push({
+      role: message.role === 'assistant' ? 'assistant' : 'user',
+      content: [
+        {
+          type: 'text',
+          text: message.content,
+        },
+      ],
+    });
+  }
+  if (chatMessages.length === 0) {
+    chatMessages.push({
+      role: 'user',
+      content: [{ type: 'text', text: 'Provide a concise summary.' }],
+    });
+  }
+  return { systemPrompt, chatMessages };
+}
+
+/**
+ * Call Anthropic API
+ */
+async function callAnthropic(messages, options = {}) {
+  if (!ANTHROPIC_API_KEY) {
+    throw new Error('Anthropic API key not configured');
+  }
+  const model = options.model || ANTHROPIC_MODEL;
+  const temperature = options.temperature ?? 0.0;
+  const maxTokens = options.maxTokens ?? 2000;
+  const { systemPrompt, chatMessages } = formatAnthropicMessages(messages);
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model,
+      system: systemPrompt,
+      max_tokens: maxTokens,
+      temperature,
+      messages: chatMessages,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Anthropic API error: ${response.status} ${errorText}`);
+  }
+
+  const data = await response.json();
+  const contentBlocks = Array.isArray(data.content) ? data.content : [];
+  const text = contentBlocks
+    .map(block => {
+      if (block.type === 'text') {
+        return block.text;
+      }
+      if (Array.isArray(block.content)) {
+        return block.content
+          .map(part => (typeof part.text === 'string' ? part.text : ''))
+          .join('\n')
+          .trim();
+      }
+      return '';
+    })
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+
+  return {
+    answer: text,
+    model: data.model || model,
+    tokensUsed: data.usage?.output_tokens || 0,
+  };
+}
+
+/**
  * Build prompt for task
  */
 function buildPrompt(task, question, inputText, url) {
@@ -162,6 +256,78 @@ function buildPrompt(task, question, inputText, url) {
   }
 }
 
+function resolveProviderOrder() {
+  const preferred = [];
+  const normalizedPrimary = (LLM_PROVIDER || '').trim().toLowerCase();
+  if (normalizedPrimary) {
+    preferred.push(normalizedPrimary);
+  }
+  if (LLM_FALLBACKS) {
+    preferred.push(
+      ...LLM_FALLBACKS.split(',')
+        .map(token => token.trim().toLowerCase())
+        .filter(Boolean)
+    );
+  }
+  if (OPENAI_API_KEY) {
+    preferred.push('openai');
+  }
+  if (ANTHROPIC_API_KEY) {
+    preferred.push('anthropic');
+  }
+  preferred.push('ollama');
+
+  const seen = new Set();
+  return preferred.filter(provider => {
+    if (seen.has(provider)) {
+      return false;
+    }
+    seen.add(provider);
+    if (provider === 'openai') {
+      return Boolean(OPENAI_API_KEY);
+    }
+    if (provider === 'anthropic') {
+      return Boolean(ANTHROPIC_API_KEY);
+    }
+    if (provider === 'ollama') {
+      return true;
+    }
+    return false;
+  });
+}
+
+async function invokeProvider(provider, messages, options) {
+  switch (provider) {
+    case 'openai':
+      return callOpenAI(messages, options);
+    case 'anthropic':
+      return callAnthropic(messages, options);
+    case 'ollama':
+    default:
+      return callOllama(messages, options);
+  }
+}
+
+async function runWithProviderFallback(messages, options = {}) {
+  const providers = resolveProviderOrder();
+  const attempts = [];
+  for (const provider of providers) {
+    try {
+      const result = await invokeProvider(provider, messages, options);
+      return { result, provider, attempts };
+    } catch (error) {
+      attempts.push({
+        provider,
+        message: error?.message || 'unknown-error',
+      });
+      if (process.env.NODE_ENV !== 'test') {
+        console.warn(`[llm] Provider ${provider} failed`, error?.message || error);
+      }
+    }
+  }
+  return { result: null, provider: null, attempts };
+}
+
 /**
  * Analyze content with LLM
  */
@@ -192,17 +358,21 @@ export async function analyzeWithLLM({
     { role: 'user', content: user },
   ];
 
-  // Call LLM
-  let llmResult;
-  try {
-    if (LLM_PROVIDER === 'openai' && OPENAI_API_KEY) {
-      llmResult = await callOpenAI(messages, { temperature: 0.0 });
-    } else {
-      llmResult = await callOllama(messages, { temperature: 0.0 });
-    }
-  } catch (error) {
-    // Fallback to simple extraction if LLM fails
-    console.warn('[llm] LLM call failed, using fallback', error);
+  // Call LLM with provider fallback chain
+  const { result: providerResult, provider, attempts } = await runWithProviderFallback(messages, {
+    temperature: 0.0,
+  });
+
+  let llmResult = providerResult;
+  let fallbackUsed = false;
+  let providerName = provider || LLM_PROVIDER || 'ollama';
+
+  if (!llmResult) {
+    fallbackUsed = true;
+    providerName = 'fallback';
+    console.warn('[llm] All preferred LLM providers failed, using fallback summary', {
+      attempts,
+    });
     const fallbackAnswer =
       task === 'summarize'
         ? `Summary: ${text.slice(0, 500)}...`
@@ -231,10 +401,16 @@ export async function analyzeWithLLM({
     highlights: highlights.length > 0 ? highlights : [llmResult.answer.slice(0, 150)],
     model: {
       name: llmResult.model,
-      provider: LLM_PROVIDER,
+      provider: providerName,
       temperature: 0.0,
-      tokensUsed: llmResult.tokensUsed,
+      tokensUsed: llmResult.tokensUsed ?? 0,
+      fallbackUsed,
     },
     latencyMs,
+    diagnostics: {
+      provider: providerName,
+      fallbackUsed,
+      attempts,
+    },
   };
 }

@@ -21,8 +21,7 @@ import { TabContentSurface } from './TabContentSurface';
 // Lazy load heavy Redix services to avoid blocking initial render
 const initializeOptimizer = () =>
   import('../../core/redix/optimizer').then(m => m.initializeOptimizer());
-const startTabSuspensionService = () =>
-  import('../../core/redix/tab-suspension').then(m => m.startTabSuspensionService());
+const loadTabSuspensionModule = () => import('../../core/redix/tab-suspension');
 const initBatteryManager = () =>
   import('../../core/redix/battery-manager').then(m => m.initBatteryManager());
 const initMemoryManager = () =>
@@ -986,11 +985,34 @@ export function AppShell() {
 
   useEffect(() => {
     // Defer tab suspension service
-    setTimeout(() => {
-      startTabSuspensionService().catch(err => {
-        if (isDevEnv()) console.warn('[AppShell] Tab suspension init failed:', err);
-      });
+    let isActive = true;
+    let loadedModule: any | null = null;
+    const timerId = window.setTimeout(() => {
+      loadTabSuspensionModule()
+        .then(mod => {
+          loadedModule = mod;
+          if (!isActive) {
+            mod.stopTabSuspensionService?.();
+            return;
+          }
+          mod.startTabSuspensionService();
+        })
+        .catch(err => {
+          if (isDevEnv()) console.warn('[AppShell] Tab suspension init failed:', err);
+        });
     }, 1000);
+
+    return () => {
+      isActive = false;
+      window.clearTimeout(timerId);
+      if (loadedModule?.stopTabSuspensionService) {
+        loadedModule.stopTabSuspensionService();
+      } else {
+        loadTabSuspensionModule()
+          .then(mod => mod.stopTabSuspensionService?.())
+          .catch(() => {});
+      }
+    };
   }, []);
 
   useEffect(() => {
