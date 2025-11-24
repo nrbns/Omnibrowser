@@ -177,17 +177,7 @@ export function TabContentSurface({ tab, overlayActive }: TabContentSurfaceProps
       }
       setLoading(false);
       setFailedMessage(null);
-      if (!iframeRef.current) return;
-      try {
-        const doc = iframeRef.current.contentDocument;
-        void doc?.title;
-        setBlockedExternal(false);
-      } catch (error) {
-        if (import.meta.env.DEV) {
-          console.info('[TabContentSurface] cross-origin frame detected', error);
-        }
-        setBlockedExternal(true);
-      }
+      setBlockedExternal(false);
     };
 
     const handleError = () => {
