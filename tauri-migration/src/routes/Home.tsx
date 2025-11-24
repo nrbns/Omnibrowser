@@ -1,9 +1,6 @@
 import { useEffect, useState, Suspense, lazy } from 'react';
 import { useAppStore } from '../state/appStore';
 import { ipcEvents } from '../lib/ipc-events';
-import { ResearchSplit } from '../components/Panels/ResearchSplit';
-import { OmniDesk } from '../components/OmniDesk';
-import { ResearchPane } from '../components/research/ResearchPane';
 import { Loader2 } from 'lucide-react';
 import { ErrorBoundary } from '../core/errors/ErrorBoundary';
 
@@ -14,6 +11,13 @@ const DocumentMode = lazy(() =>
   import('../modes/docs/DocumentMode').then(m => ({ default: m.DocumentMode }))
 );
 const ThreatsPanel = lazy(() => import('../modes/threats'));
+const OmniDesk = lazy(() => import('../components/OmniDesk').then(m => ({ default: m.OmniDesk })));
+const ResearchSplit = lazy(() =>
+  import('../components/Panels/ResearchSplit').then(m => ({ default: m.ResearchSplit }))
+);
+const ResearchPane = lazy(() =>
+  import('../components/research/ResearchPane').then(m => ({ default: m.ResearchPane }))
+);
 
 // Enhanced loading fallback with skeleton loader
 const ModeLoadingFallback = () => (
@@ -93,7 +97,9 @@ export default function Home() {
           {/* z-20 is below TabStrip (z-50) to ensure tabs are always clickable */}
           <div className="absolute inset-0 z-20 pointer-events-none">
             <div className="pointer-events-auto h-full w-full overflow-hidden">
-              <OmniDesk variant="overlay" />
+              <Suspense fallback={<ModeLoadingFallback />}>
+                <OmniDesk variant="overlay" />
+              </Suspense>
             </div>
           </div>
         </div>
@@ -116,7 +122,9 @@ export default function Home() {
             {!isFullscreen && (
               <div className="absolute inset-0 pointer-events-none z-30">
                 <div className="pointer-events-auto h-full w-full overflow-hidden">
-                  <ResearchSplit />
+                  <Suspense fallback={<ModeLoadingFallback />}>
+                    <ResearchSplit />
+                  </Suspense>
                 </div>
               </div>
             )}
@@ -161,7 +169,11 @@ export default function Home() {
       )}
 
       {/* Research Pane - Available in all modes except Research (which has its own panel) */}
-      {!isFullscreen && mode !== 'Research' && <ResearchPane />}
+      {!isFullscreen && mode !== 'Research' && (
+        <Suspense fallback={<ModeLoadingFallback />}>
+          <ResearchPane />
+        </Suspense>
+      )}
     </div>
   );
 }

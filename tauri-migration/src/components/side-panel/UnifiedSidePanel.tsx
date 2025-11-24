@@ -63,8 +63,8 @@ export function UnifiedSidePanel({
               damping: 25,
               stiffness: 200,
             }}
-            className="fixed right-0 top-0 bottom-0 z-50 bg-[#1A1D28] border-l border-gray-800/60 flex flex-col shadow-2xl"
-            style={{ width: `${width}px` }}
+            className="fixed right-0 top-0 bottom-0 z-50 bg-[#1A1D28] border-l border-gray-800/60 flex flex-col shadow-2xl w-full md:w-[420px]"
+            style={{ width: '100%', maxWidth: `${width}px` }}
             role="dialog"
             aria-modal="true"
             aria-label="Side panel"
