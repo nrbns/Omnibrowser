@@ -20,34 +20,32 @@ import { useTabsStore } from '../../state/tabsStore';
 import { ipc } from '../../lib/ipc-typed';
 import { toast } from '../../utils/toast';
 import { HandsFreeMode } from './HandsFreeMode';
-import { getRegenSocket } from '../../lib/realtime/regen-socket';
+import RegenSocketClient, { createRegenSocket } from '../../lib/realtime/regen-socket';
+import { useRegenChatStore, type RegenChatMessage } from '../../state/regenChatStore';
+import { getEnvVar } from '../../lib/env';
+
+const REDIX_AGENT_API_BASE =
+  (getEnvVar('VITE_REDIX_URL') || getEnvVar('REDIX_URL') || 'http://localhost:4000').replace(
+    /\/$/,
+    ''
+  );
 
 export type RegenMode = 'research' | 'trade';
 
-interface RegenMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: number;
-  done?: boolean; // For streaming messages
-  commands?: Array<{ type: string; payload: Record<string, unknown> }>;
-}
-
-// RegenCommand type is now handled by RegenSocket client
-
 export function RegenSidebar() {
-  const [messages, setMessages] = useState<RegenMessage[]>([]);
+  const messages = useRegenChatStore(state => state.messages);
+  const chatStatus = useRegenChatStore(state => state.status);
+  const isConnected = useRegenChatStore(state => state.connected);
+  const appendLocalMessage = useRegenChatStore(state => state.appendLocalMessage);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [handsFreeMode, setHandsFreeMode] = useState(false);
   const [mode, setMode] = useState<RegenMode>('research');
   const [sessionId] = useState(() => `regen-${Date.now()}`);
-  const [isConnected] = useState(false);
-  const [_currentStatus, _setCurrentStatus] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
-  const socketRef = useRef<ReturnType<typeof getRegenSocket> | null>(null);
+  const socketRef = useRef<RegenSocketClient | null>(null);
   const { tabs, activeId } = useTabsStore();
   const activeTab = tabs.find(t => t.id === activeId);
 
@@ -100,6 +98,55 @@ export function RegenSidebar() {
     };
   }, []);
 
+  useEffect(() => {
+    const socket = createRegenSocket({
+      sessionId,
+      handlers: {
+        onMessage: event => {
+          useRegenChatStore.getState().upsertAssistantMessage(event);
+        },
+        onStatus: event => {
+          useRegenChatStore.getState().setStatus(event);
+        },
+        onNotification: event => {
+          useRegenChatStore.getState().addNotification(event);
+          const notify =
+            event.level === 'error'
+              ? toast.error
+              : event.level === 'warning'
+              ? toast.warning
+              : event.level === 'success'
+              ? toast.success
+              : toast.info;
+          notify(`${event.title}: ${event.message}`);
+        },
+        onError: event => {
+          useRegenChatStore.getState().setError(event.message);
+          toast.error(event.message);
+        },
+        onConnected: () => {
+          useRegenChatStore.getState().setConnected(true);
+        },
+        onDisconnected: () => {
+          useRegenChatStore.getState().setConnected(false);
+        },
+      },
+    });
+
+    socketRef.current = socket;
+
+    socket.connect(sessionId).catch(error => {
+      console.error('[Regen] WebSocket connection failed', error);
+      toast.error('Unable to connect to Regen stream');
+    });
+
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+      useRegenChatStore.getState().setConnected(false);
+    };
+  }, [sessionId]);
+
   // Track pending confirmation
   const [pendingConfirmation, setPendingConfirmation] = useState<{
     orderId?: string;
@@ -123,7 +170,7 @@ export function RegenSidebar() {
             pendingOrder: pendingConfirmation.pendingOrder,
           });
 
-          const confirmationMessage: RegenMessage = {
+          const confirmationMessage: RegenChatMessage = {
             id: `msg-${Date.now()}`,
             role: 'assistant',
             content: confirmed
@@ -131,7 +178,7 @@ export function RegenSidebar() {
               : '❌ Order cancelled.',
             timestamp: Date.now(),
           };
-          setMessages(prev => [...prev, confirmationMessage]);
+          appendLocalMessage(confirmationMessage);
           setPendingConfirmation(null);
         } catch (error) {
           console.error('[Regen] Trade confirmation failed:', error);
@@ -146,30 +193,20 @@ export function RegenSidebar() {
     setInput('');
 
     // Add user message
-    const userMessage: RegenMessage = {
+    const userMessage: RegenChatMessage = {
       id: `msg-${Date.now()}`,
       role: 'user',
       content: messageText,
       timestamp: Date.now(),
     };
-    setMessages(prev => [...prev, userMessage]);
+    appendLocalMessage(userMessage);
 
     try {
       // Send query via HTTP (response streams via WebSocket)
       const socket = socketRef.current;
       const clientId = socket?.getClientId() || `client-${Date.now()}`;
 
-      // Create placeholder message for streaming
-      const placeholderMessage: RegenMessage = {
-        id: `msg-${Date.now()}-streaming`,
-        role: 'assistant',
-        content: '',
-        timestamp: Date.now(),
-        done: false,
-      };
-      setMessages(prev => [...prev, placeholderMessage]);
-
-      const response = await fetch('http://localhost:4000/api/agent/query', {
+      const response = await fetch(`${REDIX_AGENT_API_BASE}/api/agent/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -199,13 +236,13 @@ export function RegenSidebar() {
       console.error('[Regen] Query failed:', error);
       toast.error('Failed to get response from Regen');
 
-      const errorMessage: RegenMessage = {
+      const errorMessage: RegenChatMessage = {
         id: `msg-${Date.now() + 1}`,
         role: 'assistant',
         content: 'Sorry, I encountered an error. Please try again.',
         timestamp: Date.now(),
       };
-      setMessages(prev => [...prev, errorMessage]);
+      appendLocalMessage(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -291,7 +328,9 @@ export function RegenSidebar() {
           <div className="text-center text-gray-400 mt-8">
             <Sparkles className="w-12 h-12 mx-auto mb-4 opacity-50" />
             <p className="text-sm">Ask me anything or use voice commands</p>
-            {_currentStatus && <p className="text-xs mt-2 text-blue-400">{_currentStatus}</p>}
+            {chatStatus?.detail && (
+              <p className="text-xs mt-2 text-blue-400">{chatStatus.detail}</p>
+            )}
             <p className="text-xs mt-2 text-gray-500">
               {mode === 'research' ? (
                 <>

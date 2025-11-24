@@ -1,10 +1,11 @@
 /**
  * Regen Real-Time WebSocket Client
- * Connects to backend and handles real-time events
+ * Connects to backend and handles real-time events with strongly typed routing.
  */
 
 import { v4 as uuidv4 } from 'uuid';
 import { ipc } from '../ipc-typed';
+import { getEnvVar } from '../env';
 
 export type RegenSocketEvent =
   | RegenMessageEvent
@@ -66,96 +67,218 @@ export interface RegenErrorEvent extends BaseEvent {
   recoverable?: boolean;
 }
 
-type EventHandler = (event: RegenSocketEvent) => void;
+export interface RegenSocketHandlers {
+  onMessage?: (event: RegenMessageEvent) => void;
+  onStatus?: (event: RegenStatusEvent) => void;
+  onCommand?: (event: RegenCommandEvent) => void | Promise<void>;
+  onNotification?: (event: RegenNotificationEvent) => void;
+  onError?: (event: RegenErrorEvent) => void;
+  onConnected?: () => void;
+  onDisconnected?: (event?: CloseEvent) => void;
+}
+
+export interface RegenSocketOptions {
+  clientId?: string;
+  sessionId?: string;
+  autoReconnect?: boolean;
+  reconnectDelayMs?: number;
+  maxReconnectAttempts?: number;
+  handlers?: Partial<RegenSocketHandlers>;
+}
+
+const noop = () => {};
+
+const defaultHandlers: Required<RegenSocketHandlers> = {
+  onMessage: noop,
+  onStatus: noop,
+  onCommand: async () => {
+    /* no-op */
+  },
+  onNotification: noop,
+  onError: event => {
+    console.error('[RegenSocket] error', event);
+  },
+  onConnected: noop,
+  onDisconnected: noop,
+};
+
+function resolveApiBase(): string {
+  const envUrl =
+    getEnvVar('VITE_REDIX_URL') ||
+    getEnvVar('REDIX_URL') ||
+    (typeof window !== 'undefined' ? (window as any).__REDIX_URL : undefined);
+  return (envUrl || 'http://localhost:4000').replace(/\/$/, '');
+}
+
+function buildAgentStreamUrl(baseUrl: string, clientId: string, sessionId?: string) {
+  const target = new URL(baseUrl);
+  target.pathname = '/agent/stream';
+  target.searchParams.set('clientId', clientId);
+  if (sessionId) {
+    target.searchParams.set('sessionId', sessionId);
+  }
+  if (target.protocol === 'http:') {
+    target.protocol = 'ws:';
+  } else if (target.protocol === 'https:') {
+    target.protocol = 'wss:';
+  }
+  return target.toString();
+}
+
+async function executeCommand(cmd: RegenCommandEvent['command']) {
+  switch (cmd.kind) {
+    case 'OPEN_TAB':
+      await ipc.regen.openTab({ url: cmd.url, background: cmd.background });
+      break;
+    case 'SCROLL':
+      await ipc.regen.scroll({ tabId: cmd.tabId, amount: cmd.amount });
+      break;
+    case 'CLICK_ELEMENT':
+      if (cmd.selector) {
+        await ipc.regen.clickElement({ tabId: cmd.tabId, selector: cmd.selector });
+      }
+      break;
+    case 'GO_BACK':
+      await ipc.regen.goBack({ tabId: cmd.tabId });
+      break;
+    case 'GO_FORWARD':
+      await ipc.regen.goForward({ tabId: cmd.tabId });
+      break;
+    case 'SWITCH_TAB':
+      await ipc.regen.switchTab({ id: cmd.tabId });
+      break;
+    case 'CLOSE_TAB':
+      await ipc.regen.closeTab({ tabId: cmd.tabId });
+      break;
+    case 'TYPE_INTO_ELEMENT':
+      await ipc.regen.typeIntoElement({
+        tabId: cmd.tabId,
+        selector: cmd.selector,
+        text: cmd.text,
+      });
+      break;
+    case 'SPEAK':
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        const utterance = new SpeechSynthesisUtterance(cmd.text);
+        utterance.lang = cmd.language;
+        window.speechSynthesis.speak(utterance);
+      }
+      break;
+    case 'STOP_SPEAKING':
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+      break;
+  }
+}
 
 class RegenSocketClient {
   private socket: WebSocket | null = null;
-  private clientId: string;
+  private readonly clientId: string;
+  private sessionId?: string;
+  private readonly autoReconnect: boolean;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 10;
-  private reconnectDelay = 2000;
+  private readonly maxReconnectAttempts: number;
+  private readonly reconnectDelayMs: number;
   private isReconnecting = false;
-  private handlers: Map<string, Set<EventHandler>> = new Map();
-  private messageBuffer: string = ''; // For streaming messages
+  private manualClose = false;
+  private handlers: Required<RegenSocketHandlers>;
 
-  constructor(clientId?: string) {
-    this.clientId = clientId || `client-${uuidv4()}`;
+  constructor(options: RegenSocketOptions = {}) {
+    this.clientId = options.clientId || `client-${uuidv4()}`;
+    this.sessionId = options.sessionId;
+    this.autoReconnect = options.autoReconnect ?? true;
+    this.maxReconnectAttempts = options.maxReconnectAttempts ?? 5;
+    this.reconnectDelayMs = options.reconnectDelayMs ?? 1500;
+    this.handlers = {
+      ...defaultHandlers,
+      onCommand: async event => {
+        await executeCommand(event.command);
+      },
+      ...(options.handlers || {}),
+    } as Required<RegenSocketHandlers>;
   }
 
-  /**
-   * Connect to WebSocket server
-   */
-  connect(sessionId?: string): Promise<void> {
+  updateHandlers(partial: Partial<RegenSocketHandlers>) {
+    this.handlers = {
+      ...this.handlers,
+      ...partial,
+    };
+  }
+
+  connect(nextSessionId?: string): Promise<void> {
+    if (nextSessionId) {
+      this.sessionId = nextSessionId;
+    }
+
     return new Promise((resolve, reject) => {
-      // Prevent multiple connection attempts
       if (
         this.socket &&
         (this.socket.readyState === WebSocket.OPEN ||
           this.socket.readyState === WebSocket.CONNECTING)
       ) {
-        console.log('[RegenSocket] Already connected or connecting');
         resolve();
         return;
       }
 
-      // Use window.location for WebSocket URL in Electron
-      const wsUrl = process.env.VITE_REDIX_URL || 'ws://localhost:4000';
-      const url = `${wsUrl}/agent/stream?clientId=${this.clientId}${sessionId ? `&sessionId=${sessionId}` : ''}`;
+      const url = buildAgentStreamUrl(resolveApiBase(), this.clientId, this.sessionId);
 
       try {
+        this.manualClose = false;
         this.socket = new WebSocket(url);
 
-        // Set connection timeout
         const timeout = setTimeout(() => {
           if (this.socket && this.socket.readyState !== WebSocket.OPEN) {
             this.socket.close();
             reject(new Error('WebSocket connection timeout'));
           }
-        }, 10000); // 10 second timeout
+        }, 10_000);
 
         this.socket.onopen = () => {
           clearTimeout(timeout);
-          console.log('[RegenSocket] Connected', { clientId: this.clientId });
           this.reconnectAttempts = 0;
           this.isReconnecting = false;
-          this.emit('connected', {} as any);
+          this.handlers.onConnected();
           resolve();
         };
 
         this.socket.onmessage = ev => {
           try {
             const event: RegenSocketEvent = JSON.parse(ev.data);
-            this.handleEvent(event);
+            this.routeEvent(event);
           } catch (error) {
             console.error('[RegenSocket] Failed to parse event', error);
           }
         };
 
-        this.socket.onclose = event => {
+        this.socket.onerror = () => {
           clearTimeout(timeout);
-          console.log('[RegenSocket] Disconnected', { code: event.code, reason: event.reason });
-          this.emit('disconnected', {} as any);
-
-          // Only attempt reconnect if not a manual close
-          if (event.code !== 1000) {
-            this.attemptReconnect(sessionId);
-          }
-        };
-
-        this.socket.onerror = error => {
-          clearTimeout(timeout);
-          console.error('[RegenSocket] Error', error);
-          this.emit('error', {
+          const event: RegenErrorEvent = {
             id: uuidv4(),
             clientId: this.clientId,
-            sessionId: sessionId || '',
+            sessionId: this.sessionId || '',
+            timestamp: Date.now(),
+            version: 1,
             type: 'error',
             code: 'WEBSOCKET_ERROR',
             message: 'WebSocket connection error',
-            timestamp: Date.now(),
-            version: 1,
-          } as RegenErrorEvent);
-          reject(error);
+            recoverable: true,
+          };
+          this.handlers.onError(event);
+          reject(new Error(event.message));
+        };
+
+        this.socket.onclose = closeEvent => {
+          clearTimeout(timeout);
+          this.handlers.onDisconnected(closeEvent);
+
+          if (this.manualClose || !this.autoReconnect) {
+            return;
+          }
+
+          if (closeEvent.code !== 1000) {
+            this.scheduleReconnect();
+          }
         };
       } catch (error) {
         reject(error);
@@ -163,199 +286,88 @@ class RegenSocketClient {
     });
   }
 
-  /**
-   * Attempt to reconnect
-   */
-  private attemptReconnect(sessionId?: string) {
-    if (this.isReconnecting) return;
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('[RegenSocket] Max reconnect attempts reached');
-      this.emit('reconnect_failed', {} as any);
+  private scheduleReconnect() {
+    if (this.isReconnecting || this.reconnectAttempts >= this.maxReconnectAttempts) {
       return;
     }
 
     this.isReconnecting = true;
-    this.reconnectAttempts++;
-
-    console.log(`[RegenSocket] Reconnecting (attempt ${this.reconnectAttempts})...`);
+    this.reconnectAttempts += 1;
 
     setTimeout(() => {
-      this.connect(sessionId).catch(() => {
+      this.connect(this.sessionId).catch(() => {
         this.isReconnecting = false;
       });
-    }, this.reconnectDelay * this.reconnectAttempts);
+    }, this.reconnectDelayMs * this.reconnectAttempts);
   }
 
-  /**
-   * Handle incoming event
-   */
-  private handleEvent(event: RegenSocketEvent) {
-    // Emit to specific type handlers
-    this.emit(event.type, event);
-
-    // Emit to all handlers
-    this.emit('*', event);
-
-    // Handle commands immediately
-    if (event.type === 'command') {
-      this.handleCommand(event.command);
+  private routeEvent(event: RegenSocketEvent) {
+    switch (event.type) {
+      case 'message':
+        this.handlers.onMessage(event);
+        break;
+      case 'status':
+        this.handlers.onStatus(event);
+        break;
+      case 'notification':
+        this.handlers.onNotification(event);
+        break;
+      case 'error':
+        this.handlers.onError(event);
+        break;
+      case 'command':
+        Promise.resolve(this.handlers.onCommand(event)).catch(error => {
+          console.error('[RegenSocket] command handler failed', error);
+        });
+        break;
     }
   }
 
-  /**
-   * Handle Regen commands
-   */
-  private async handleCommand(cmd: RegenCommandEvent['command']) {
-    try {
-      switch (cmd.kind) {
-        case 'OPEN_TAB':
-          await ipc.regen.openTab({ url: cmd.url, background: cmd.background });
-          break;
-
-        case 'SCROLL':
-          await ipc.regen.scroll({ tabId: cmd.tabId, amount: cmd.amount });
-          break;
-
-        case 'CLICK_ELEMENT':
-          if (cmd.selector) {
-            await ipc.regen.clickElement({ tabId: cmd.tabId, selector: cmd.selector });
-          }
-          break;
-
-        case 'GO_BACK':
-          await ipc.regen.goBack({ tabId: cmd.tabId });
-          break;
-
-        case 'GO_FORWARD':
-          await ipc.regen.goForward({ tabId: cmd.tabId });
-          break;
-
-        case 'SWITCH_TAB':
-          await ipc.regen.switchTab({ id: cmd.tabId });
-          break;
-
-        case 'CLOSE_TAB':
-          await ipc.regen.closeTab({ tabId: cmd.tabId });
-          break;
-
-        case 'TYPE_INTO_ELEMENT':
-          await ipc.regen.typeIntoElement({
-            tabId: cmd.tabId,
-            selector: cmd.selector,
-            text: cmd.text,
-          });
-          break;
-
-        case 'SPEAK':
-          // Use browser TTS
-          if ('speechSynthesis' in window) {
-            const utterance = new SpeechSynthesisUtterance(cmd.text);
-            utterance.lang = cmd.language;
-            window.speechSynthesis.speak(utterance);
-          }
-          break;
-
-        case 'STOP_SPEAKING':
-          if ('speechSynthesis' in window) {
-            window.speechSynthesis.cancel();
-          }
-          break;
-      }
-    } catch (error) {
-      console.error('[RegenSocket] Command execution failed', { cmd, error });
-    }
-  }
-
-  /**
-   * Subscribe to events
-   */
-  on(eventType: string, handler: EventHandler) {
-    if (!this.handlers.has(eventType)) {
-      this.handlers.set(eventType, new Set());
-    }
-    this.handlers.get(eventType)!.add(handler);
-  }
-
-  /**
-   * Unsubscribe from events
-   */
-  off(eventType: string, handler: EventHandler) {
-    const handlers = this.handlers.get(eventType);
-    if (handlers) {
-      handlers.delete(handler);
-    }
-  }
-
-  /**
-   * Emit event to handlers
-   */
-  private emit(eventType: string, event: RegenSocketEvent) {
-    const handlers = this.handlers.get(eventType);
-    if (handlers) {
-      handlers.forEach(handler => {
-        try {
-          handler(event);
-        } catch (error) {
-          console.error('[RegenSocket] Handler error', { eventType, error });
-        }
-      });
-    }
-  }
-
-  /**
-   * Send message to server
-   */
   send(message: Record<string, unknown>) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(message));
-    } else {
-      console.warn('[RegenSocket] Cannot send message, socket not open');
+      return;
     }
+    console.warn('[RegenSocket] Cannot send message, socket not open');
   }
 
-  /**
-   * Disconnect
-   */
   disconnect() {
     if (this.socket) {
-      this.socket.close();
+      this.manualClose = true;
+      this.socket.close(1000, 'client_closed');
       this.socket = null;
     }
   }
 
-  /**
-   * Get client ID
-   */
   getClientId(): string {
     return this.clientId;
   }
 
-  /**
-   * Check if connected
-   */
   isConnected(): boolean {
     return this.socket !== null && this.socket.readyState === WebSocket.OPEN;
   }
 }
 
-// Singleton instance
+export function createRegenSocket(options?: RegenSocketOptions) {
+  return new RegenSocketClient(options);
+}
+
 let socketInstance: RegenSocketClient | null = null;
 
-/**
- * Get or create socket instance
- */
-export function getRegenSocket(clientId?: string): RegenSocketClient {
+export function getRegenSocket(options?: string | RegenSocketOptions) {
   if (!socketInstance) {
-    socketInstance = new RegenSocketClient(clientId);
+    socketInstance =
+      typeof options === 'string'
+        ? new RegenSocketClient({ clientId: options })
+        : new RegenSocketClient(options);
+  } else if (options && typeof options === 'object') {
+    socketInstance.updateHandlers(options.handlers ?? {});
   }
   return socketInstance;
 }
 
-/**
- * Connect Regen socket
- */
-export function connectRegenSocket(sessionId?: string): Promise<void> {
-  const socket = getRegenSocket();
+export function connectRegenSocket(sessionId?: string, handlers?: Partial<RegenSocketHandlers>) {
+  const socket = getRegenSocket({ sessionId, handlers });
   return socket.connect(sessionId);
 }
 
