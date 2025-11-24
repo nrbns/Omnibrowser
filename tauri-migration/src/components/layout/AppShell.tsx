@@ -16,6 +16,7 @@ import { useTabGraphStore } from '../../state/tabGraphStore';
 import { isDevEnv, isElectronRuntime } from '../../lib/env';
 import { TabContentSurface } from './TabContentSurface';
 import { TabManager } from './TabManager';
+import { MemoryWarningBanner } from '../system/MemoryWarningBanner';
 // Voice components disabled by user request
 // import { VoiceTips } from '../voice/VoiceTips';
 // import VoiceCompanion from '../voice/VoiceCompanion';
@@ -1496,6 +1497,7 @@ export function AppShell() {
   return (
     <>
       <TabManager />
+      <MemoryWarningBanner />
       <div
         className="flex h-screen w-screen flex-col overflow-hidden bg-slate-950 text-slate-100"
         data-app-shell="true"
