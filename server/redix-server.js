@@ -35,6 +35,8 @@ import crypto from 'crypto';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { registerRegenSocketServer } from './realtime/regenSocket.js';
+import { handleMessageSafe } from './agent/core.js';
 
 // Create require function for CommonJS modules
 const __filename = fileURLToPath(import.meta.url);
@@ -583,6 +585,7 @@ fastify.post('/api/profile/signout', async () => ({ ok: true }));
  * Body: { url, text?, question, task?: 'summarize'|'qa'|'threat', waitFor?: number, callback_url?: string, userId?: string }
  */
 fastify.post('/api/agent/query', async (request, reply) => {
+  const body = request.body ?? {};
   const {
     url,
     text,
@@ -592,6 +595,29 @@ fastify.post('/api/agent/query', async (request, reply) => {
     callback_url,
     userId,
   } = request.body ?? {};
+
+  const regenMessage = typeof body?.message === 'string' ? body.message : text;
+  const regenClientId = typeof body?.clientId === 'string' ? body.clientId.trim() : null;
+  const regenMode = body?.mode || mode;
+  const regenLocale = body?.locale;
+
+  if (regenClientId && regenMessage) {
+    const requestId = uuidv4();
+    handleMessageSafe({
+      clientId: regenClientId,
+      text: regenMessage,
+      mode: regenMode || 'research',
+      locale: regenLocale || body?.language || 'en',
+      requestId,
+    }).catch(error => {
+      request.log.error({ error }, 'regen realtime handler failed');
+    });
+    return reply.status(202).send({
+      status: 'accepted',
+      clientId: regenClientId,
+      requestId,
+    });
+  }
 
   if (!url && !text) {
     return reply.status(400).send({ error: 'url-or-text-required' });
@@ -693,6 +719,7 @@ fastify.post('/api/agent/query', async (request, reply) => {
       summary: llmResult.summary,
       highlights: llmResult.highlights,
       model: llmResult.model,
+      diagnostics: llmResult.diagnostics,
       sources: [
         {
           url: url || 'text-input',
@@ -728,15 +755,22 @@ fastify.post('/api/agent/query', async (request, reply) => {
     });
   } catch (error) {
     request.log.error({ error }, 'LLM analysis failed');
+    const providerUnavailable =
+      error?.code === 'LLM_PROVIDER_UNAVAILABLE' || error?.name === 'LLMProviderUnavailableError';
     // Check if circuit is open
-    if (LLMCircuit.opened) {
+    if (LLMCircuit.opened || providerUnavailable) {
       return reply.status(503).send({
         error: 'llm-circuit-open',
-        message: 'LLM service temporarily unavailable',
+        message: providerUnavailable
+          ? 'All AI providers are temporarily unavailable'
+          : 'LLM service temporarily unavailable',
         jobId,
+        attempts: error?.attempts || error?.metadata?.attempts,
       });
     }
-    return reply.status(500).send({ error: 'analysis-failed', jobId });
+    return reply
+      .status(500)
+      .send({ error: 'analysis-failed', jobId, message: error?.message ?? 'analysis failed' });
   }
 });
 
@@ -1915,6 +1949,7 @@ fastify.get('/metrics/prom', async (_request, reply) => {
   try {
     if (enableWebSockets) {
       await fastify.register(websocketPlugin);
+      await registerRegenSocketServer(fastify);
     }
     // Initialize WebSocket server before listening
     const httpServer = fastify.server;

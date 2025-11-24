@@ -27,6 +27,39 @@ let initialized = false;
 let evaluateTimer: ReturnType<typeof setInterval> | null = null;
 let latestTabs: TabSummary[] = [];
 const suspendQueue = new Set<string>();
+const cleanupCallbacks: Array<() => void> = [];
+let beforeUnloadHandler: (() => void) | null = null;
+
+function registerCleanup(callback: () => void) {
+  cleanupCallbacks.push(callback);
+}
+
+export function stopTabSuspensionService(): void {
+  if (!initialized) {
+    return;
+  }
+  initialized = false;
+  if (evaluateTimer) {
+    clearInterval(evaluateTimer);
+    evaluateTimer = null;
+  }
+  while (cleanupCallbacks.length) {
+    const cleanup = cleanupCallbacks.pop();
+    if (cleanup) {
+      try {
+        cleanup();
+      } catch (error) {
+        console.warn('[Redix] Tab suspension cleanup failed:', error);
+      }
+    }
+  }
+  suspendQueue.clear();
+  latestTabs = [];
+  if (beforeUnloadHandler && typeof window !== 'undefined') {
+    window.removeEventListener('beforeunload', beforeUnloadHandler);
+    beforeUnloadHandler = null;
+  }
+}
 
 export function startTabSuspensionService(): void {
   if (initialized || typeof window === 'undefined' || !isElectronRuntime()) {
@@ -58,6 +91,7 @@ export function startTabSuspensionService(): void {
   };
 
   const unsubscribeTabs = ipcEvents.on('tabs:updated', handleTabsUpdated);
+  registerCleanup(unsubscribeTabs);
 
   // Ensure we react when tabs close or active tab changes
   const unsubscribeActive = useTabsStore.subscribe(
@@ -72,6 +106,7 @@ export function startTabSuspensionService(): void {
       }
     }
   );
+  registerCleanup(unsubscribeActive);
 
   const unsubscribeTabsStore = useTabsStore.subscribe(
     state => state.tabs,
@@ -79,27 +114,26 @@ export function startTabSuspensionService(): void {
       cleanupResolvedSuspensions();
     }
   );
+  registerCleanup(unsubscribeTabsStore);
 
   evaluateTimer = setInterval(() => {
     evaluateSuspensions(inactivityThresholdMs).catch(() => {});
   }, EVALUATION_INTERVAL);
+  registerCleanup(() => {
+    if (evaluateTimer) {
+      clearInterval(evaluateTimer);
+      evaluateTimer = null;
+    }
+  });
 
   // Run an immediate pass once tabs list is available
   evaluateSuspensions(inactivityThresholdMs).catch(() => {});
 
   // Attach cleanup to window unload
-  window.addEventListener(
-    'beforeunload',
-    () => {
-      unsubscribeTabs();
-      unsubscribeActive();
-      unsubscribeTabsStore();
-      if (evaluateTimer) {
-        clearInterval(evaluateTimer);
-      }
-    },
-    { once: true }
-  );
+  if (!beforeUnloadHandler) {
+    beforeUnloadHandler = () => stopTabSuspensionService();
+    window.addEventListener('beforeunload', beforeUnloadHandler);
+  }
 }
 
 async function evaluateSuspensions(thresholdMs: number): Promise<void> {

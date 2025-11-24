@@ -44,11 +44,12 @@ This guide shows exactly how real-time communication works in OmniBrowser:
 When Regen sidebar loads:
 
 ```typescript
-import { connectRegenSocket } from '../../lib/realtime/regen-socket';
+import { createRegenRealtimeClient } from '../../regen/realtime';
 
 // Connect once on mount
 useEffect(() => {
-  connectRegenSocket(sessionId);
+  const client = createRegenRealtimeClient(sessionId);
+  client.connect();
 }, [sessionId]);
 ```
 
@@ -137,7 +138,7 @@ npm run dev:redix
 
 ✅ **Already implemented:**
 
-- `src/lib/realtime/regen-socket.ts`
+- `src/regen/realtime.ts`
 - Integrated into `src/components/regen/RegenSidebar.tsx`
 
 **Features:**

@@ -3,6 +3,7 @@
 import React, { Suspense } from 'react';
 import ReactDOM from 'react-dom/client';
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
 import './styles/globals.css';
 import './styles/mode-themes.css';
 import './lib/battery';
@@ -12,6 +13,7 @@ import { syncRendererTelemetry } from './lib/monitoring/sentry-client';
 import { syncAnalyticsOptIn, trackPageView } from './lib/monitoring/analytics-client';
 import { ipc } from './lib/ipc-typed';
 import { ThemeProvider } from './ui/theme';
+import { AppErrorBoundary } from './components/AppErrorBoundary';
 
 // Import test utility in dev mode
 if (isDevEnv()) {
@@ -21,7 +23,7 @@ if (isDevEnv()) {
 }
 
 // Tier 2: Enhanced Error Boundary
-import { GlobalErrorBoundary } from './core/errors/ErrorBoundary';
+import { GlobalErrorBoundary, ErrorBoundary } from './core/errors/ErrorBoundary';
 import { startSnapshotting } from './core/recovery';
 
 // Tier 3: Initialize services
@@ -79,7 +81,6 @@ const ConsentTimelinePage = lazyWithErrorHandling(
   () => import('./routes/ConsentTimeline'),
   'ConsentTimelinePage'
 );
-
 function LoadingFallback() {
   return (
     <div
@@ -112,23 +113,133 @@ const router = createBrowserRouter(
     {
       path: '/',
       element: (
-        <Suspense fallback={<LoadingFallback />}>
-          <AppShell />
-        </Suspense>
+        <ErrorBoundary componentName="AppShell" level="page">
+          <Suspense fallback={<LoadingFallback />}>
+            <AppShell />
+          </Suspense>
+        </ErrorBoundary>
       ),
       children: [
-        { index: true, element: <Suspense fallback={<LoadingFallback />}><Home /></Suspense> },
-        { path: 'settings', element: <Suspense fallback={<LoadingFallback />}><Settings /></Suspense> },
-        { path: 'w/:id', element: <Suspense fallback={<LoadingFallback />}><Workspace /></Suspense> },
-        { path: 'agent', element: <Suspense fallback={<LoadingFallback />}><AgentConsole /></Suspense> },
-        { path: 'runs', element: <Suspense fallback={<LoadingFallback />}><Runs /></Suspense> },
-        { path: 'replay/:id', element: <Suspense fallback={<LoadingFallback />}><Replay /></Suspense> },
-        { path: 'playbooks', element: <Suspense fallback={<LoadingFallback />}><PlaybookForge /></Suspense> },
-        { path: 'history', element: <Suspense fallback={<LoadingFallback />}><HistoryPage /></Suspense> },
-        { path: 'downloads', element: <Suspense fallback={<LoadingFallback />}><DownloadsPage /></Suspense> },
-        { path: 'watchers', element: <Suspense fallback={<LoadingFallback />}><WatchersPage /></Suspense> },
-        { path: 'video', element: <Suspense fallback={<LoadingFallback />}><VideoPage /></Suspense> },
-        { path: 'consent-timeline', element: <Suspense fallback={<LoadingFallback />}><ConsentTimelinePage /></Suspense> },
+        {
+          index: true,
+          element: (
+            <ErrorBoundary componentName="HomeRoute" level="page">
+              <Suspense fallback={<LoadingFallback />}>
+                <Home />
+              </Suspense>
+            </ErrorBoundary>
+          ),
+        },
+        {
+          path: 'settings',
+          element: (
+            <ErrorBoundary componentName='SettingsRoute' level='page'>
+              <Suspense fallback={<LoadingFallback />}>
+                <Settings />
+              </Suspense>
+            </ErrorBoundary>
+          ),
+        },
+        {
+          path: 'w/:id',
+          element: (
+            <ErrorBoundary componentName='WorkspaceRoute' level='page'>
+              <Suspense fallback={<LoadingFallback />}>
+                <Workspace />
+              </Suspense>
+            </ErrorBoundary>
+          ),
+        },
+        {
+          path: 'agent',
+          element: (
+            <ErrorBoundary componentName='AgentConsoleRoute' level='page'>
+              <Suspense fallback={<LoadingFallback />}>
+                <AgentConsole />
+              </Suspense>
+            </ErrorBoundary>
+          ),
+        },
+        {
+          path: 'runs',
+          element: (
+            <ErrorBoundary componentName='RunsRoute' level='page'>
+              <Suspense fallback={<LoadingFallback />}>
+                <Runs />
+              </Suspense>
+            </ErrorBoundary>
+          ),
+        },
+        {
+          path: 'replay/:id',
+          element: (
+            <ErrorBoundary componentName='ReplayRoute' level='page'>
+              <Suspense fallback={<LoadingFallback />}>
+                <Replay />
+              </Suspense>
+            </ErrorBoundary>
+          ),
+        },
+        {
+          path: 'playbooks',
+          element: (
+            <ErrorBoundary componentName='PlaybookForgeRoute' level='page'>
+              <Suspense fallback={<LoadingFallback />}>
+                <PlaybookForge />
+              </Suspense>
+            </ErrorBoundary>
+          ),
+        },
+        {
+          path: 'history',
+          element: (
+            <ErrorBoundary componentName='HistoryRoute' level='page'>
+              <Suspense fallback={<LoadingFallback />}>
+                <HistoryPage />
+              </Suspense>
+            </ErrorBoundary>
+          ),
+        },
+        {
+          path: 'downloads',
+          element: (
+            <ErrorBoundary componentName='DownloadsRoute' level='page'>
+              <Suspense fallback={<LoadingFallback />}>
+                <DownloadsPage />
+              </Suspense>
+            </ErrorBoundary>
+          ),
+        },
+        {
+          path: 'watchers',
+          element: (
+            <ErrorBoundary componentName='WatchersRoute' level='page'>
+              <Suspense fallback={<LoadingFallback />}>
+                <WatchersPage />
+              </Suspense>
+            </ErrorBoundary>
+          ),
+        },
+        {
+          path: 'video',
+          element: (
+            <ErrorBoundary componentName='VideoRoute' level='page'>
+              <Suspense fallback={<LoadingFallback />}>
+                <VideoPage />
+              </Suspense>
+            </ErrorBoundary>
+          ),
+        },
+        {
+          path: 'consent-timeline',
+          element: (
+            <ErrorBoundary componentName='ConsentTimelineRoute' level='page'>
+              <Suspense fallback={<LoadingFallback />}>
+                <ConsentTimelinePage />
+              </Suspense>
+            </ErrorBoundary>
+          ),
+        },
       ],
     },
   ],
@@ -195,13 +306,25 @@ try {
 
   root.render(
     <React.StrictMode>
-      <ThemeProvider>
-        <GlobalErrorBoundary>
-          <Suspense fallback={<LoadingFallback />}>
-            <RouterProvider router={router} future={{ v7_startTransition: true }} />
-          </Suspense>
-        </GlobalErrorBoundary>
-      </ThemeProvider>
+      <AppErrorBoundary>
+        <ThemeProvider>
+          <GlobalErrorBoundary>
+            <Suspense fallback={<LoadingFallback />}>
+              <RouterProvider router={router} future={{ v7_startTransition: true }} />
+            </Suspense>
+          </GlobalErrorBoundary>
+          <Toaster
+            position="bottom-right"
+            toastOptions={{
+              style: {
+                background: '#0f172a',
+                color: '#e2e8f0',
+                border: '1px solid rgba(148,163,184,0.3)',
+              },
+            }}
+          />
+        </ThemeProvider>
+      </AppErrorBoundary>
     </React.StrictMode>
   );
 } catch (error) {

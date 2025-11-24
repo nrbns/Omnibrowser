@@ -3,7 +3,7 @@
  * The AI brain of OmniBrowser - chat + voice interface
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Send,
   Mic,
@@ -19,8 +19,17 @@ import {
 import { useTabsStore } from '../../state/tabsStore';
 import { ipc } from '../../lib/ipc-typed';
 import { toast } from '../../utils/toast';
+import { toast as hotToast } from 'react-hot-toast';
 import { HandsFreeMode } from './HandsFreeMode';
-import { getRegenSocket } from '../../lib/realtime/regen-socket';
+import { createRegenRealtimeClient } from '../../regen/realtime';
+import type {
+  RegenCommandEvent,
+  RegenErrorEvent,
+  RegenMessageEvent,
+  RegenNotificationEvent,
+  RegenStatusEvent,
+} from '../../../shared/regen-events';
+import { nanoid } from '../../core/utils/nanoid';
 
 export type RegenMode = 'research' | 'trade';
 
@@ -43,13 +52,35 @@ export function RegenSidebar() {
   const [handsFreeMode, setHandsFreeMode] = useState(false);
   const [mode, setMode] = useState<RegenMode>('research');
   const [sessionId] = useState(() => `regen-${Date.now()}`);
-  const [isConnected] = useState(false);
-  const [_currentStatus, _setCurrentStatus] = useState<string>('');
+  const [isConnected, setIsConnected] = useState(false);
+  const [currentStatus, setCurrentStatus] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
-  const socketRef = useRef<ReturnType<typeof getRegenSocket> | null>(null);
+  const clientIdRef = useRef<string>();
+  if (!clientIdRef.current) {
+    clientIdRef.current = `regen-${nanoid(12)}`;
+  }
+  const clientId = clientIdRef.current;
+  const statusToastRef = useRef<string | null>(null);
+  const queryToastRef = useRef<string | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const { tabs, activeId } = useTabsStore();
   const activeTab = tabs.find(t => t.id === activeId);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const seen = localStorage.getItem('omnibrowser:onboarding:voice');
+    setShowOnboarding(!seen);
+  }, []);
+
+  const dismissOnboarding = () => {
+    try {
+      localStorage.setItem('omnibrowser:onboarding:voice', '1');
+    } catch {
+      // ignore storage errors
+    }
+    setShowOnboarding(false);
+  };
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -106,6 +137,182 @@ export function RegenSidebar() {
     pendingOrder: any;
   } | null>(null);
 
+  const handleSocketMessage = useCallback(
+    (event: RegenMessageEvent) => {
+      if (!event?.text) {
+        return;
+      }
+      const role = event.role === 'agent' || event.role === 'system' ? 'assistant' : 'user';
+      setMessages(prev => {
+        const idx = prev.findIndex(msg => msg.id === event.messageId);
+        if (idx >= 0) {
+          const next = [...prev];
+          const existing = next[idx];
+          const updatedContent = existing.content
+            ? `${existing.content}${existing.content.endsWith(' ') ? '' : ' '}${event.text}`
+            : event.text;
+          next[idx] = {
+            ...existing,
+            content: updatedContent,
+            done: event.done ?? existing.done,
+            timestamp: event.timestamp,
+          };
+          return next;
+        }
+        const newMessage: RegenMessage = {
+          id: event.messageId,
+          role,
+          content: event.text,
+          timestamp: event.timestamp,
+          done: event.done,
+        };
+        return [...prev, newMessage];
+      });
+    },
+    [setMessages]
+  );
+
+  const handleStatusEvent = useCallback((event: RegenStatusEvent) => {
+    if (event.phase === 'idle') {
+      if (statusToastRef.current) {
+        hotToast.dismiss(statusToastRef.current);
+        statusToastRef.current = null;
+        hotToast.success('Regen is ready');
+      }
+      setCurrentStatus('');
+      setIsLoading(false);
+      return;
+    }
+    const label = event.detail || event.label || event.phase;
+    setCurrentStatus(label);
+    setIsLoading(true);
+    if (statusToastRef.current) {
+      hotToast.loading(label, { id: statusToastRef.current });
+    } else {
+      statusToastRef.current = hotToast.loading(label);
+    }
+  }, []);
+
+  const handleNotification = useCallback((event: RegenNotificationEvent) => {
+    const body = event.body || event.title;
+    switch (event.severity) {
+      case 'success':
+        toast.success(body);
+        break;
+      case 'warning':
+        toast.warning(body);
+        break;
+      case 'error':
+        toast.error(body);
+        break;
+      default:
+        toast.info(body);
+        break;
+    }
+  }, []);
+
+  const executeCommand = useCallback(
+    async (event: RegenCommandEvent) => {
+      const payload = event.payload || {};
+      const targetTabId = (payload.tabId as string) || activeTab?.id;
+      try {
+        switch (event.command) {
+          case 'OPEN_TAB':
+            if (payload.url) {
+              await ipc.regen.openTab({ url: payload.url as string });
+            }
+            break;
+          case 'SWITCH_TAB':
+            if (targetTabId) {
+              await ipc.regen.switchTab({ id: targetTabId });
+            }
+            break;
+          case 'SCROLL':
+            if (targetTabId) {
+              await ipc.regen.scroll({
+                tabId: targetTabId,
+                amount: (payload.amount as number) || 500,
+              });
+            }
+            break;
+          case 'CLICK_ELEMENT':
+            if (targetTabId && payload.selector) {
+              await ipc.regen.clickElement({
+                tabId: targetTabId,
+                selector: payload.selector as string,
+              });
+            }
+            break;
+          case 'NAVIGATE':
+            if (targetTabId && payload.url) {
+              await ipc.regen.navigate({
+                tabId: targetTabId,
+                url: payload.url as string,
+              });
+            }
+            break;
+          case 'GET_DOM':
+            if (targetTabId) {
+              await ipc.regen.captureDom?.({ tabId: targetTabId });
+            }
+            break;
+          case 'SET_FOCUS':
+            if (targetTabId) {
+              await ipc.regen.focusTab?.({ tabId: targetTabId });
+            }
+            break;
+          case 'SPEAK':
+            if ('speechSynthesis' in window && payload.text) {
+              const utterance = new SpeechSynthesisUtterance(payload.text as string);
+              window.speechSynthesis.speak(utterance);
+            }
+            break;
+          default:
+            break;
+        }
+      } catch (error) {
+        console.error('[RegenSidebar] Command execution failed', error);
+      }
+    },
+    [activeTab]
+  );
+
+  const handleStreamError = useCallback(
+    (event: RegenErrorEvent) => {
+      toast.error(event.message);
+      if (statusToastRef.current) {
+        hotToast.dismiss(statusToastRef.current);
+        statusToastRef.current = null;
+      }
+      setIsLoading(false);
+      setCurrentStatus('');
+    },
+    []
+  );
+
+  useEffect(() => {
+    const client = createRegenRealtimeClient(clientId, {
+      onOpen: () => {
+        setIsConnected(true);
+      },
+      onClose: () => {
+        setIsConnected(false);
+      },
+      onMessage: handleSocketMessage,
+      onStatus: handleStatusEvent,
+      onNotification: handleNotification,
+      onCommand: executeCommand,
+      onStreamError: handleStreamError,
+      onError: () => {
+        setIsConnected(false);
+      },
+    });
+    client.connect();
+    return () => {
+      client.disconnect();
+    };
+  }, [clientId, handleSocketMessage, handleStatusEvent, handleNotification, executeCommand, handleStreamError]);
+
   const handleSend = async (text?: string) => {
     const messageText = text || input.trim();
     if (!messageText) return;
@@ -155,20 +362,7 @@ export function RegenSidebar() {
     setMessages(prev => [...prev, userMessage]);
 
     try {
-      // Send query via HTTP (response streams via WebSocket)
-      const socket = socketRef.current;
-      const clientId = socket?.getClientId() || `client-${Date.now()}`;
-
-      // Create placeholder message for streaming
-      const placeholderMessage: RegenMessage = {
-        id: `msg-${Date.now()}-streaming`,
-        role: 'assistant',
-        content: '',
-        timestamp: Date.now(),
-        done: false,
-      };
-      setMessages(prev => [...prev, placeholderMessage]);
-
+      queryToastRef.current = hotToast.loading('Analyzing…');
       const response = await fetch('http://localhost:4000/api/agent/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -185,6 +379,7 @@ export function RegenSidebar() {
                 title: activeTab.title,
               }
             : undefined,
+          locale: navigator.language || 'en',
         }),
       });
 
@@ -198,6 +393,10 @@ export function RegenSidebar() {
     } catch (error) {
       console.error('[Regen] Query failed:', error);
       toast.error('Failed to get response from Regen');
+      if (queryToastRef.current) {
+        hotToast.error('Something went wrong', { id: queryToastRef.current });
+        queryToastRef.current = null;
+      }
 
       const errorMessage: RegenMessage = {
         id: `msg-${Date.now() + 1}`,
@@ -207,6 +406,10 @@ export function RegenSidebar() {
       };
       setMessages(prev => [...prev, errorMessage]);
     } finally {
+      if (queryToastRef.current) {
+        hotToast.success('Answer ready', { id: queryToastRef.current });
+        queryToastRef.current = null;
+      }
       setIsLoading(false);
     }
   };
@@ -234,9 +437,9 @@ export function RegenSidebar() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-gray-900 border-l border-gray-700">
+    <div className="relative flex h-full w-full flex-col border-t border-gray-800 bg-slate-950 md:w-80 md:border-l md:border-t-0 lg:w-96">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-700">
+      <div className="flex items-center justify-between border-b border-gray-800 px-4 py-3">
         <div className="flex items-center gap-2">
           <Sparkles className="w-5 h-5 text-blue-500" />
           <h2 className="text-lg font-semibold text-gray-200">Regen</h2>
@@ -260,7 +463,7 @@ export function RegenSidebar() {
       </div>
 
       {/* Mode Toggles */}
-      <div className="flex gap-2 p-3 border-b border-gray-700">
+      <div className="flex gap-2 border-b border-gray-800 p-3">
         <button
           onClick={() => setMode('research')}
           className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg transition-colors ${
@@ -291,7 +494,7 @@ export function RegenSidebar() {
           <div className="text-center text-gray-400 mt-8">
             <Sparkles className="w-12 h-12 mx-auto mb-4 opacity-50" />
             <p className="text-sm">Ask me anything or use voice commands</p>
-            {_currentStatus && <p className="text-xs mt-2 text-blue-400">{_currentStatus}</p>}
+            {currentStatus && <p className="text-xs mt-2 text-blue-400">{currentStatus}</p>}
             <p className="text-xs mt-2 text-gray-500">
               {mode === 'research' ? (
                 <>
@@ -343,7 +546,7 @@ export function RegenSidebar() {
       </div>
 
       {/* Hands-Free Mode Toggle */}
-      <div className="px-4 py-2 border-t border-gray-700 flex items-center justify-between bg-gray-800/50">
+      <div className="flex items-center justify-between border-t border-gray-800 bg-gray-900/60 px-4 py-2">
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-400">Hands-Free Mode</span>
           <button
@@ -369,7 +572,7 @@ export function RegenSidebar() {
       </div>
 
       {/* Input */}
-      <div className="p-4 border-t border-gray-700">
+      <div className="border-t border-gray-800 p-4">
         <div className="flex items-center gap-2">
           <button
             onClick={handleVoiceToggle}
@@ -447,6 +650,28 @@ export function RegenSidebar() {
           }}
           onClose={() => setHandsFreeMode(false)}
         />
+      )}
+
+      {showOnboarding && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-slate-950/80 px-6 py-10">
+          <div className="w-full max-w-sm space-y-4 rounded-2xl border border-blue-500/40 bg-slate-900/90 p-5 text-center text-slate-100 shadow-2xl">
+            <div className="flex flex-col items-center gap-2">
+              <Sparkles className="h-6 w-6 text-blue-400" />
+              <p className="text-lg font-semibold">Voice in Hindi to start</p>
+              <p className="text-sm text-slate-400">
+                Hold the mic button and say “नमस्ते रीजन” to try hands-free mode. You can switch back
+                anytime.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={dismissOnboarding}
+              className="w-full rounded-lg border border-blue-500/60 bg-blue-600/20 px-4 py-2 text-sm font-medium text-blue-100 transition hover:bg-blue-600/30"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
