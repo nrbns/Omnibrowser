@@ -96,16 +96,16 @@ async function runTests() {
 
   // Test 1: Error Handling in Components
   log('Testing error handling in AI components...', 'info');
-  await checkErrorHandling('src/components/SearchBar.tsx', 'SearchBar');
-  await checkErrorHandling('src/components/RedixQuickDialog.tsx', 'RedixQuickDialog');
+  await checkErrorHandling('src/components/TopNav/Omnibox.tsx', 'Omnibox');
+  await checkErrorHandling('src/components/layout/CommandPalette.tsx', 'CommandPalette');
   await checkErrorHandling('src/components/layout/BottomStatus.tsx', 'BottomStatus');
   await checkErrorHandling('src/components/research/ResearchPane.tsx', 'ResearchPane');
   log('');
 
   // Test 2: Offline Fallback
   log('Testing offline fallback mechanisms...', 'info');
-  await checkOfflineFallback('src/components/SearchBar.tsx', 'SearchBar');
-  await checkOfflineFallback('src/components/RedixQuickDialog.tsx', 'RedixQuickDialog');
+  await checkOfflineFallback('src/components/TopNav/Omnibox.tsx', 'Omnibox');
+  await checkOfflineFallback('src/components/layout/CommandPalette.tsx', 'CommandPalette');
   await checkOfflineFallback('src/components/layout/AppShell.tsx', 'AppShell');
   await checkOfflineFallback('src/lib/ipc-typed.ts', 'IPC bridge');
   await checkOfflineFallback('apps/api/routes/redix.py', 'Redix API');
@@ -145,7 +145,7 @@ async function runTests() {
   });
 
   await testAsync('Components - Error messages are user-friendly', async () => {
-    const files = ['src/components/SearchBar.tsx', 'src/components/RedixQuickDialog.tsx'];
+    const files = ['src/components/TopNav/Omnibox.tsx', 'src/components/layout/CommandPalette.tsx'];
 
     for (const file of files) {
       const filePath = path.join(__dirname, '..', file);

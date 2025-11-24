@@ -95,13 +95,13 @@ async function runTests() {
 
   // Test 1: Critical Files Exist
   log('Testing file structure...', 'info');
-  await checkFileExists('src/components/SearchBar.tsx', 'SearchBar');
+  await checkFileExists('src/components/TopNav/Omnibox.tsx', 'Omnibox');
   await checkFileExists('src/components/layout/TabStrip.tsx', 'TabStrip');
   await checkFileExists('src/components/layout/BottomStatus.tsx', 'BottomStatus');
-  await checkFileExists('src/components/layout/MainView.tsx', 'MainView');
+  await checkFileExists('src/components/layout/AppShell.tsx', 'AppShell');
   await checkFileExists('src/components/Onboarding/OnboardingTour.tsx', 'OnboardingTour');
   await checkFileExists('src/components/PrivacySwitch.tsx', 'PrivacySwitch');
-  await checkFileExists('src/components/RedixQuickDialog.tsx', 'RedixQuickDialog');
+  await checkFileExists('src/components/layout/CommandPalette.tsx', 'CommandPalette');
   await checkFileExists('src/routes/Downloads.tsx', 'Downloads');
   await checkFileExists('src/components/research/ResearchPane.tsx', 'ResearchPane');
   await checkFileExists('tauri-migration/src/lib/ipc-typed.ts', 'Tauri IPC bridge');
@@ -117,13 +117,13 @@ async function runTests() {
 
   // Test 3: Component Integrations
   log('Testing component integrations...', 'info');
-  await checkComponentIntegration('src/components/SearchBar.tsx', 'SearchBar Redix');
+  await checkComponentIntegration('src/components/TopNav/Omnibox.tsx', 'Omnibox Redix');
   await checkComponentIntegration('src/components/layout/BottomStatus.tsx', 'BottomStatus Metrics');
   await checkComponentIntegration('src/components/layout/TabStrip.tsx', 'TabStrip IPC');
   await checkComponentIntegration('src/components/PrivacySwitch.tsx', 'PrivacySwitch IPC');
   await checkComponentIntegration(
-    'src/components/RedixQuickDialog.tsx',
-    'RedixQuickDialog Streaming'
+    'src/components/layout/CommandPalette.tsx',
+    'CommandPalette Streaming'
   );
   log('');
 
