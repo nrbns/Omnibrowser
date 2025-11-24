@@ -8,7 +8,14 @@ const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-3-haiku-20240307';
 const LLM_PROVIDER = process.env.LLM_PROVIDER || (OPENAI_API_KEY ? 'openai' : 'ollama');
+const PROVIDER_CHAIN = process.env.LLM_PROVIDER_CHAIN;
+const MAX_LLM_CONCURRENCY = Math.max(1, Number(process.env.LLM_CONCURRENCY || 2));
+
+let activeLLMCalls = 0;
+const llmWaiters = [];
 
 /**
  * Extract plain text from HTML
@@ -51,6 +58,47 @@ function chunkText(text, maxChunkSize = 4000) {
   }
   if (currentChunk) chunks.push(currentChunk.trim());
   return chunks;
+}
+
+const wait = (ms = 0) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function withLLMConcurrency(task) {
+  if (activeLLMCalls >= MAX_LLM_CONCURRENCY) {
+    await new Promise(resolve => llmWaiters.push(resolve));
+  }
+  activeLLMCalls++;
+  try {
+    return await task();
+  } finally {
+    activeLLMCalls--;
+    const next = llmWaiters.shift();
+    if (next) {
+      next();
+    }
+  }
+}
+
+function buildProviderChain() {
+  const preferred = PROVIDER_CHAIN
+    ? PROVIDER_CHAIN.split(',').map(p => p.trim().toLowerCase()).filter(Boolean)
+    : [LLM_PROVIDER, 'openai', 'anthropic', 'ollama'];
+
+  const normalized = [];
+  const pushIfAvailable = provider => {
+    if (!provider) return;
+    if (provider === 'openai' && !OPENAI_API_KEY) return;
+    if (provider === 'anthropic' && !ANTHROPIC_API_KEY) return;
+    if (provider === 'ollama' && !OLLAMA_BASE_URL) return;
+    if (!normalized.includes(provider)) {
+      normalized.push(provider);
+    }
+  };
+
+  preferred.forEach(pushIfAvailable);
+  if (!normalized.includes('ollama')) {
+    pushIfAvailable('ollama');
+  }
+  return normalized.length ? normalized : ['ollama'];
 }
 
 /**
@@ -129,6 +177,58 @@ async function callOpenAI(messages, options = {}) {
   };
 }
 
+async function callAnthropic(messages, options = {}) {
+  if (!ANTHROPIC_API_KEY) {
+    throw new Error('Anthropic API key not configured');
+  }
+  const model = options.model || ANTHROPIC_MODEL;
+  const temperature = options.temperature ?? 0.0;
+  const maxTokens = options.maxTokens ?? 1024;
+
+  const systemPrompt = messages.find(m => m.role === 'system')?.content;
+  const conversation = messages
+    .filter(m => m.role !== 'system')
+    .map(m => ({
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: [{ type: 'text', text: m.content }],
+    }));
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: maxTokens,
+      temperature,
+      system: systemPrompt,
+      messages: conversation,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Anthropic API error: ${response.status} ${error}`);
+  }
+
+  const data = await response.json();
+  const contentBlocks = Array.isArray(data.content) ? data.content : [];
+  const text = contentBlocks
+    .map(block => block.text || '')
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+
+  return {
+    answer: text,
+    model: data.model || model,
+    tokensUsed: data.usage?.output_tokens || 0,
+  };
+}
+
 /**
  * Build prompt for task
  */
@@ -162,6 +262,25 @@ function buildPrompt(task, question, inputText, url) {
   }
 }
 
+function isRateLimitError(error) {
+  if (!error) return false;
+  const message = typeof error === 'string' ? error : error.message || '';
+  return message.includes('429') || message.toLowerCase().includes('rate limit');
+}
+
+async function executeProvider(provider, messages, options) {
+  switch (provider) {
+    case 'openai':
+      return callOpenAI(messages, options);
+    case 'anthropic':
+      return callAnthropic(messages, options);
+    case 'ollama':
+      return callOllama(messages, options);
+    default:
+      throw new Error(`Unsupported LLM provider: ${provider}`);
+  }
+}
+
 /**
  * Analyze content with LLM
  */
@@ -192,17 +311,35 @@ export async function analyzeWithLLM({
     { role: 'user', content: user },
   ];
 
-  // Call LLM
+  const providerChain = buildProviderChain();
+  const llmOptions = { temperature: 0.0 };
+  const providerErrors = [];
   let llmResult;
-  try {
-    if (LLM_PROVIDER === 'openai' && OPENAI_API_KEY) {
-      llmResult = await callOpenAI(messages, { temperature: 0.0 });
-    } else {
-      llmResult = await callOllama(messages, { temperature: 0.0 });
+  let providerUsed = null;
+  let backoffMs = 500;
+
+  for (const provider of providerChain) {
+    try {
+      const result = await withLLMConcurrency(() =>
+        executeProvider(provider, messages, llmOptions)
+      );
+      llmResult = result;
+      providerUsed = provider;
+      break;
+    } catch (error) {
+      providerErrors.push({ provider, error });
+      if (isRateLimitError(error)) {
+        await wait(backoffMs);
+        backoffMs = Math.min(backoffMs * 2, 4000);
+      }
     }
-  } catch (error) {
-    // Fallback to simple extraction if LLM fails
-    console.warn('[llm] LLM call failed, using fallback', error);
+  }
+
+  if (!llmResult) {
+    console.warn(
+      '[llm] All providers failed, using fallback',
+      providerErrors.map(({ provider, error }) => `${provider}: ${error?.message || error}`).join('; ')
+    );
     const fallbackAnswer =
       task === 'summarize'
         ? `Summary: ${text.slice(0, 500)}...`
@@ -214,6 +351,7 @@ export async function analyzeWithLLM({
       model: 'fallback-extractor',
       tokensUsed: 0,
     };
+    providerUsed = 'fallback';
   }
 
   // Extract highlights (simple sentence extraction)
@@ -231,7 +369,7 @@ export async function analyzeWithLLM({
     highlights: highlights.length > 0 ? highlights : [llmResult.answer.slice(0, 150)],
     model: {
       name: llmResult.model,
-      provider: LLM_PROVIDER,
+      provider: providerUsed || LLM_PROVIDER,
       temperature: 0.0,
       tokensUsed: llmResult.tokensUsed,
     },

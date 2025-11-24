@@ -986,11 +986,18 @@ export function AppShell() {
 
   useEffect(() => {
     // Defer tab suspension service
-    setTimeout(() => {
-      startTabSuspensionService().catch(err => {
+    let disposeService: (() => void) | undefined;
+    const timer = window.setTimeout(() => {
+      try {
+        disposeService = startTabSuspensionService();
+      } catch (err) {
         if (isDevEnv()) console.warn('[AppShell] Tab suspension init failed:', err);
-      });
+      }
     }, 1000);
+    return () => {
+      window.clearTimeout(timer);
+      disposeService?.();
+    };
   }, []);
 
   useEffect(() => {
