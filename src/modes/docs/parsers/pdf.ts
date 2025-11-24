@@ -1,10 +1,10 @@
+const PDF_WORKER_URL = '/workers/pdf.worker.js';
 let cachedPdfLib: typeof import('pdfjs-dist') | null = null;
 
 async function getPdfJs() {
   if (!cachedPdfLib) {
     cachedPdfLib = await import('pdfjs-dist');
-    const worker = await import('pdfjs-dist/build/pdf.worker.mjs?worker&url');
-    (cachedPdfLib as any).GlobalWorkerOptions.workerSrc = worker.default;
+    (cachedPdfLib as any).GlobalWorkerOptions.workerSrc = PDF_WORKER_URL;
   }
   return cachedPdfLib;
 }

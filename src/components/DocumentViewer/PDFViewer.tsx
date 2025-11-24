@@ -27,11 +27,7 @@ export function PDFViewer({ filePath, onPageChange }: PDFViewerProps) {
     setLoading(true);
     try {
       const pdfjsLib = await import('pdfjs-dist');
-      const worker = await import('pdfjs-dist/build/pdf.worker.mjs?worker&url');
-
-      if (typeof window !== 'undefined') {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = worker.default;
-      }
+      pdfjsLib.GlobalWorkerOptions.workerSrc = '/workers/pdf.worker.js';
 
       // Load PDF (filePath should be accessible URL or data URL)
       const loadingTask = pdfjsLib.getDocument(filePath);
