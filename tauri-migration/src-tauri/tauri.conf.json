@@ -3,6 +3,9 @@
   "productName": "OmniBrowser",
   "version": "0.1.0-alpha",
   "identifier": "com.omnibrowser.app",
+  "allowlist": {
+    "all": true
+  },
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
@@ -18,7 +21,10 @@
         "width": 1280,
         "height": 800,
         "minWidth": 800,
-        "minHeight": 600
+        "minHeight": 600,
+        "additionalBrowserArgs": [
+          "--js-flags=--max-old-space-size=256"
+        ]
       }
     ],
     "security": {

@@ -1,7 +1,14 @@
-import { sendPrompt, type LLMOptions, type LLMResponse } from '../llm/adapter';
 import { trackAction } from '../supermemory/tracker';
 
 export type AITaskKind = 'search' | 'agent' | 'chat' | 'summary';
+
+export interface AITaskLLMOptions {
+  provider?: string;
+  maxTokens?: number;
+  temperature?: number;
+  stream?: boolean;
+  systemPrompt?: string;
+}
 
 export interface AITaskRequest {
   kind: AITaskKind;
@@ -9,7 +16,7 @@ export interface AITaskRequest {
   context?: Record<string, unknown>;
   mode?: string;
   metadata?: Record<string, string | number | boolean>;
-  llm?: LLMOptions;
+  llm?: AITaskLLMOptions;
   stream?: boolean;
   signal?: AbortSignal | null;
 }
@@ -32,8 +39,7 @@ type StreamHandler = (event: {
 /**
  * Sprint 2 placeholder AI Engine.
  *
- * For now this simply forwards to `sendPrompt` on the renderer, but it gives us a
- * single entrypoint so SearchBar/agents can migrate without waiting for the backend router.
+ * Routes all tasks through the Redix backend so langchain/tooling stays server-side.
  */
 export class AIEngine {
   private readonly apiBase =
@@ -51,7 +57,9 @@ export class AIEngine {
       return backendResult;
     }
 
-    return this.runLocalLLM(request, onStream);
+    throw new Error(
+      'AI backend unavailable. Please ensure Redix Core is running and reachable.'
+    );
   }
 
   private async callBackendTask(
@@ -180,28 +188,6 @@ export class AIEngine {
       }
       return null;
     }
-  }
-
-  private async runLocalLLM(
-    request: AITaskRequest,
-    onStream?: StreamHandler
-  ): Promise<AITaskResult> {
-    const response = await sendPrompt(request.prompt, {
-      ...request.llm,
-      stream: Boolean(onStream) || request.llm?.stream,
-      systemPrompt: request.llm?.systemPrompt ?? this.resolveSystemPrompt(request),
-    });
-
-    const result = {
-      text: response.text,
-      provider: response.provider,
-      model: response.model,
-      usage: response.usage,
-      latency: response.latency,
-    };
-    this.trackTelemetry(result, request);
-    onStream?.({ type: 'done', data: result });
-    return result;
   }
 
   private resolveSystemPrompt(request: AITaskRequest): string | undefined {

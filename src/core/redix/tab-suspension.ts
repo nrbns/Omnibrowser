@@ -27,10 +27,17 @@ let initialized = false;
 let evaluateTimer: ReturnType<typeof setInterval> | null = null;
 let latestTabs: TabSummary[] = [];
 const suspendQueue = new Set<string>();
+let cleanupRef: (() => void) | null = null;
 
-export function startTabSuspensionService(): void {
-  if (initialized || typeof window === 'undefined' || !isElectronRuntime()) {
-    return;
+export function startTabSuspensionService(): () => void {
+  if (cleanupRef) {
+    return cleanupRef;
+  }
+  if (typeof window === 'undefined' || !isElectronRuntime()) {
+    return () => {};
+  }
+  if (initialized) {
+    return cleanupRef ?? (() => {});
   }
   initialized = true;
 
@@ -87,19 +94,22 @@ export function startTabSuspensionService(): void {
   // Run an immediate pass once tabs list is available
   evaluateSuspensions(inactivityThresholdMs).catch(() => {});
 
-  // Attach cleanup to window unload
-  window.addEventListener(
-    'beforeunload',
-    () => {
-      unsubscribeTabs();
-      unsubscribeActive();
-      unsubscribeTabsStore();
-      if (evaluateTimer) {
-        clearInterval(evaluateTimer);
-      }
-    },
-    { once: true }
-  );
+  cleanupRef = () => {
+    if (!initialized) return;
+    unsubscribeTabs?.();
+    unsubscribeActive?.();
+    unsubscribeTabsStore?.();
+    if (evaluateTimer) {
+      clearInterval(evaluateTimer);
+      evaluateTimer = null;
+    }
+    latestTabs = [];
+    suspendQueue.clear();
+    initialized = false;
+    cleanupRef = null;
+  };
+
+  return cleanupRef;
 }
 
 async function evaluateSuspensions(thresholdMs: number): Promise<void> {

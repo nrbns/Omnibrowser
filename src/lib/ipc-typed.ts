@@ -19,7 +19,6 @@ import type {
 import type { ConsentAction, ConsentRecord } from '../types/consent';
 import { useTabsStore } from '../state/tabsStore';
 import { useContainerStore } from '../state/containerStore';
-import apiClient from './api-client';
 
 const IS_DEV = isDevEnv();
 

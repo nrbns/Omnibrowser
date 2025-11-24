@@ -3,12 +3,13 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bot, Send, StopCircle, Copy, CheckCircle2, Loader2, Sparkles } from 'lucide-react';
-import { aiEngine, type AITaskResult } from '../core/ai';
+import { type AITaskResult } from '../core/ai';
 import { MemoryStoreInstance } from '../core/supermemory/store';
 import { semanticSearchMemories } from '../core/supermemory/search';
 import { useAgentStreamStore } from '../state/agentStreamStore';
 import { useAgentMemoryStore } from '../state/agentMemoryStore';
 import { trackAgent, trackAction } from '../core/supermemory/tracker';
+import { useLazyAgentEngine } from '../hooks/useLazyAgentEngine';
 
 export default function AgentConsole() {
   const [runId, setRunId] = useState<string | null>(null);

@@ -890,20 +890,7 @@ export function BottomStatus() {
         return;
       }
       
-      // Final fallback: Use LLM adapter directly
-      try {
-        const { sendPrompt } = await import('../../core/llm/adapter');
-        const contextPrompt = tabContext 
-          ? `Context: You are viewing "${tabContext.title}" at ${tabContext.url}\n\nUser question: ${prompt}`
-          : prompt;
-        const response = await sendPrompt(contextPrompt, {
-          systemPrompt: 'You are a helpful AI assistant in a browser. Answer concisely.',
-          maxTokens: 500,
-        });
-        setPromptResponse(response.text);
-      } catch {
-        throw new Error('AI service unavailable. Please check your API keys or Redix server.');
-      }
+      throw new Error('AI service unavailable. Please check your Redix server.');
     } catch (error: any) {
       console.error('[BottomStatus] Prompt failed:', error);
       setPromptError(error.message || 'Failed to get AI response. Check Redix server or API keys.');

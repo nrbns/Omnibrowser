@@ -39,7 +39,7 @@ import { dirname } from 'path';
 // Create require function for CommonJS modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const require = createRequire(import.meta.url);
+const _require = createRequire(import.meta.url);
 
 // Load metrics - provide stub for now (metrics.js is CommonJS)
 const getMetrics = () => {
@@ -89,7 +89,7 @@ const initWebSocketServer = () => {
 };
 
 // Regen controller stub
-const regenController = {
+const _regenController = {
   handleAgentQuery: async () => ({ error: 'Regen controller not available' }),
   handleAgentStream: async () => ({ error: 'Regen controller not available' }),
 };
@@ -143,14 +143,14 @@ const fastify = Fastify({
 // Register CORS for Tauri migration
 fastify.register(cors, {
   origin: [
-    'http://localhost:1420',  // Tauri dev server
-    'tauri://localhost',       // Tauri production
-    'http://localhost:5173',   // Vite dev (Electron fallback)
+    'http://localhost:1420', // Tauri dev server
+    'tauri://localhost', // Tauri production
+    'http://localhost:5173', // Vite dev (Electron fallback)
     'http://127.0.0.1:1420',
     'http://127.0.0.1:5173',
-    'http://localhost:4000',   // Direct backend access
-    'http://127.0.0.1:4000',  // Direct backend access
-    '*'  // Allow all origins for development
+    'http://localhost:4000', // Direct backend access
+    'http://127.0.0.1:4000', // Direct backend access
+    '*', // Allow all origins for development
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
@@ -1068,7 +1068,7 @@ fastify.get('/api/tabs', async () => {
   return Array.from(tabsStore.values());
 });
 
-fastify.post('/api/tabs', async (request, reply) => {
+fastify.post('/api/tabs', async (request, _reply) => {
   const { url = 'about:blank', profileId } = request.body;
   const tabId = uuidv4();
   const tab = {
@@ -1194,7 +1194,7 @@ fastify.get('/api/sessions', async () => {
   return Array.from(sessionsStore.values());
 });
 
-fastify.post('/api/sessions', async (request, reply) => {
+fastify.post('/api/sessions', async (request, _reply) => {
   const { name = 'New Session', profileId, color } = request.body;
   const sessionId = uuidv4();
   const session = {
@@ -1258,7 +1258,7 @@ fastify.post('/api/agent/ask', async (request, reply) => {
     reply.code(400);
     return { error: 'Prompt is required' };
   }
-  
+
   try {
     // Use existing agent query endpoint logic
     const jobId = uuidv4();
@@ -1267,7 +1267,7 @@ fastify.post('/api/agent/ask', async (request, reply) => {
       sessionId,
       jobId,
     });
-    
+
     return {
       response: result?.response || 'Agent response unavailable',
       jobId,
@@ -1345,7 +1345,7 @@ fastify.get('/api/storage/:key', async (request, reply) => {
   return { error: 'Key not found' };
 });
 
-fastify.post('/api/storage/:key', async (request, reply) => {
+fastify.post('/api/storage/:key', async (request, _reply) => {
   const { key } = request.params;
   const { value } = request.body;
   storageStore.set(key, value);
@@ -1406,12 +1406,12 @@ fastify.get('/api/storage/accounts', async () => {
 // ============================================================================
 const historyStore = [];
 
-fastify.get('/api/history', async (request) => {
+fastify.get('/api/history', async request => {
   const limit = Number(request.query?.limit) || 100;
   return historyStore.slice(0, limit);
 });
 
-fastify.post('/api/history', async (request, reply) => {
+fastify.post('/api/history', async (request, _reply) => {
   const { url, title, typed } = request.body;
   const entry = {
     id: uuidv4(),
@@ -1428,16 +1428,17 @@ fastify.post('/api/history', async (request, reply) => {
   return { success: true, id: entry.id };
 });
 
-fastify.get('/api/history/search', async (request) => {
+fastify.get('/api/history/search', async request => {
   const { query, limit = 50 } = request.query;
   if (!query) {
     return [];
   }
   const searchTerm = query.toLowerCase();
   const results = historyStore
-    .filter(entry => 
-      entry.url.toLowerCase().includes(searchTerm) ||
-      entry.title.toLowerCase().includes(searchTerm)
+    .filter(
+      entry =>
+        entry.url.toLowerCase().includes(searchTerm) ||
+        entry.title.toLowerCase().includes(searchTerm)
     )
     .slice(0, Number(limit));
   return results;
@@ -1452,7 +1453,7 @@ fastify.post('/api/research/query', async (request, reply) => {
     reply.code(400);
     return { error: 'Query is required' };
   }
-  
+
   // Use existing search functionality
   try {
     const results = await runSearch(query, { limit: 10 });
@@ -1474,7 +1475,7 @@ fastify.post('/api/research/enhanced', async (request, reply) => {
     reply.code(400);
     return { error: 'Query is required' };
   }
-  
+
   try {
     // Enhanced research with LLM
     const jobId = uuidv4();
@@ -1483,7 +1484,7 @@ fastify.post('/api/research/enhanced', async (request, reply) => {
       mode: mode || 'research',
       jobId,
     });
-    
+
     return {
       query,
       response: result?.response || 'Research unavailable',
@@ -1510,12 +1511,12 @@ fastify.get('/api/graph', async () => {
 });
 
 fastify.post('/api/graph', async (request, reply) => {
-  const { node, edges } = request.body;
+  const { node, edges: _edges } = request.body;
   if (!node || !node.id) {
     reply.code(400);
     return { error: 'Node with ID is required' };
   }
-  
+
   const graphNode = {
     id: node.id,
     type: node.type || 'default',
@@ -1532,7 +1533,7 @@ fastify.post('/api/graph/node', async (request, reply) => {
     reply.code(400);
     return { error: 'Node ID is required' };
   }
-  
+
   const node = {
     id,
     type: type || 'default',
@@ -1566,30 +1567,31 @@ fastify.get('/api/graph/node/:id', async (request, reply) => {
 // ============================================================================
 const ledgerStore = [];
 
-fastify.get('/api/ledger', async (request) => {
+fastify.get('/api/ledger', async request => {
   const limit = Number(request.query?.limit) || 100;
   return ledgerStore.slice(0, limit);
 });
 
-fastify.post('/api/ledger', async (request, reply) => {
+fastify.post('/api/ledger', async (request, _reply) => {
   const { url, passage, action, domain, timestamp, metadata } = request.body;
-  
+
   // Support both formats: { url, passage } and { action, domain, ... }
-  const entry = url && passage
-    ? {
-        id: uuidv4(),
-        url,
-        passage,
-        timestamp: Date.now(),
-      }
-    : {
-        id: uuidv4(),
-        action: action || 'unknown',
-        domain: domain || 'unknown',
-        timestamp: timestamp || Date.now(),
-        metadata: metadata || {},
-      };
-  
+  const entry =
+    url && passage
+      ? {
+          id: uuidv4(),
+          url,
+          passage,
+          timestamp: Date.now(),
+        }
+      : {
+          id: uuidv4(),
+          action: action || 'unknown',
+          domain: domain || 'unknown',
+          timestamp: timestamp || Date.now(),
+          metadata: metadata || {},
+        };
+
   ledgerStore.unshift(entry);
   if (ledgerStore.length > 10000) {
     ledgerStore.length = 10000;
@@ -1658,12 +1660,12 @@ fastify.get('/api/proxy/status', async () => {
   return { enabled: false, type: null, address: null };
 });
 
-fastify.post('/api/proxy/enable', async (request, reply) => {
+fastify.post('/api/proxy/enable', async (request, _reply) => {
   const { type, address, port } = request.body;
   return { success: true, enabled: true, type, address, port };
 });
 
-fastify.post('/api/proxy', async (request) => {
+fastify.post('/api/proxy', async request => {
   const rules = request.body;
   return { success: true, rules };
 });
@@ -1672,7 +1674,7 @@ fastify.post('/api/proxy/disable', async () => {
   return { success: true, enabled: false };
 });
 
-fastify.post('/api/proxy/kill-switch', async (request) => {
+fastify.post('/api/proxy/kill-switch', async request => {
   const { enabled } = request.body;
   return { success: true, enabled: enabled || false };
 });
@@ -1686,7 +1688,7 @@ fastify.post('/api/threats/scan', async (request, reply) => {
     reply.code(400);
     return { error: 'URL is required' };
   }
-  
+
   return {
     url,
     safe: true,
@@ -1701,7 +1703,7 @@ fastify.post('/api/threats/scan-url', async (request, reply) => {
     reply.code(400);
     return { error: 'URL is required' };
   }
-  
+
   return {
     url,
     safe: true,
@@ -1716,7 +1718,7 @@ fastify.post('/api/threats/scan-file', async (request, reply) => {
     reply.code(400);
     return { error: 'File path is required' };
   }
-  
+
   return {
     filePath,
     safe: true,
@@ -1744,7 +1746,7 @@ fastify.post('/api/video/stop', async () => {
   return { success: true };
 });
 
-fastify.delete('/api/video/:id', async (request, reply) => {
+fastify.delete('/api/video/:id', async (request, _reply) => {
   const { id } = request.params;
   return { success: true, id };
 });
@@ -1753,7 +1755,7 @@ fastify.get('/api/video/consent', async () => {
   return false;
 });
 
-fastify.post('/api/video/consent', async (request) => {
+fastify.post('/api/video/consent', async request => {
   const { value } = request.body;
   return { success: true, value: value || false };
 });
@@ -1761,12 +1763,12 @@ fastify.post('/api/video/consent', async (request) => {
 // ============================================================================
 // UI API - For Tauri migration
 // ============================================================================
-fastify.post('/api/ui/chrome-offsets', async (request) => {
+fastify.post('/api/ui/chrome-offsets', async request => {
   const offsets = request.body;
   return { success: true, offsets };
 });
 
-fastify.post('/api/ui/right-dock', async (request) => {
+fastify.post('/api/ui/right-dock', async request => {
   const { px } = request.body;
   return { success: true, px: px || 0 };
 });
@@ -1817,7 +1819,7 @@ fastify.get('/api/session/load-tabs', async () => {
   return { tabs: Array.from(tabsStore.values()) };
 });
 
-fastify.post('/api/session/add-history', async (request, reply) => {
+fastify.post('/api/session/add-history', async (request, _reply) => {
   const { url, title, typed } = request.body;
   const entry = {
     id: uuidv4(),
@@ -1830,7 +1832,7 @@ fastify.post('/api/session/add-history', async (request, reply) => {
   return { success: true, id: entry.id };
 });
 
-fastify.get('/api/session/history', async (request) => {
+fastify.get('/api/session/history', async request => {
   const limit = Number(request.query?.limit) || 100;
   return { history: historyStore.slice(0, limit) };
 });
@@ -1843,15 +1845,16 @@ fastify.post('/api/session/search-history', async (request, reply) => {
   }
   const searchTerm = query.toLowerCase();
   const results = historyStore
-    .filter(entry => 
-      entry.url.toLowerCase().includes(searchTerm) ||
-      entry.title.toLowerCase().includes(searchTerm)
+    .filter(
+      entry =>
+        entry.url.toLowerCase().includes(searchTerm) ||
+        entry.title.toLowerCase().includes(searchTerm)
     )
     .slice(0, Number(limit));
   return { results };
 });
 
-fastify.post('/api/session/save-setting', async (request, reply) => {
+fastify.post('/api/session/save-setting', async (request, _reply) => {
   const { key, value } = request.body;
   storageStore.set(`settings:${key}`, value);
   return { success: true };

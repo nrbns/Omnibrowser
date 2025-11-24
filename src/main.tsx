@@ -21,7 +21,10 @@ if (isDevEnv()) {
 }
 
 // Tier 2: Enhanced Error Boundary
-import { GlobalErrorBoundary } from './core/errors/ErrorBoundary';
+import {
+  GlobalErrorBoundary,
+  ErrorBoundary as RouteErrorBoundary,
+} from './core/errors/ErrorBoundary';
 import { startSnapshotting } from './core/recovery';
 
 // Tier 3: Initialize services
@@ -127,19 +130,28 @@ function LoadingFallback() {
 }
 
 // Router configuration with v7 future flags
+const withRouteBoundary = (componentName: string, node: React.ReactNode) => (
+  <RouteErrorBoundary componentName={componentName} level="page">
+    {node}
+  </RouteErrorBoundary>
+);
+
 const router = createBrowserRouter(
   [
     {
       path: '/',
       element: (
-        <Suspense fallback={<LoadingFallback />}>
-          <AppShell />
-        </Suspense>
+        <RouteErrorBoundary componentName="AppShell" level="page">
+          <Suspense fallback={<LoadingFallback />}>
+            <AppShell />
+          </Suspense>
+        </RouteErrorBoundary>
       ),
       children: [
         {
           index: true,
-          element: (
+          element: withRouteBoundary(
+            'HomeRoute',
             <Suspense fallback={<LoadingFallback />}>
               <Home />
             </Suspense>
@@ -147,7 +159,8 @@ const router = createBrowserRouter(
         },
         {
           path: 'settings',
-          element: (
+          element: withRouteBoundary(
+            'SettingsRoute',
             <Suspense fallback={<LoadingFallback />}>
               <Settings />
             </Suspense>
@@ -155,7 +168,8 @@ const router = createBrowserRouter(
         },
         {
           path: 'w/:id',
-          element: (
+          element: withRouteBoundary(
+            'WorkspaceRoute',
             <Suspense fallback={<LoadingFallback />}>
               <Workspace />
             </Suspense>
@@ -163,7 +177,8 @@ const router = createBrowserRouter(
         },
         {
           path: 'agent',
-          element: (
+          element: withRouteBoundary(
+            'AgentConsoleRoute',
             <Suspense fallback={<LoadingFallback />}>
               <AgentConsole />
             </Suspense>
@@ -171,7 +186,8 @@ const router = createBrowserRouter(
         },
         {
           path: 'runs',
-          element: (
+          element: withRouteBoundary(
+            'RunsRoute',
             <Suspense fallback={<LoadingFallback />}>
               <Runs />
             </Suspense>
@@ -179,7 +195,8 @@ const router = createBrowserRouter(
         },
         {
           path: 'replay/:id',
-          element: (
+          element: withRouteBoundary(
+            'ReplayRoute',
             <Suspense fallback={<LoadingFallback />}>
               <Replay />
             </Suspense>
@@ -187,7 +204,8 @@ const router = createBrowserRouter(
         },
         {
           path: 'playbooks',
-          element: (
+          element: withRouteBoundary(
+            'PlaybookForgeRoute',
             <Suspense fallback={<LoadingFallback />}>
               <PlaybookForge />
             </Suspense>
@@ -195,7 +213,8 @@ const router = createBrowserRouter(
         },
         {
           path: 'history',
-          element: (
+          element: withRouteBoundary(
+            'HistoryRoute',
             <Suspense fallback={<LoadingFallback />}>
               <HistoryPage />
             </Suspense>
@@ -203,7 +222,8 @@ const router = createBrowserRouter(
         },
         {
           path: 'downloads',
-          element: (
+          element: withRouteBoundary(
+            'DownloadsRoute',
             <Suspense fallback={<LoadingFallback />}>
               <DownloadsPage />
             </Suspense>
@@ -211,7 +231,8 @@ const router = createBrowserRouter(
         },
         {
           path: 'watchers',
-          element: (
+          element: withRouteBoundary(
+            'WatchersRoute',
             <Suspense fallback={<LoadingFallback />}>
               <WatchersPage />
             </Suspense>
@@ -219,7 +240,8 @@ const router = createBrowserRouter(
         },
         {
           path: 'video',
-          element: (
+          element: withRouteBoundary(
+            'VideoRoute',
             <Suspense fallback={<LoadingFallback />}>
               <VideoPage />
             </Suspense>
@@ -227,7 +249,8 @@ const router = createBrowserRouter(
         },
         {
           path: 'consent-timeline',
-          element: (
+          element: withRouteBoundary(
+            'ConsentTimelineRoute',
             <Suspense fallback={<LoadingFallback />}>
               <ConsentTimelinePage />
             </Suspense>

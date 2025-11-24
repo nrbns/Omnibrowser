@@ -168,14 +168,22 @@ export function ReaderOverlay({ active, onClose, tabId, url }: ReaderOverlayProp
     try {
       // Try using LLM adapter first, fallback to IPC
       try {
-        const { sendPrompt } = await import('../../core/llm/adapter');
+        const { aiEngine } = await import('../../core/ai');
         const prompt = `Summarize the following article in 3-5 bullet points:\n\nTitle: ${article.title}\n\n${article.content}`;
-        const response = await sendPrompt(prompt, {
-          systemPrompt: 'You are a helpful assistant that creates concise summaries of web articles.',
-          maxTokens: 300,
+        const response = await aiEngine.runTask({
+          kind: 'summary',
+          prompt,
+          context: {
+            url: article.url,
+            title: article.title,
+          },
+          llm: {
+            systemPrompt:
+              'You are a helpful assistant that creates concise summaries of web articles.',
+            maxTokens: 300,
+          },
         });
-        
-        // Parse bullet points from response
+
         const bullets = response.text
           .split(/\n/)
           .filter(line => line.trim().match(/^[-•*]\s|^\d+\.\s/))
@@ -183,7 +191,7 @@ export function ReaderOverlay({ active, onClose, tabId, url }: ReaderOverlayProp
             summary: line.replace(/^[-•*]\s|^\d+\.\s/, '').trim(),
             citation: { text: article.title, url: article.url },
           }));
-        
+
         if (bullets.length > 0) {
           setSummary(bullets);
           setSummaryMode('cloud');

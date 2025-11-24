@@ -7,65 +7,44 @@
 import { ipc } from '../ipc-typed';
 import { isElectronRuntime } from '../env';
 
-let rendererSentry: typeof import('@sentry/electron/renderer') | null = null;
-let sentryInitialized = false;
+const sentryState = {
+  initialized: false,
+  hasWarned: false,
+};
 
 const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN || '';
-const SENTRY_ENV = import.meta.env.MODE || process.env.NODE_ENV || 'development';
-const SENTRY_SAMPLE_RATE = Number(import.meta.env.VITE_SENTRY_TRACES_SAMPLE_RATE ?? '0');
-const RELEASE = import.meta.env.VITE_APP_VERSION || '0.0.0';
+
+/**
+ * Electron-specific Sentry SDK is no longer bundled with the Tauri build.
+ * We keep the previous public API so the rest of the app can continue
+ * toggling telemetry opt-in without runtime errors.
+ */
+function logUnsupported(reason: string) {
+  if (sentryState.hasWarned) return;
+  console.info(
+    `[Sentry] Renderer telemetry disabled (${reason}). ` +
+      'Tauri builds intentionally exclude @sentry/electron. ' +
+      'Configure a browser/Tauri-friendly SDK if telemetry is required.'
+  );
+  sentryState.hasWarned = true;
+}
 
 async function initRendererSentry() {
   if (!isElectronRuntime()) return;
-  if (sentryInitialized) return;
-  if (!SENTRY_DSN) return;
-
-  if (!rendererSentry) {
-    try {
-      rendererSentry = await import('@sentry/electron/renderer');
-    } catch (error) {
-      console.warn('[Sentry] Renderer SDK unavailable', error);
-      return;
-    }
+  if (!SENTRY_DSN) {
+    logUnsupported('missing DSN');
+    return;
   }
 
-  try {
-    rendererSentry.init({
-      dsn: SENTRY_DSN,
-      environment: SENTRY_ENV,
-      release: `omnibrowser-renderer@${RELEASE}`,
-      enableUnresponsive: false,
-      tracesSampleRate: Number.isFinite(SENTRY_SAMPLE_RATE) ? SENTRY_SAMPLE_RATE : 0,
-      beforeSend(event) {
-        if (event?.request?.url) {
-          try {
-            const url = new URL(event.request.url);
-            event.request.url = `${url.protocol}//${url.hostname}`;
-          } catch {
-            delete event.request.url;
-          }
-        }
-        if (event?.user) {
-          delete event.user;
-        }
-        return event;
-      },
-    });
-    sentryInitialized = true;
-    console.info('[Sentry] Renderer crash reporting enabled');
-  } catch (error) {
-    console.warn('[Sentry] Failed to initialize renderer', error);
-  }
+  // We do not bundle the electron renderer SDK anymore but we keep this hook
+  // so future desktop builds can swap in an implementation without touching callers.
+  logUnsupported('electron runtime not available');
+  sentryState.initialized = false;
 }
 
 async function shutdownRendererSentry() {
-  if (!rendererSentry || !sentryInitialized) return;
-  try {
-    await rendererSentry.close?.(2000);
-  } catch (error) {
-    console.warn('[Sentry] Failed to shutdown renderer SDK', error);
-  }
-  sentryInitialized = false;
+  if (!isElectronRuntime()) return;
+  sentryState.initialized = false;
 }
 
 export async function applyTelemetryOptIn(optIn: boolean) {
@@ -88,5 +67,3 @@ export async function syncRendererTelemetry() {
     await shutdownRendererSentry();
   }
 }
-
-

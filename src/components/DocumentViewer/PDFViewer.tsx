@@ -26,13 +26,8 @@ export function PDFViewer({ filePath, onPageChange }: PDFViewerProps) {
   const loadPDF = async () => {
     setLoading(true);
     try {
-      // Use pdfjs-dist for PDF rendering
-      const pdfjsLib = require('pdfjs-dist');
-      
-      // For browser environment, use worker
-      if (typeof window !== 'undefined') {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
-      }
+      const pdfjsLib = await import('pdfjs-dist');
+      pdfjsLib.GlobalWorkerOptions.workerSrc = '/workers/pdf.worker.js';
 
       // Load PDF (filePath should be accessible URL or data URL)
       const loadingTask = pdfjsLib.getDocument(filePath);

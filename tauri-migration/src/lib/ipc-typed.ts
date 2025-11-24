@@ -7,7 +7,7 @@
 
 import { z } from 'zod';
 import type { PrivacyAuditSummary } from './ipc-events';
-import { isDevEnv, isElectronRuntime } from './env';
+import { isDevEnv } from './env';
 import type { EcoImpactForecast } from '../types/ecoImpact';
 import type { TrustSummary } from '../types/trustWeaver';
 import type { NexusListResponse, NexusPluginEntry } from '../types/extensionNexus';
@@ -278,101 +278,11 @@ if (typeof window !== 'undefined') {
   }
 }
 
-// Wait for IPC to be ready (with timeout)
-// Electron removed - no need to wait for IPC
-async function waitForIPC(_timeout = 10000): Promise<boolean> {
-  // Always return true in Tauri - HTTP API is always available
-  return true;
-  // If already ready, return immediately
-  if (
-    ipcReady &&
-    typeof window !== 'undefined' &&
-    window.ipc &&
-    typeof window.ipc.invoke === 'function'
-  ) {
-    return true;
-  }
-
-  // Check if window.ipc exists (even if not marked as ready)
-  if (typeof window !== 'undefined' && window.ipc && typeof window.ipc.invoke === 'function') {
-    // Mark as ready if IPC bridge exists
-    if (!ipcReady) {
-      ipcReady = true;
-      const resolvers = [...ipcReadyResolvers];
-      ipcReadyResolvers = [];
-      resolvers.forEach(resolve => resolve());
-      if (IS_DEV) {
-        console.log('[IPC] Bridge detected and marked as ready');
-      }
-    }
-    return true;
-  }
-
-  // Wait for ready signal
-  return new Promise(resolve => {
-    const startTime = Date.now();
-
-    // If already ready, resolve immediately
-    if (ipcReady && window.ipc && typeof window.ipc.invoke === 'function') {
-      resolve(true);
-      return;
-    }
-
-    // Add resolver to list
-    const timeoutId = setTimeout(() => {
-      // Remove from list if timeout
-      ipcReadyResolvers = ipcReadyResolvers.filter(r => r !== resolver);
-      resolve(false);
-    }, timeout);
-
-    const resolver = () => {
-      clearTimeout(timeoutId);
-      resolve(true);
-    };
-
-    ipcReadyResolvers.push(resolver);
-
-    // Also poll as fallback - check both ipcReady flag AND window.ipc existence
-    const checkInterval = setInterval(() => {
-      const hasIpc =
-        typeof window !== 'undefined' && window.ipc && typeof window.ipc.invoke === 'function';
-      if (ipcReady && hasIpc) {
-        clearInterval(checkInterval);
-        clearTimeout(timeoutId);
-        ipcReadyResolvers = ipcReadyResolvers.filter(r => r !== resolver);
-        resolve(true);
-      } else if (hasIpc && !ipcReady) {
-        // IPC bridge exists but not marked ready - mark it now
-        ipcReady = true;
-        const allResolvers = [...ipcReadyResolvers];
-        ipcReadyResolvers = [];
-        allResolvers.forEach(r => r());
-        clearInterval(checkInterval);
-        clearTimeout(timeoutId);
-        if (IS_DEV) {
-          console.log('[IPC] Bridge detected during polling and marked as ready');
-        }
-        resolve(true);
-      } else if (Date.now() - startTime > timeout) {
-        clearInterval(checkInterval);
-        clearTimeout(timeoutId);
-        ipcReadyResolvers = ipcReadyResolvers.filter(r => r !== resolver);
-        if (IS_DEV) {
-          console.warn(`[IPC] Timeout waiting for IPC bridge (${timeout}ms)`);
-        }
-        resolve(false);
-      }
-    }, 100);
-  });
-}
-
 export async function ipcCall<TRequest, TResponse = unknown>(
   channel: string,
   request: TRequest,
   schema?: z.ZodSchema<TResponse>
 ): Promise<TResponse> {
-  const fullChannel = `ob://ipc/v1/${channel}`;
-
   // Tauri migration: Always use HTTP API (Electron removed)
   // Map IPC channel to HTTP endpoint
   const channelMap: Record<string, string | ((req: any) => string)> = {
@@ -391,14 +301,14 @@ export async function ipcCall<TRequest, TResponse = unknown>(
     // Map channel to HTTP endpoint
     let endpoint: string | undefined;
     const endpointOrFn = channelMap[channel];
-    
+
     // Handle dynamic endpoints
     if (typeof endpointOrFn === 'function') {
       endpoint = endpointOrFn(request as any);
     } else if (typeof endpointOrFn === 'string') {
       endpoint = endpointOrFn;
     }
-    
+
     let method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET';
     let body: any = null;
 
@@ -409,7 +319,11 @@ export async function ipcCall<TRequest, TResponse = unknown>(
     } else if (channel.includes(':update') || channel.includes(':set')) {
       method = 'PUT';
       body = request;
-    } else if (channel.includes(':delete') || channel.includes(':close') || channel.includes(':stop')) {
+    } else if (
+      channel.includes(':delete') ||
+      channel.includes(':close') ||
+      channel.includes(':stop')
+    ) {
       method = 'DELETE';
     } else if (channel.includes(':activate') || channel.includes(':navigate')) {
       method = 'POST';
@@ -432,7 +346,7 @@ export async function ipcCall<TRequest, TResponse = unknown>(
       const apiMethod = apiClientMethods[channel];
       if (apiMethod) {
         const response = await apiMethod(request);
-        
+
         if (schema && response !== undefined && response !== null) {
           const parsed = schema.safeParse(response);
           if (!parsed.success) {
@@ -464,14 +378,14 @@ export async function ipcCall<TRequest, TResponse = unknown>(
     }
 
     const httpResponse = await fetch(url, options);
-    
+
     if (!httpResponse.ok) {
       const errorText = await httpResponse.text();
       throw new Error(`HTTP ${httpResponse.status}: ${errorText}`);
     }
 
     const response = await httpResponse.json();
-    
+
     if (schema && response !== undefined && response !== null) {
       const parsed = schema.safeParse(response);
       if (!parsed.success) {
