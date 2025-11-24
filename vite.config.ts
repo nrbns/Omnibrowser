@@ -1,18 +1,32 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type PluginOption } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
+import { visualizer } from 'rollup-plugin-visualizer';
+
+const enableAnalyze = process.env.ANALYZE === 'true';
+const plugins: PluginOption[] = [
+  react({
+    babel: {
+      parserOpts: {
+        plugins: ['jsx'],
+      },
+    },
+  }),
+];
+
+if (enableAnalyze) {
+  plugins.push(
+    visualizer({
+      filename: 'dist-web/bundle-report.html',
+      template: 'treemap',
+      gzipSize: true,
+      brotliSize: true,
+    })
+  );
+}
 
 export default defineConfig({
-  plugins: [
-    react({
-      babel: {
-        parserOpts: {
-          plugins: ['jsx'],
-        },
-      },
-    }),
-    // Electron plugin removed - using Tauri now
-  ],
+  plugins,
   root: resolve(__dirname),
   publicDir: 'public',
   esbuild: {
