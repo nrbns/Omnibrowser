@@ -19,6 +19,7 @@ import {
 import { useTabsStore } from '../../state/tabsStore';
 import { ipc } from '../../lib/ipc-typed';
 import { toast } from '../../utils/toast';
+import { toast as hotToast } from 'react-hot-toast';
 import { HandsFreeMode } from './HandsFreeMode';
 import { createRegenRealtimeClient } from '../../regen/realtime';
 import type {
@@ -60,8 +61,26 @@ export function RegenSidebar() {
     clientIdRef.current = `regen-${nanoid(12)}`;
   }
   const clientId = clientIdRef.current;
+  const statusToastRef = useRef<string | null>(null);
+  const queryToastRef = useRef<string | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const { tabs, activeId } = useTabsStore();
   const activeTab = tabs.find(t => t.id === activeId);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const seen = localStorage.getItem('omnibrowser:onboarding:voice');
+    setShowOnboarding(!seen);
+  }, []);
+
+  const dismissOnboarding = () => {
+    try {
+      localStorage.setItem('omnibrowser:onboarding:voice', '1');
+    } catch {
+      // ignore storage errors
+    }
+    setShowOnboarding(false);
+  };
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -155,11 +174,23 @@ export function RegenSidebar() {
 
   const handleStatusEvent = useCallback((event: RegenStatusEvent) => {
     if (event.phase === 'idle') {
+      if (statusToastRef.current) {
+        hotToast.dismiss(statusToastRef.current);
+        statusToastRef.current = null;
+        hotToast.success('Regen is ready');
+      }
       setCurrentStatus('');
       setIsLoading(false);
       return;
     }
-    setCurrentStatus(event.detail || event.label || event.phase);
+    const label = event.detail || event.label || event.phase;
+    setCurrentStatus(label);
+    setIsLoading(true);
+    if (statusToastRef.current) {
+      hotToast.loading(label, { id: statusToastRef.current });
+    } else {
+      statusToastRef.current = hotToast.loading(label);
+    }
   }, []);
 
   const handleNotification = useCallback((event: RegenNotificationEvent) => {
@@ -249,6 +280,10 @@ export function RegenSidebar() {
   const handleStreamError = useCallback(
     (event: RegenErrorEvent) => {
       toast.error(event.message);
+      if (statusToastRef.current) {
+        hotToast.dismiss(statusToastRef.current);
+        statusToastRef.current = null;
+      }
       setIsLoading(false);
       setCurrentStatus('');
     },
@@ -327,6 +362,7 @@ export function RegenSidebar() {
     setMessages(prev => [...prev, userMessage]);
 
     try {
+      queryToastRef.current = hotToast.loading('Analyzing…');
       const response = await fetch('http://localhost:4000/api/agent/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -357,6 +393,10 @@ export function RegenSidebar() {
     } catch (error) {
       console.error('[Regen] Query failed:', error);
       toast.error('Failed to get response from Regen');
+      if (queryToastRef.current) {
+        hotToast.error('Something went wrong', { id: queryToastRef.current });
+        queryToastRef.current = null;
+      }
 
       const errorMessage: RegenMessage = {
         id: `msg-${Date.now() + 1}`,
@@ -366,6 +406,10 @@ export function RegenSidebar() {
       };
       setMessages(prev => [...prev, errorMessage]);
     } finally {
+      if (queryToastRef.current) {
+        hotToast.success('Answer ready', { id: queryToastRef.current });
+        queryToastRef.current = null;
+      }
       setIsLoading(false);
     }
   };
@@ -393,9 +437,9 @@ export function RegenSidebar() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-gray-900 border-l border-gray-700">
+    <div className="relative flex h-full w-full flex-col border-t border-gray-800 bg-slate-950 md:w-80 md:border-l md:border-t-0 lg:w-96">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-700">
+      <div className="flex items-center justify-between border-b border-gray-800 px-4 py-3">
         <div className="flex items-center gap-2">
           <Sparkles className="w-5 h-5 text-blue-500" />
           <h2 className="text-lg font-semibold text-gray-200">Regen</h2>
@@ -419,7 +463,7 @@ export function RegenSidebar() {
       </div>
 
       {/* Mode Toggles */}
-      <div className="flex gap-2 p-3 border-b border-gray-700">
+      <div className="flex gap-2 border-b border-gray-800 p-3">
         <button
           onClick={() => setMode('research')}
           className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg transition-colors ${
@@ -502,7 +546,7 @@ export function RegenSidebar() {
       </div>
 
       {/* Hands-Free Mode Toggle */}
-      <div className="px-4 py-2 border-t border-gray-700 flex items-center justify-between bg-gray-800/50">
+      <div className="flex items-center justify-between border-t border-gray-800 bg-gray-900/60 px-4 py-2">
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-400">Hands-Free Mode</span>
           <button
@@ -528,7 +572,7 @@ export function RegenSidebar() {
       </div>
 
       {/* Input */}
-      <div className="p-4 border-t border-gray-700">
+      <div className="border-t border-gray-800 p-4">
         <div className="flex items-center gap-2">
           <button
             onClick={handleVoiceToggle}
@@ -606,6 +650,28 @@ export function RegenSidebar() {
           }}
           onClose={() => setHandsFreeMode(false)}
         />
+      )}
+
+      {showOnboarding && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-slate-950/80 px-6 py-10">
+          <div className="w-full max-w-sm space-y-4 rounded-2xl border border-blue-500/40 bg-slate-900/90 p-5 text-center text-slate-100 shadow-2xl">
+            <div className="flex flex-col items-center gap-2">
+              <Sparkles className="h-6 w-6 text-blue-400" />
+              <p className="text-lg font-semibold">Voice in Hindi to start</p>
+              <p className="text-sm text-slate-400">
+                Hold the mic button and say “नमस्ते रीजन” to try hands-free mode. You can switch back
+                anytime.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={dismissOnboarding}
+              className="w-full rounded-lg border border-blue-500/60 bg-blue-600/20 px-4 py-2 text-sm font-medium text-blue-100 transition hover:bg-blue-600/30"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

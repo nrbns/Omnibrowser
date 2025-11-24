@@ -3,6 +3,7 @@
 import React, { Suspense } from 'react';
 import ReactDOM from 'react-dom/client';
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
 import './styles/globals.css';
 import './styles/mode-themes.css';
 import './lib/battery';
@@ -79,7 +80,6 @@ const ConsentTimelinePage = lazyWithErrorHandling(
   () => import('./routes/ConsentTimeline'),
   'ConsentTimelinePage'
 );
-
 function LoadingFallback() {
   return (
     <div
@@ -311,6 +311,16 @@ try {
             <RouterProvider router={router} future={{ v7_startTransition: true }} />
           </Suspense>
         </GlobalErrorBoundary>
+        <Toaster
+          position="bottom-right"
+          toastOptions={{
+            style: {
+              background: '#0f172a',
+              color: '#e2e8f0',
+              border: '1px solid rgba(148,163,184,0.3)',
+            },
+          }}
+        />
       </ThemeProvider>
     </React.StrictMode>
   );
