@@ -7,6 +7,7 @@
 import { ipc } from '../ipc-typed';
 import { isElectronRuntime } from '../env';
 
+const ELECTRON_SENTRY_MODULE_ID = '@sentry/electron/renderer';
 let rendererSentry: typeof import('@sentry/electron/renderer') | null = null;
 let sentryInitialized = false;
 
@@ -22,7 +23,7 @@ async function initRendererSentry() {
 
   if (!rendererSentry) {
     try {
-      rendererSentry = await import('@sentry/electron/renderer');
+      rendererSentry = await import(/* @vite-ignore */ ELECTRON_SENTRY_MODULE_ID);
     } catch (error) {
       console.warn('[Sentry] Renderer SDK unavailable', error);
       return;
@@ -88,5 +89,3 @@ export async function syncRendererTelemetry() {
     await shutdownRendererSentry();
   }
 }
-
-

@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "moduleResolution": "bundler",
+    "module": "ESNext",
+    "outDir": "./dist/electron",
+    "rootDir": "."
+  },
+  "include": [
+    "server/**/*.ts",
+    "server/**/*.tsx",
+    "packages/**/*.ts",
+    "packages/**/*.tsx",
+    "scripts/**/*.ts",
+    "scripts/**/*.tsx"
+  ],
+  "exclude": ["node_modules", "dist", "dist-web", "dist-release"]
+}
