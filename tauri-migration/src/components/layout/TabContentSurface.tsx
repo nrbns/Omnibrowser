@@ -8,6 +8,7 @@ import { isElectronRuntime } from '../../lib/env';
 import { OmniDesk } from '../OmniDesk';
 import { ipc } from '../../lib/ipc-typed';
 import { useTabsStore } from '../../state/tabsStore';
+import { BrowserTab } from './BrowserTab';
 
 interface TabContentSurfaceProps {
   tab: Tab | undefined;
@@ -24,11 +25,11 @@ function isInternalUrl(url?: string | null): boolean {
 export function TabContentSurface({ tab, overlayActive }: TabContentSurfaceProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   // const webviewRef = useRef<any>(null); // Not used - BrowserView managed by main process
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const isElectron = isElectronRuntime();
   const [loading, setLoading] = useState(false);
   const [failedMessage, setFailedMessage] = useState<string | null>(null);
   const [blockedExternal, setBlockedExternal] = useState(false);
+  const [reloadNonce, setReloadNonce] = useState(0);
   // const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null); // Not used - BrowserView managed by main process
   // const retryCountRef = useRef(0); // Not used - BrowserView managed by main process
 
@@ -246,21 +247,17 @@ export function TabContentSurface({ tab, overlayActive }: TabContentSurfaceProps
       return;
     }
 
-    // In Electron, BrowserView navigation is handled by electron/services/tabs.ts
-    // We don't need to update webview src here
     if (isElectron) {
-      // BrowserView is managed by main process
-      return;
-    } else {
-      const iframe = iframeRef.current;
-      if (!iframe) return;
-      if (iframe.src !== targetUrl) {
-        setLoading(true);
-        iframe.src = targetUrl;
-      }
+      setLoading(false);
+      setFailedMessage(null);
       setBlockedExternal(false);
+      return;
     }
-  }, [isElectron, targetUrl]);
+
+    setLoading(true);
+    setFailedMessage(null);
+    setBlockedExternal(false);
+  }, [isElectron, targetUrl, reloadNonce]);
 
   const panelId = tab?.id ? `tabpanel-${tab.id}` : 'tabpanel-empty';
   const labelledById = tab?.id ? `tab-${tab.id}` : undefined;
@@ -316,25 +313,24 @@ export function TabContentSurface({ tab, overlayActive }: TabContentSurfaceProps
       {/* In Electron, BrowserView is managed by main process, so we don't render webview tag here */}
       {/* The BrowserView is positioned by electron/services/tabs.ts */}
       {/* For non-Electron builds, use iframe fallback */}
-      {!isElectron && (
-        <iframe
-          ref={iframeRef}
-          className="w-full h-full border-0"
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            width: '100%',
-            height: '100%',
-            border: 'none',
-          }}
-          src={targetUrl ?? 'about:blank'}
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-          allow="fullscreen"
+      {!isElectron && targetUrl && (
+        <BrowserTab
+          key={`${targetUrl}-${reloadNonce}`}
+          url={targetUrl}
           title={tab?.title ?? 'Tab content'}
-          aria-label={tab?.title ? `Content for ${tab.title}` : 'Tab content'}
+          className="w-full h-full border-0 absolute inset-0"
+          onLoad={({ blocked }) => {
+            setLoading(false);
+            setFailedMessage(null);
+            setBlockedExternal(blocked);
+          }}
+          onError={message => {
+            setLoading(false);
+            setFailedMessage(
+              message || 'Failed to load this page. Please check the URL or your connection.'
+            );
+            setBlockedExternal(true);
+          }}
         />
       )}
 
@@ -409,18 +405,18 @@ export function TabContentSurface({ tab, overlayActive }: TabContentSurfaceProps
                 <button
                   type="button"
                   onClick={() => {
-                    if (targetUrl && isElectron) {
-                      // In Electron, reload is handled by main process via IPC
+                    if (!targetUrl) return;
+                    if (isElectron) {
                       const activeTab = useTabsStore.getState().activeId;
                       if (activeTab) {
                         ipc.tabs.reload({ id: activeTab }).catch(console.error);
                       }
                       setFailedMessage(null);
                       setLoading(true);
-                    } else if (targetUrl && !isElectron && iframeRef.current) {
+                    } else {
                       setFailedMessage(null);
                       setLoading(true);
-                      iframeRef.current.src = targetUrl;
+                      setReloadNonce(value => value + 1);
                     }
                   }}
                   className="rounded-lg border border-amber-400/60 bg-amber-500/20 px-3 py-1.5 text-xs font-medium text-amber-50 transition-colors hover:bg-amber-500/30"

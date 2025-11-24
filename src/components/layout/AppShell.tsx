@@ -1564,13 +1564,19 @@ export function AppShell() {
                     const isAboutBlank = activeTab?.url === 'about:blank' || !activeTab?.url;
 
                     // Check if it's a URL or search query
-                    const isUrl =
-                      /^https?:\/\//i.test(query) || /^[a-z0-9]+(\.[a-z0-9]+)+/i.test(query);
-                    const targetUrl = isUrl
-                      ? query.startsWith('http')
-                        ? query
-                        : `https://${query}`
-                      : `https://duckduckgo.com/?q=${encodeURIComponent(query)}`;
+                    const trimmed = query.trim();
+                    const hasScheme = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(trimmed);
+                    const hasSpace = /\s/.test(trimmed);
+                    const looksLikeDomain = /^[\w-]+(\.[\w-]+)+(:\d+)?(\/.*)?$/i.test(trimmed);
+                    const isLocalhost = /^localhost(:\d+)?(\/.*)?$/i.test(trimmed);
+                    const isIpAddress = /^\d{1,3}(\.\d{1,3}){3}(?::\d+)?(\/.*)?$/.test(trimmed);
+                    const treatAsUrl =
+                      !hasSpace && (hasScheme || looksLikeDomain || isLocalhost || isIpAddress);
+                    const targetUrl = treatAsUrl
+                      ? hasScheme
+                        ? trimmed
+                        : `https://${trimmed}`
+                      : `https://duckduckgo.com/?q=${encodeURIComponent(trimmed)}`;
 
                     if (isAboutBlank && activeTab) {
                       await ipc.tabs.navigate(activeTab.id, targetUrl);
