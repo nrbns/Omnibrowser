@@ -13,6 +13,7 @@ import { syncRendererTelemetry } from './lib/monitoring/sentry-client';
 import { syncAnalyticsOptIn, trackPageView } from './lib/monitoring/analytics-client';
 import { ipc } from './lib/ipc-typed';
 import { ThemeProvider } from './ui/theme';
+import { AppErrorBoundary } from './components/AppErrorBoundary';
 
 // Import test utility in dev mode
 if (isDevEnv()) {
@@ -305,23 +306,25 @@ try {
 
   root.render(
     <React.StrictMode>
-      <ThemeProvider>
-        <GlobalErrorBoundary>
-          <Suspense fallback={<LoadingFallback />}>
-            <RouterProvider router={router} future={{ v7_startTransition: true }} />
-          </Suspense>
-        </GlobalErrorBoundary>
-        <Toaster
-          position="bottom-right"
-          toastOptions={{
-            style: {
-              background: '#0f172a',
-              color: '#e2e8f0',
-              border: '1px solid rgba(148,163,184,0.3)',
-            },
-          }}
-        />
-      </ThemeProvider>
+      <AppErrorBoundary>
+        <ThemeProvider>
+          <GlobalErrorBoundary>
+            <Suspense fallback={<LoadingFallback />}>
+              <RouterProvider router={router} future={{ v7_startTransition: true }} />
+            </Suspense>
+          </GlobalErrorBoundary>
+          <Toaster
+            position="bottom-right"
+            toastOptions={{
+              style: {
+                background: '#0f172a',
+                color: '#e2e8f0',
+                border: '1px solid rgba(148,163,184,0.3)',
+              },
+            }}
+          />
+        </ThemeProvider>
+      </AppErrorBoundary>
     </React.StrictMode>
   );
 } catch (error) {

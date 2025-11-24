@@ -15,13 +15,13 @@ import { formatDistanceToNow } from 'date-fns';
 import { useTabGraphStore } from '../../state/tabGraphStore';
 import { isDevEnv, isElectronRuntime } from '../../lib/env';
 import { TabContentSurface } from './TabContentSurface';
+import { TabManager } from './TabManager';
 // Voice components disabled by user request
 // import { VoiceTips } from '../voice/VoiceTips';
 // import VoiceCompanion from '../voice/VoiceCompanion';
 // Lazy load heavy Redix services to avoid blocking initial render
 const initializeOptimizer = () =>
   import('../../core/redix/optimizer').then(m => m.initializeOptimizer());
-const loadTabSuspensionModule = () => import('../../core/redix/tab-suspension');
 const initBatteryManager = () =>
   import('../../core/redix/battery-manager').then(m => m.initBatteryManager());
 const initMemoryManager = () =>
@@ -984,38 +984,6 @@ export function AppShell() {
   }, []);
 
   useEffect(() => {
-    // Defer tab suspension service
-    let isActive = true;
-    let loadedModule: any | null = null;
-    const timerId = window.setTimeout(() => {
-      loadTabSuspensionModule()
-        .then(mod => {
-          loadedModule = mod;
-          if (!isActive) {
-            mod.stopTabSuspensionService?.();
-            return;
-          }
-          mod.startTabSuspensionService();
-        })
-        .catch(err => {
-          if (isDevEnv()) console.warn('[AppShell] Tab suspension init failed:', err);
-        });
-    }, 1000);
-
-    return () => {
-      isActive = false;
-      window.clearTimeout(timerId);
-      if (loadedModule?.stopTabSuspensionService) {
-        loadedModule.stopTabSuspensionService();
-      } else {
-        loadTabSuspensionModule()
-          .then(mod => mod.stopTabSuspensionService?.())
-          .catch(() => {});
-      }
-    };
-  }, []);
-
-  useEffect(() => {
     // Defer battery, power, and memory managers
     setTimeout(() => {
       Promise.all([
@@ -1526,10 +1494,12 @@ export function AppShell() {
   );
 
   return (
-    <div
-      className="flex h-screen w-screen flex-col overflow-hidden bg-slate-950 text-slate-100"
-      data-app-shell="true"
-    >
+    <>
+      <TabManager />
+      <div
+        className="flex h-screen w-screen flex-col overflow-hidden bg-slate-950 text-slate-100"
+        data-app-shell="true"
+      >
       {/* Top Chrome Elements - Fixed header, never scrolls */}
       <div ref={topChromeRef} className="flex-none shrink-0 border-b border-slate-800 bg-slate-950">
         {/* Top Navigation - Hidden in fullscreen */}
@@ -2045,5 +2015,6 @@ export function AppShell() {
       {/* Session Restore Prompt */}
       <SessionRestorePrompt />
     </div>
+    </>
   );
 }
