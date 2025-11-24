@@ -5,7 +5,7 @@ import type {
   RegenNotificationEvent,
   RegenSocketEvent,
   RegenStatusEvent,
-} from '../../shared/regen-events';
+} from '../../../shared/regen-events';
 
 export type RegenRealtimeHandlers = {
   onOpen?: () => void;

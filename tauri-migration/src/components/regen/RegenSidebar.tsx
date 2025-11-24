@@ -3,7 +3,7 @@
  * The AI brain of OmniBrowser - chat + voice interface
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Send,
   Mic,
@@ -20,7 +20,15 @@ import { useTabsStore } from '../../state/tabsStore';
 import { ipc } from '../../lib/ipc-typed';
 import { toast } from '../../utils/toast';
 import { HandsFreeMode } from './HandsFreeMode';
-import { getRegenSocket } from '../../lib/realtime/regen-socket';
+import { createRegenRealtimeClient } from '../../regen/realtime';
+import type {
+  RegenCommandEvent,
+  RegenErrorEvent,
+  RegenMessageEvent,
+  RegenNotificationEvent,
+  RegenStatusEvent,
+} from '../../../shared/regen-events';
+import { nanoid } from '../../core/utils/nanoid';
 
 export type RegenMode = 'research' | 'trade';
 
@@ -43,11 +51,15 @@ export function RegenSidebar() {
   const [handsFreeMode, setHandsFreeMode] = useState(false);
   const [mode, setMode] = useState<RegenMode>('research');
   const [sessionId] = useState(() => `regen-${Date.now()}`);
-  const [isConnected] = useState(false);
-  const [_currentStatus, _setCurrentStatus] = useState<string>('');
+  const [isConnected, setIsConnected] = useState(false);
+  const [currentStatus, setCurrentStatus] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
-  const socketRef = useRef<ReturnType<typeof getRegenSocket> | null>(null);
+  const clientIdRef = useRef<string>();
+  if (!clientIdRef.current) {
+    clientIdRef.current = `regen-${nanoid(12)}`;
+  }
+  const clientId = clientIdRef.current;
   const { tabs, activeId } = useTabsStore();
   const activeTab = tabs.find(t => t.id === activeId);
 
@@ -106,6 +118,166 @@ export function RegenSidebar() {
     pendingOrder: any;
   } | null>(null);
 
+  const handleSocketMessage = useCallback(
+    (event: RegenMessageEvent) => {
+      if (!event?.text) {
+        return;
+      }
+      const role = event.role === 'agent' || event.role === 'system' ? 'assistant' : 'user';
+      setMessages(prev => {
+        const idx = prev.findIndex(msg => msg.id === event.messageId);
+        if (idx >= 0) {
+          const next = [...prev];
+          const existing = next[idx];
+          const updatedContent = existing.content
+            ? `${existing.content}${existing.content.endsWith(' ') ? '' : ' '}${event.text}`
+            : event.text;
+          next[idx] = {
+            ...existing,
+            content: updatedContent,
+            done: event.done ?? existing.done,
+            timestamp: event.timestamp,
+          };
+          return next;
+        }
+        const newMessage: RegenMessage = {
+          id: event.messageId,
+          role,
+          content: event.text,
+          timestamp: event.timestamp,
+          done: event.done,
+        };
+        return [...prev, newMessage];
+      });
+    },
+    [setMessages]
+  );
+
+  const handleStatusEvent = useCallback((event: RegenStatusEvent) => {
+    if (event.phase === 'idle') {
+      setCurrentStatus('');
+      setIsLoading(false);
+      return;
+    }
+    setCurrentStatus(event.detail || event.label || event.phase);
+  }, []);
+
+  const handleNotification = useCallback((event: RegenNotificationEvent) => {
+    const body = event.body || event.title;
+    switch (event.severity) {
+      case 'success':
+        toast.success(body);
+        break;
+      case 'warning':
+        toast.warning(body);
+        break;
+      case 'error':
+        toast.error(body);
+        break;
+      default:
+        toast.info(body);
+        break;
+    }
+  }, []);
+
+  const executeCommand = useCallback(
+    async (event: RegenCommandEvent) => {
+      const payload = event.payload || {};
+      const targetTabId = (payload.tabId as string) || activeTab?.id;
+      try {
+        switch (event.command) {
+          case 'OPEN_TAB':
+            if (payload.url) {
+              await ipc.regen.openTab({ url: payload.url as string });
+            }
+            break;
+          case 'SWITCH_TAB':
+            if (targetTabId) {
+              await ipc.regen.switchTab({ id: targetTabId });
+            }
+            break;
+          case 'SCROLL':
+            if (targetTabId) {
+              await ipc.regen.scroll({
+                tabId: targetTabId,
+                amount: (payload.amount as number) || 500,
+              });
+            }
+            break;
+          case 'CLICK_ELEMENT':
+            if (targetTabId && payload.selector) {
+              await ipc.regen.clickElement({
+                tabId: targetTabId,
+                selector: payload.selector as string,
+              });
+            }
+            break;
+          case 'NAVIGATE':
+            if (targetTabId && payload.url) {
+              await ipc.regen.navigate({
+                tabId: targetTabId,
+                url: payload.url as string,
+              });
+            }
+            break;
+          case 'GET_DOM':
+            if (targetTabId) {
+              await ipc.regen.captureDom?.({ tabId: targetTabId });
+            }
+            break;
+          case 'SET_FOCUS':
+            if (targetTabId) {
+              await ipc.regen.focusTab?.({ tabId: targetTabId });
+            }
+            break;
+          case 'SPEAK':
+            if ('speechSynthesis' in window && payload.text) {
+              const utterance = new SpeechSynthesisUtterance(payload.text as string);
+              window.speechSynthesis.speak(utterance);
+            }
+            break;
+          default:
+            break;
+        }
+      } catch (error) {
+        console.error('[RegenSidebar] Command execution failed', error);
+      }
+    },
+    [activeTab]
+  );
+
+  const handleStreamError = useCallback(
+    (event: RegenErrorEvent) => {
+      toast.error(event.message);
+      setIsLoading(false);
+      setCurrentStatus('');
+    },
+    []
+  );
+
+  useEffect(() => {
+    const client = createRegenRealtimeClient(clientId, {
+      onOpen: () => {
+        setIsConnected(true);
+      },
+      onClose: () => {
+        setIsConnected(false);
+      },
+      onMessage: handleSocketMessage,
+      onStatus: handleStatusEvent,
+      onNotification: handleNotification,
+      onCommand: executeCommand,
+      onStreamError: handleStreamError,
+      onError: () => {
+        setIsConnected(false);
+      },
+    });
+    client.connect();
+    return () => {
+      client.disconnect();
+    };
+  }, [clientId, handleSocketMessage, handleStatusEvent, handleNotification, executeCommand, handleStreamError]);
+
   const handleSend = async (text?: string) => {
     const messageText = text || input.trim();
     if (!messageText) return;
@@ -155,20 +327,6 @@ export function RegenSidebar() {
     setMessages(prev => [...prev, userMessage]);
 
     try {
-      // Send query via HTTP (response streams via WebSocket)
-      const socket = socketRef.current;
-      const clientId = socket?.getClientId() || `client-${Date.now()}`;
-
-      // Create placeholder message for streaming
-      const placeholderMessage: RegenMessage = {
-        id: `msg-${Date.now()}-streaming`,
-        role: 'assistant',
-        content: '',
-        timestamp: Date.now(),
-        done: false,
-      };
-      setMessages(prev => [...prev, placeholderMessage]);
-
       const response = await fetch('http://localhost:4000/api/agent/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -185,6 +343,7 @@ export function RegenSidebar() {
                 title: activeTab.title,
               }
             : undefined,
+          locale: navigator.language || 'en',
         }),
       });
 
@@ -291,7 +450,7 @@ export function RegenSidebar() {
           <div className="text-center text-gray-400 mt-8">
             <Sparkles className="w-12 h-12 mx-auto mb-4 opacity-50" />
             <p className="text-sm">Ask me anything or use voice commands</p>
-            {_currentStatus && <p className="text-xs mt-2 text-blue-400">{_currentStatus}</p>}
+            {currentStatus && <p className="text-xs mt-2 text-blue-400">{currentStatus}</p>}
             <p className="text-xs mt-2 text-gray-500">
               {mode === 'research' ? (
                 <>

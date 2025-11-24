@@ -36,6 +36,7 @@ import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { registerRegenSocketServer } from './realtime/regenSocket.js';
+import { handleMessageSafe } from './agent/core.js';
 
 // Create require function for CommonJS modules
 const __filename = fileURLToPath(import.meta.url);
@@ -584,6 +585,7 @@ fastify.post('/api/profile/signout', async () => ({ ok: true }));
  * Body: { url, text?, question, task?: 'summarize'|'qa'|'threat', waitFor?: number, callback_url?: string, userId?: string }
  */
 fastify.post('/api/agent/query', async (request, reply) => {
+  const body = request.body ?? {};
   const {
     url,
     text,
@@ -593,6 +595,29 @@ fastify.post('/api/agent/query', async (request, reply) => {
     callback_url,
     userId,
   } = request.body ?? {};
+
+  const regenMessage = typeof body?.message === 'string' ? body.message : text;
+  const regenClientId = typeof body?.clientId === 'string' ? body.clientId.trim() : null;
+  const regenMode = body?.mode || mode;
+  const regenLocale = body?.locale;
+
+  if (regenClientId && regenMessage) {
+    const requestId = uuidv4();
+    handleMessageSafe({
+      clientId: regenClientId,
+      text: regenMessage,
+      mode: regenMode || 'research',
+      locale: regenLocale || body?.language || 'en',
+      requestId,
+    }).catch(error => {
+      request.log.error({ error }, 'regen realtime handler failed');
+    });
+    return reply.status(202).send({
+      status: 'accepted',
+      clientId: regenClientId,
+      requestId,
+    });
+  }
 
   if (!url && !text) {
     return reply.status(400).send({ error: 'url-or-text-required' });
