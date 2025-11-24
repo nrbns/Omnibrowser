@@ -63,4 +63,18 @@
 
 **Note**: Migration is complete. All migration-related files have been removed. The project now uses Tauri exclusively.
 
+## 📊 Bundle Trim Progress (2025-11-24)
+
+- Added conditional analyzer build (`npm run analyze`) that renders `dist-web/bundle-report.html` using rollup-visualizer.
+- Moved `ResearchPane`, `ResearchSplit`, Mammoth DOCX parsing, and pdfjs viewer logic behind dynamic imports so they only load on demand; production `vendor` chunk dropped from ~812 kB gzip → ~206 kB gzip during analyze run.
+- Remaining heavy chunks:
+  - `vendor-pdf-*` (~107 kB gzip) – still required for interactive PDF rendering; candidate for optional download if docs mode disabled.
+  - `mode-research` (~37 kB gzip) – already lazy, next step is trimming unused components within `modes/research`.
+- Next targets:
+  1. Split pdf.js worker into separate Tauri asset to keep web bundle lean.
+  2. Audit `services/multiSourceSearch` + langchain imports for tree-shaking (currently bundled in `core-ai` chunk).
+
+Re-run `npm run analyze` after each refinement to track deltas.
+
+
 
