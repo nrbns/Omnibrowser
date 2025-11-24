@@ -2,7 +2,11 @@ export const getEnvVar = (key: string): string | undefined => {
   if (typeof process !== 'undefined' && process?.env && process.env[key] !== undefined) {
     return process.env[key];
   }
-  if (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env[key] !== undefined) {
+  if (
+    typeof import.meta !== 'undefined' &&
+    (import.meta as any).env &&
+    (import.meta as any).env[key] !== undefined
+  ) {
     return (import.meta as any).env[key];
   }
   return undefined;
@@ -17,26 +21,39 @@ export const isDevEnv = (): boolean => {
   return viteMode === 'development';
 };
 
-export const isElectronRuntime = (): boolean => {
-  if (typeof window === 'undefined') {
+const hasWindowContext = () => typeof window !== 'undefined';
+
+const detectTauriBridge = (): boolean => {
+  if (!hasWindowContext()) {
+    return false;
+  }
+  const w = window as any;
+  return Boolean(w.__TAURI__ || w.__TAURI_IPC__ || w.__TAURI_METADATA__);
+};
+
+const detectElectronBridge = (): boolean => {
+  if (!hasWindowContext()) {
     return false;
   }
 
-  // Check for IPC bridge (most reliable indicator)
   const maybeIpc = (window as any).ipc;
   if (maybeIpc && typeof maybeIpc.invoke === 'function') {
     return true;
   }
 
-  // Check for legacy electron API
   if ((window as any).electron) {
     return true;
   }
 
-  // Check for user agent (fallback)
   if (typeof navigator !== 'undefined' && navigator.userAgent) {
     return navigator.userAgent.includes('Electron');
   }
 
   return false;
 };
+
+export const isTauriRuntime = (): boolean => detectTauriBridge();
+
+export const isDesktopRuntime = (): boolean => detectTauriBridge() || detectElectronBridge();
+
+export const isElectronRuntime = (): boolean => isDesktopRuntime();

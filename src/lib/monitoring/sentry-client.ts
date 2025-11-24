@@ -5,10 +5,10 @@
  */
 
 import { ipc } from '../ipc-typed';
-import { isElectronRuntime } from '../env';
+import { isDesktopRuntime } from '../env';
 
-const ELECTRON_SENTRY_MODULE_ID = '@sentry/electron/renderer';
-let rendererSentry: typeof import('@sentry/electron/renderer') | null = null;
+const SENTRY_BROWSER_MODULE_ID = '@sentry/browser';
+let browserSentry: typeof import('@sentry/browser') | null = null;
 let sentryInitialized = false;
 
 const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN || '';
@@ -17,24 +17,24 @@ const SENTRY_SAMPLE_RATE = Number(import.meta.env.VITE_SENTRY_TRACES_SAMPLE_RATE
 const RELEASE = import.meta.env.VITE_APP_VERSION || '0.0.0';
 
 async function initRendererSentry() {
-  if (!isElectronRuntime()) return;
+  if (!isDesktopRuntime()) return;
   if (sentryInitialized) return;
   if (!SENTRY_DSN) return;
 
-  if (!rendererSentry) {
+  if (!browserSentry) {
     try {
-      rendererSentry = await import(/* @vite-ignore */ ELECTRON_SENTRY_MODULE_ID);
+      browserSentry = await import(/* @vite-ignore */ SENTRY_BROWSER_MODULE_ID);
     } catch (error) {
-      console.warn('[Sentry] Renderer SDK unavailable', error);
+      console.warn('[Sentry] Browser SDK unavailable', error);
       return;
     }
   }
 
   try {
-    rendererSentry.init({
+    browserSentry.init({
       dsn: SENTRY_DSN,
       environment: SENTRY_ENV,
-      release: `omnibrowser-renderer@${RELEASE}`,
+      release: `omnibrowser-desktop@${RELEASE}`,
       enableUnresponsive: false,
       tracesSampleRate: Number.isFinite(SENTRY_SAMPLE_RATE) ? SENTRY_SAMPLE_RATE : 0,
       beforeSend(event) {
@@ -53,25 +53,25 @@ async function initRendererSentry() {
       },
     });
     sentryInitialized = true;
-    console.info('[Sentry] Renderer crash reporting enabled');
+    console.info('[Sentry] Desktop telemetry enabled');
   } catch (error) {
-    console.warn('[Sentry] Failed to initialize renderer', error);
+    console.warn('[Sentry] Failed to initialize browser SDK', error);
   }
 }
 
 async function shutdownRendererSentry() {
-  if (!rendererSentry || !sentryInitialized) return;
+  if (!browserSentry || !sentryInitialized) return;
   try {
-    await rendererSentry.close?.(2000);
+    await browserSentry.close?.(2000);
   } catch (error) {
-    console.warn('[Sentry] Failed to shutdown renderer SDK', error);
+    console.warn('[Sentry] Failed to shutdown browser SDK', error);
   }
   sentryInitialized = false;
 }
 
 export async function applyTelemetryOptIn(optIn: boolean) {
   await ipc.telemetry.setOptIn(optIn);
-  if (!isElectronRuntime()) return;
+  if (!isDesktopRuntime()) return;
 
   if (optIn) {
     await initRendererSentry();
@@ -81,7 +81,7 @@ export async function applyTelemetryOptIn(optIn: boolean) {
 }
 
 export async function syncRendererTelemetry() {
-  if (!isElectronRuntime()) return;
+  if (!isDesktopRuntime()) return;
   const status = await ipc.telemetry.getStatus();
   if (status.optIn) {
     await initRendererSentry();
