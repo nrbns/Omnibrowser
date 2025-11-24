@@ -78,6 +78,21 @@ declare global {
   }
 }
 
+const buildNavigationTarget = (input: string): string => {
+  const value = input.trim();
+  if (!value) return 'https://www.google.com';
+
+  const hasProtocol = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(value);
+  const candidate = hasProtocol ? value : `https://${value}`;
+
+  try {
+    const url = new URL(candidate);
+    return url.toString();
+  } catch {
+    return `https://www.google.com/search?q=${encodeURIComponent(value)}`;
+  }
+};
+
 type ErrorBoundaryState = {
   hasError: boolean;
   error?: Error;
@@ -1555,15 +1570,7 @@ export function AppShell() {
                   try {
                     const activeTab = tabsState.tabs.find(t => t.id === tabsState.activeId);
                     const isAboutBlank = activeTab?.url === 'about:blank' || !activeTab?.url;
-
-                    // Check if it's a URL or search query
-                    const isUrl =
-                      /^https?:\/\//i.test(query) || /^[a-z0-9]+(\.[a-z0-9]+)+/i.test(query);
-                    const targetUrl = isUrl
-                      ? query.startsWith('http')
-                        ? query
-                        : `https://${query}`
-                      : `https://duckduckgo.com/?q=${encodeURIComponent(query)}`;
+                    const targetUrl = buildNavigationTarget(query);
 
                     if (isAboutBlank && activeTab) {
                       await ipc.tabs.navigate(activeTab.id, targetUrl);

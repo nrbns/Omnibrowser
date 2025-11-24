@@ -22,7 +22,10 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "allowlist": {
+        "all": true
+      }
     }
   },
   "bundle": {
