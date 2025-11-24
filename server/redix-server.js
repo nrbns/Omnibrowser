@@ -35,6 +35,7 @@ import crypto from 'crypto';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { registerRegenSocketServer } from './realtime/regenSocket.js';
 
 // Create require function for CommonJS modules
 const __filename = fileURLToPath(import.meta.url);
@@ -1923,6 +1924,7 @@ fastify.get('/metrics/prom', async (_request, reply) => {
   try {
     if (enableWebSockets) {
       await fastify.register(websocketPlugin);
+      await registerRegenSocketServer(fastify);
     }
     // Initialize WebSocket server before listening
     const httpServer = fastify.server;
