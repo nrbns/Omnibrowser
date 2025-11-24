@@ -3,10 +3,17 @@
  * Continuous voice listening + TTS responses
  */
 
-import { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Volume2, VolumeX, X } from 'lucide-react';
-import { ipc } from '../../lib/ipc-typed';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Mic, MicOff, Volume2, VolumeX, X, Wifi, WifiOff } from 'lucide-react';
 import { toast } from '../../utils/toast';
+import { createRegenRealtimeClient } from '../../regen/realtime';
+import type {
+  RegenCommandEvent,
+  RegenErrorEvent,
+  RegenMessageEvent,
+  RegenStatusEvent,
+} from '../../../shared/regen-events';
+import { nanoid } from '../../core/utils/nanoid';
 
 interface HandsFreeModeProps {
   sessionId: string;
@@ -21,7 +28,10 @@ export function HandsFreeMode({ sessionId, mode, onCommand, onClose }: HandsFree
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const recognitionRef = useRef<any>(null);
   const synthRef = useRef<SpeechSynthesis | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const [socketReady, setSocketReady] = useState(false);
+  const clientIdRef = useRef<string>(`regen-handsfree-${nanoid(10)}`);
+  const clientId = clientIdRef.current;
+  const responseBufferRef = useRef<Record<string, string>>({});
 
   // Initialize speech recognition
   useEffect(() => {
@@ -81,37 +91,83 @@ export function HandsFreeMode({ sessionId, mode, onCommand, onClose }: HandsFree
     };
   }, [isListening, isProcessing]);
 
+  const handleSocketMessage = useCallback((event: RegenMessageEvent) => {
+    if (!event?.text) return;
+    responseBufferRef.current[event.messageId] = responseBufferRef.current[event.messageId]
+      ? `${responseBufferRef.current[event.messageId]} ${event.text}`.trim()
+      : event.text;
+    if (event.done && ttsEnabled) {
+      speak(responseBufferRef.current[event.messageId]);
+      delete responseBufferRef.current[event.messageId];
+    }
+  }, [ttsEnabled]);
+
+  const handleStatusEvent = useCallback((event: RegenStatusEvent) => {
+    if (event.phase === 'idle') {
+      setIsProcessing(false);
+    } else if (event.phase !== 'planning') {
+      setIsProcessing(true);
+    }
+  }, []);
+
+  const handleCommand = useCallback(
+    (event: RegenCommandEvent) => {
+      if (event.command && onCommand) {
+        onCommand({ type: event.command, payload: event.payload ?? {} });
+      }
+    },
+    [onCommand]
+  );
+
+  const handleStreamError = useCallback(
+    (event: RegenErrorEvent) => {
+      toast.error(event.message);
+      setIsProcessing(false);
+    },
+    []
+  );
+
+  useEffect(() => {
+    const client = createRegenRealtimeClient(clientId, {
+      onOpen: () => setSocketReady(true),
+      onClose: () => setSocketReady(false),
+      onMessage: handleSocketMessage,
+      onStatus: handleStatusEvent,
+      onCommand: handleCommand,
+      onStreamError: handleStreamError,
+      onError: () => setSocketReady(false),
+    });
+    client.connect();
+    return () => client.disconnect();
+  }, [clientId, handleSocketMessage, handleStatusEvent, handleCommand, handleStreamError]);
+
   const handleVoiceCommand = async (transcript: string) => {
     // Stop command
     if (transcript.toLowerCase().includes('stop') || transcript.toLowerCase().includes('cancel')) {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
       speak('Stopped hands-free actions.');
       return;
     }
 
+    if (!socketReady) {
+      toast.error('Regen connection unavailable. Please wait a moment.');
+      return;
+    }
+
     try {
-      // Send to Regen
-      const response = await ipc.regen.query({
-        sessionId,
-        message: transcript,
-        mode,
-        source: 'voice',
+      const response = await fetch('http://localhost:4000/api/agent/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientId,
+          sessionId,
+          message: transcript,
+          mode,
+          source: 'voice',
+          locale: navigator.language || 'en',
+        }),
       });
-
-      // Execute commands
-      if (response.commands && response.commands.length > 0) {
-        for (const cmd of response.commands) {
-          if (onCommand) {
-            onCommand(cmd);
-          }
-        }
-      }
-
-      // Speak response
-      if (ttsEnabled && response.text) {
-        speak(response.text);
+      if (!response.ok) {
+        throw new Error('Voice query failed');
       }
     } catch (error) {
       console.error('[HandsFree] Command failed:', error);
@@ -162,6 +218,11 @@ export function HandsFreeMode({ sessionId, mode, onCommand, onClose }: HandsFree
     <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-2">
       {/* Controls */}
       <div className="flex items-center gap-2 bg-gray-900 border border-gray-700 rounded-lg p-2 shadow-lg">
+        {socketReady ? (
+          <Wifi className="w-4 h-4 text-green-400" aria-label="Connected" />
+        ) : (
+          <WifiOff className="w-4 h-4 text-red-400" aria-label="Disconnected" />
+        )}
         <button
           onClick={() => setTtsEnabled(!ttsEnabled)}
           className={`p-2 rounded transition-colors ${
