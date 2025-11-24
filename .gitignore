@@ -5,11 +5,11 @@ node_modules/
 
 # Build outputs
 dist/
-dist-electron/
 dist-web/
 build/
 out/
 redix-core/runtime/pkg/
+tauri-migration/src-tauri/target/
 *.tsbuildinfo
 
 # Environment variables
@@ -53,9 +53,6 @@ __pycache__/
 .cache/
 .temp/
 tmp/
-
-# Electron
-*.asar
 
 # Documentation (implementation notes)
 *_IMPLEMENTATION*.md

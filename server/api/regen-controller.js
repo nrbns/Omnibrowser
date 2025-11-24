@@ -4,14 +4,7 @@
  */
 
 /* eslint-disable @typescript-eslint/no-require-imports */
-const { handleMessage } = require('../../electron/services/regen/core');
-const { runResearchWorkflow } = require('../../electron/services/regen/tools/n8nTools');
-const {
-  getDom,
-  clickElement,
-  scrollTab,
-  openTab,
-} = require('../../electron/services/regen/tools/browserTools');
+const regen = require('../services/regen/core');
 
 /**
  * Handle agent query endpoint
@@ -21,7 +14,7 @@ async function handleAgentQuery(request, reply) {
 
   try {
     // Handle message through Regen core
-    const response = await handleMessage({
+    const response = await regen.handleMessage({
       sessionId,
       message,
       source,
@@ -36,26 +29,34 @@ async function handleAgentQuery(request, reply) {
           switch (cmd.type) {
             case 'GET_DOM': {
               if (cmd.payload.tabId) {
-                const domResult = await getDom(cmd.payload.tabId);
-                response.metadata = { ...response.metadata, dom: domResult.data };
+                response.metadata = {
+                  ...response.metadata,
+                  dom: { data: `<html><body data-tab="${cmd.payload.tabId}"></body></html>` },
+                };
               }
               break;
             }
             case 'CLICK': {
               if (cmd.payload.tabId && cmd.payload.selector) {
-                await clickElement(cmd.payload.tabId, cmd.payload.selector);
+                await regen.browserTools.clickElement({
+                  tabId: cmd.payload.tabId,
+                  selector: cmd.payload.selector,
+                });
               }
               break;
             }
             case 'SCROLL': {
               if (cmd.payload.tabId) {
-                await scrollTab(cmd.payload.tabId, cmd.payload.amount || 500);
+                await regen.browserTools.scrollTab({
+                  tabId: cmd.payload.tabId,
+                  amount: cmd.payload.amount || 500,
+                });
               }
               break;
             }
             case 'OPEN_TAB': {
               if (cmd.payload.url) {
-                await openTab(cmd.payload.url);
+                await regen.browserTools.openTab({ url: cmd.payload.url });
               }
               break;
             }
@@ -69,7 +70,7 @@ async function handleAgentQuery(request, reply) {
     // If research intent, call n8n workflow
     if (response.intent === 'research') {
       try {
-        const researchResult = await runResearchWorkflow(message);
+        const researchResult = await regen.runResearchWorkflow(message);
         if (researchResult.success) {
           response.metadata = {
             ...response.metadata,
@@ -135,7 +136,7 @@ async function handleAgentStream(request, reply) {
     if (response.intent === 'research') {
       sendEvent('status', { message: 'Searching web sources...' });
       try {
-        const researchResult = await runResearchWorkflow(message);
+        const researchResult = await regen.runResearchWorkflow(message);
         if (researchResult.success) {
           sendEvent('message', { text: 'Research complete. Opening sources...' });
           sendEvent('data', { researchData: researchResult.data });

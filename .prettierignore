@@ -1,7 +1,7 @@
 node_modules
 dist-web
-dist-electron
 dist-release
+tauri-migration/src-tauri/target
 storybook-static
 coverage
 *.log

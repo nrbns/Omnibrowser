@@ -7,7 +7,6 @@ export default tseslint.config(
     ignores: [
       'dist/**',
       'dist-web/**',
-      'dist-electron/**',
       'dist-release/**',
       'node_modules/**',
       'stubs/**',

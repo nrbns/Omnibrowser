@@ -11,7 +11,6 @@ const projectRoot = path.resolve(__dirname, '..');
 // Directories to remove
 const dirsToRemove = [
   'dist',
-  'dist-electron',
   'dist-web',
   'build',
   'out',
@@ -37,7 +36,6 @@ const filesToRemove = [
   'yarn-error.log*',
   'pnpm-debug.log*',
   '.dev-all.lock',
-  '.electron-dev.lock',
 ];
 
 // Patterns for unwanted markdown files (summary/status files)

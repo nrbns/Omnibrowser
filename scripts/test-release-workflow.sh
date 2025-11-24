@@ -42,15 +42,15 @@ else
   echo "   ℹ️  Version will be updated from $CURRENT_VERSION to $VERSION during release"
 fi
 
-# Test 4: electron-builder availability
+# Test 4: Tauri CLI availability
 echo ""
-echo "4. Checking electron-builder..."
+echo "4. Checking Tauri CLI..."
 if command -v npx &> /dev/null; then
-  if npx electron-builder --version &> /dev/null; then
-    BUILDER_VERSION=$(npx electron-builder --version 2>/dev/null || echo "unknown")
-    echo "   ✅ electron-builder available: $BUILDER_VERSION"
+  if npx tauri --version &> /dev/null; then
+    TAURI_VERSION=$(npx tauri --version 2>/dev/null || echo "unknown")
+    echo "   ✅ Tauri CLI available: $TAURI_VERSION"
   else
-    echo "   ⚠️  electron-builder not found in node_modules (will install during workflow)"
+    echo "   ⚠️  Tauri CLI not found (install @tauri-apps/cli for desktop builds)"
   fi
 else
   echo "   ⚠️  npx not available (should be fine in CI)"
@@ -67,9 +67,9 @@ else
 fi
 
 if grep -q '"build:app":' package.json; then
-  echo "   ✅ 'build:app' script exists"
+  echo "   ✅ 'build:app' script exists (delegates to Tauri workspace)"
 else
-  echo "   ⚠️  'build:app' script not found (workflow uses 'npm run build && electron-builder')"
+  echo "   ⚠️  'build:app' script not found (workflow expects 'npm run build && npm run build:app')"
 fi
 
 # Test 6: Output directory check
@@ -92,8 +92,8 @@ if [ -f ".github/workflows/release.yml" ]; then
     echo "   ✅ Version extraction step found"
   fi
   
-  if grep -q "Build Electron app" .github/workflows/release.yml; then
-    echo "   ✅ Electron build step found"
+  if grep -q -i "Build Tauri" .github/workflows/release.yml; then
+    echo "   ✅ Tauri build step found"
   fi
   
   if grep -q "Create GitHub Release" .github/workflows/release.yml; then

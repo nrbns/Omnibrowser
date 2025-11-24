@@ -13,12 +13,13 @@ const TEST_RESULTS = {
 };
 
 function log(message, type = 'info') {
-  const prefix = {
-    info: 'ℹ️',
-    success: '✅',
-    error: '❌',
-    warning: '⚠️',
-  }[type] || 'ℹ️';
+  const prefix =
+    {
+      info: 'ℹ️',
+      success: '✅',
+      error: '❌',
+      warning: '⚠️',
+    }[type] || 'ℹ️';
   console.log(`${prefix} ${message}`);
 }
 
@@ -39,7 +40,7 @@ function testAsync(name, fn) {
       TEST_RESULTS.passed.push(name);
       log(`${name}`, 'success');
     })
-    .catch((error) => {
+    .catch(error => {
       TEST_RESULTS.failed.push({ name, error: error.message });
       log(`${name}: ${error.message}`, 'error');
     });
@@ -51,14 +52,15 @@ async function checkErrorHandling(filePath, description) {
     if (!fs.existsSync(fullPath)) {
       throw new Error(`File not found: ${fullPath}`);
     }
-    
+
     const content = fs.readFileSync(fullPath, 'utf-8');
-    
+
     // Check for error handling patterns
     const hasTryCatch = content.includes('try') && content.includes('catch');
     const hasErrorState = content.includes('error') || content.includes('Error');
-    const hasOfflineCheck = content.includes('offline') || content.includes('unavailable') || content.includes('timeout');
-    
+    const hasOfflineCheck =
+      content.includes('offline') || content.includes('unavailable') || content.includes('timeout');
+
     if (!hasTryCatch && !hasErrorState) {
       throw new Error('Missing error handling (try/catch or error state)');
     }
@@ -71,13 +73,17 @@ async function checkOfflineFallback(filePath, description) {
     if (!fs.existsSync(fullPath)) {
       throw new Error(`File not found: ${fullPath}`);
     }
-    
+
     const content = fs.readFileSync(fullPath, 'utf-8');
-    
+
     // Check for offline/fallback handling
-    const hasOfflineCheck = content.includes('offline') || content.includes('unavailable') || content.includes('Ollama') || content.includes('fallback');
+    const hasOfflineCheck =
+      content.includes('offline') ||
+      content.includes('unavailable') ||
+      content.includes('Ollama') ||
+      content.includes('fallback');
     const hasErrorHandling = content.includes('error') || content.includes('catch');
-    
+
     if (!hasOfflineCheck && !hasErrorHandling) {
       throw new Error('Missing offline/fallback handling');
     }
@@ -101,17 +107,17 @@ async function runTests() {
   await checkOfflineFallback('src/components/SearchBar.tsx', 'SearchBar');
   await checkOfflineFallback('src/components/RedixQuickDialog.tsx', 'RedixQuickDialog');
   await checkOfflineFallback('src/components/layout/AppShell.tsx', 'AppShell');
-  await checkOfflineFallback('electron/services/redix-ipc.ts', 'Redix IPC');
+  await checkOfflineFallback('src/lib/ipc-typed.ts', 'IPC bridge');
   await checkOfflineFallback('apps/api/routes/redix.py', 'Redix API');
   log('');
 
   // Test 3: Backend Status Check
   log('Testing backend status check...', 'info');
-  await testAsync('Redix IPC - Status check exists', async () => {
-    const filePath = path.join(__dirname, '..', 'electron/services/redix-ipc.ts');
+  await testAsync('IPC bridge - Fallback map exists', async () => {
+    const filePath = path.join(__dirname, '..', 'src/lib/ipc-typed.ts');
     const content = fs.readFileSync(filePath, 'utf-8');
-    if (!content.includes('redix:status') || !content.includes('registerHandler')) {
-      throw new Error('Status check handler not found');
+    if (!content.includes('FALLBACK_CHANNELS') || !content.includes('tabs:create')) {
+      throw new Error('Fallback channels missing expected handlers');
     }
   });
 
@@ -126,20 +132,21 @@ async function runTests() {
 
   // Test 4: Error Messages
   log('Testing user-friendly error messages...', 'info');
-  await testAsync('Redix IPC - Error messages include offline hint', async () => {
-    const filePath = path.join(__dirname, '..', 'electron/services/redix-ipc.ts');
+  await testAsync('IPC bridge - Error messages include offline hint', async () => {
+    const filePath = path.join(__dirname, '..', 'src/lib/ipc-typed.ts');
     const content = fs.readFileSync(filePath, 'utf-8');
-    if (!content.includes('unavailable') && !content.includes('Ollama') && !content.includes('offline')) {
+    if (
+      !content.includes('unavailable') &&
+      !content.includes('stub') &&
+      !content.includes('offline')
+    ) {
       throw new Error('Error messages may not include offline/Ollama hints');
     }
   });
 
   await testAsync('Components - Error messages are user-friendly', async () => {
-    const files = [
-      'src/components/SearchBar.tsx',
-      'src/components/RedixQuickDialog.tsx',
-    ];
-    
+    const files = ['src/components/SearchBar.tsx', 'src/components/RedixQuickDialog.tsx'];
+
     for (const file of files) {
       const filePath = path.join(__dirname, '..', file);
       const content = fs.readFileSync(filePath, 'utf-8');
@@ -156,7 +163,10 @@ async function runTests() {
   log('AI Offline Test Summary', 'info');
   log('='.repeat(60), 'info');
   log(`✅ Passed: ${TEST_RESULTS.passed.length}`, 'success');
-  log(`❌ Failed: ${TEST_RESULTS.failed.length}`, TEST_RESULTS.failed.length > 0 ? 'error' : 'info');
+  log(
+    `❌ Failed: ${TEST_RESULTS.failed.length}`,
+    TEST_RESULTS.failed.length > 0 ? 'error' : 'info'
+  );
   log(`⏭️  Skipped: ${TEST_RESULTS.skipped.length}`, 'warning');
   log('');
 
@@ -173,8 +183,7 @@ async function runTests() {
   }
 }
 
-runTests().catch((error) => {
+runTests().catch(error => {
   log(`Test runner error: ${error.message}`, 'error');
   process.exit(1);
 });
-

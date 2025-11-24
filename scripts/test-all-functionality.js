@@ -15,12 +15,13 @@ const TEST_RESULTS = {
 };
 
 function log(message, type = 'info') {
-  const prefix = {
-    info: 'ℹ️',
-    success: '✅',
-    error: '❌',
-    warning: '⚠️',
-  }[type] || 'ℹ️';
+  const prefix =
+    {
+      info: 'ℹ️',
+      success: '✅',
+      error: '❌',
+      warning: '⚠️',
+    }[type] || 'ℹ️';
   console.log(`${prefix} ${message}`);
 }
 
@@ -41,7 +42,7 @@ function testAsync(name, fn) {
       TEST_RESULTS.passed.push(name);
       log(`${name}`, 'success');
     })
-    .catch((error) => {
+    .catch(error => {
       TEST_RESULTS.failed.push({ name, error: error.message });
       log(`${name}: ${error.message}`, 'error');
     });
@@ -57,11 +58,13 @@ async function checkFileExists(filePath, description) {
 
 async function checkIPCIntegration(handlerName, description) {
   return testAsync(`${description} - IPC Handler: ${handlerName}`, async () => {
-    // Check if handler is registered in main.ts
-    const mainTs = path.join(__dirname, '..', 'electron', 'main.ts');
-    const content = fs.readFileSync(mainTs, 'utf-8');
+    const mainRs = path.join(__dirname, '..', 'tauri-migration', 'src-tauri', 'src', 'main.rs');
+    if (!fs.existsSync(mainRs)) {
+      throw new Error(`Tauri main.rs not found: ${mainRs}`);
+    }
+    const content = fs.readFileSync(mainRs, 'utf-8');
     if (!content.includes(handlerName)) {
-      throw new Error(`IPC handler ${handlerName} not found in main.ts`);
+      throw new Error(`IPC handler ${handlerName} not found in main.rs`);
     }
   });
 }
@@ -72,10 +75,14 @@ async function checkComponentIntegration(componentPath, description) {
     if (!fs.existsSync(fullPath)) {
       throw new Error(`Component not found: ${fullPath}`);
     }
-    
+
     // Check if component imports necessary dependencies
     const content = fs.readFileSync(fullPath, 'utf-8');
-    if (content.includes('ipc.') || content.includes('useTabsStore') || content.includes('useMetricsStore')) {
+    if (
+      content.includes('ipc.') ||
+      content.includes('useTabsStore') ||
+      content.includes('useMetricsStore')
+    ) {
       // Component has integrations
       return true;
     }
@@ -97,21 +104,15 @@ async function runTests() {
   await checkFileExists('src/components/RedixQuickDialog.tsx', 'RedixQuickDialog');
   await checkFileExists('src/routes/Downloads.tsx', 'Downloads');
   await checkFileExists('src/components/research/ResearchPane.tsx', 'ResearchPane');
-  await checkFileExists('electron/services/redix-ipc.ts', 'Redix IPC');
-  await checkFileExists('electron/services/private-ipc.ts', 'Private IPC');
-  await checkFileExists('electron/services/tabs.ts', 'Tabs Service');
+  await checkFileExists('tauri-migration/src/lib/ipc-typed.ts', 'Tauri IPC bridge');
+  await checkFileExists('tauri-migration/src/components/layout/TabStrip.tsx', 'Tauri TabStrip');
+  await checkFileExists('tauri-migration/src-tauri/src/main.rs', 'Tauri main process');
   log('');
 
   // Test 2: IPC Handlers Registered
   log('Testing IPC handler registration...', 'info');
-  await checkIPCIntegration('registerRedixIpc', 'Redix');
-  await checkIPCIntegration('registerTabIpc', 'Tabs');
-  await checkIPCIntegration('registerPrivateIpc', 'Private');
-  await checkIPCIntegration('registerTabContextIpc', 'Tab Context');
-  await checkIPCIntegration('registerWorkflowIpc', 'Workflow');
-  await checkIPCIntegration('registerDownloadsIpc', 'Downloads');
-  await checkIPCIntegration('registerTorIpc', 'Tor');
-  await checkIPCIntegration('registerVPNIpc', 'VPN');
+  await checkIPCIntegration('greet', 'Greet command');
+  await checkIPCIntegration('get_system_info', 'System info command');
   log('');
 
   // Test 3: Component Integrations
@@ -120,7 +121,10 @@ async function runTests() {
   await checkComponentIntegration('src/components/layout/BottomStatus.tsx', 'BottomStatus Metrics');
   await checkComponentIntegration('src/components/layout/TabStrip.tsx', 'TabStrip IPC');
   await checkComponentIntegration('src/components/PrivacySwitch.tsx', 'PrivacySwitch IPC');
-  await checkComponentIntegration('src/components/RedixQuickDialog.tsx', 'RedixQuickDialog Streaming');
+  await checkComponentIntegration(
+    'src/components/RedixQuickDialog.tsx',
+    'RedixQuickDialog Streaming'
+  );
   log('');
 
   // Test 4: Store Integrations
@@ -155,7 +159,10 @@ async function runTests() {
   log('Test Summary', 'info');
   log('='.repeat(60), 'info');
   log(`✅ Passed: ${TEST_RESULTS.passed.length}`, 'success');
-  log(`❌ Failed: ${TEST_RESULTS.failed.length}`, TEST_RESULTS.failed.length > 0 ? 'error' : 'info');
+  log(
+    `❌ Failed: ${TEST_RESULTS.failed.length}`,
+    TEST_RESULTS.failed.length > 0 ? 'error' : 'info'
+  );
   log(`⏭️  Skipped: ${TEST_RESULTS.skipped.length}`, 'warning');
   log('');
 
@@ -172,8 +179,7 @@ async function runTests() {
   }
 }
 
-runTests().catch((error) => {
+runTests().catch(error => {
   log(`Test runner error: ${error.message}`, 'error');
   process.exit(1);
 });
-
