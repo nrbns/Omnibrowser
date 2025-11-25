@@ -9,6 +9,8 @@ export default tseslint.config(
       'dist-web/**',
       'dist-electron/**',
       'dist-release/**',
+      'dist-redix/**',
+      'tauri-migration/dist/**',
       'node_modules/**',
       'stubs/**',
       '.github/**',
