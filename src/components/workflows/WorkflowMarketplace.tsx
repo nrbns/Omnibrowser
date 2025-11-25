@@ -267,8 +267,29 @@ export function WorkflowMarketplace({ open, onClose }: WorkflowMarketplaceProps)
                         Install
                       </button>
                       <button
+                        onClick={() => {
+                          // Share workflow - open GitHub repo or copy link
+                          const shareUrl = `https://github.com/regenbrowser/workflows/tree/main/${workflow.workflowId || workflow.id}`;
+                          if (navigator.share) {
+                            navigator
+                              .share({
+                                title: `Share ${workflow.name}`,
+                                text: workflow.description,
+                                url: shareUrl,
+                              })
+                              .catch(() => {
+                                // Fallback to copy
+                                navigator.clipboard.writeText(shareUrl);
+                                toast.success('Workflow link copied to clipboard!');
+                              });
+                          } else {
+                            // Copy to clipboard
+                            navigator.clipboard.writeText(shareUrl);
+                            toast.success('Workflow link copied to clipboard!');
+                          }
+                        }}
                         className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm transition-colors"
-                        title="Share workflow"
+                        title="Share workflow (Earn affiliates)"
                       >
                         <Share2 size={14} />
                       </button>

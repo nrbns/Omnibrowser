@@ -113,6 +113,7 @@ import {
   checkForResurrectableTabs,
   scheduleAutoResurrection,
 } from '../../core/tabs/resurrection';
+import { initExtensionsAPI, setupPreloadHook } from '../../core/extensions/api';
 import { useAppError } from '../../hooks/useAppError';
 import { LoopResumeModal } from '../agents/LoopResumeModal';
 import { checkForCrashedLoops } from '../../core/agents/loopResume';
@@ -528,6 +529,12 @@ export function AppShell() {
   // Initialize Trade Alerts Cron service on app start
   useEffect(() => {
     initTradeAlertsCron();
+  }, []);
+
+  // Initialize Extensions API on app start
+  useEffect(() => {
+    setupPreloadHook();
+    initExtensionsAPI();
   }, []);
 
   // Check Ollama availability when offline
