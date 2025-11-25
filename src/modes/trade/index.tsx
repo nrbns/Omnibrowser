@@ -17,6 +17,16 @@ import { semanticSearchMemories } from '../../core/supermemory/search';
 import { toast } from '../../utils/toast';
 import { useSettingsStore } from '../../state/settingsStore';
 import { tradeToResearch } from '../../core/agents/handoff';
+import {
+  startTradeAlertsCron,
+  stopTradeAlertsCron,
+  updateWatchedSymbols,
+  onAlert,
+  getUnacknowledgedAlerts,
+  acknowledgeAlert,
+  initTradeAlertsCron,
+  type TradeAlert,
+} from '../../services/tradeAlertsCron';
 
 const TRADE_PREFS_STORAGE_KEY = 'trade_mode_preferences_v1';
 
@@ -194,6 +204,59 @@ export default function TradePanel() {
     });
     setRiskPreset(null);
   }, [symbol]);
+
+  // Initialize Trade Alerts Cron on mount
+  useEffect(() => {
+    initTradeAlertsCron();
+
+    // Get watched symbols (current symbol + watchlist)
+    const watchedSymbols = [symbol, ...recentSymbols].filter(
+      (s, index, arr) => arr.indexOf(s) === index
+    );
+
+    // Start cron loop
+    startTradeAlertsCron(watchedSymbols);
+
+    // Listen for new alerts
+    const unsubscribe = onAlert((alert: TradeAlert) => {
+      // Show toast notification
+      const iconEmoji = alert.action === 'buy' ? '📈' : alert.action === 'sell' ? '📉' : '📊';
+      toast.success(`${iconEmoji} ${alert.message}`, {
+        duration: 5000,
+      });
+
+      // Update AI signal if it's for the current symbol
+      if (alert.symbol === symbol) {
+        setAiSignal({
+          id: alert.id,
+          symbol: alert.symbol,
+          action: alert.action,
+          confidence: alert.confidence,
+          entryPrice: alert.price,
+          positionSize: 100, // Default position size
+          rationale: alert.message,
+          contributingFactors: [],
+          modelVersion: 'cron-v1',
+          generatedAt: new Date(alert.timestamp).toISOString(),
+          expiresAt: new Date(alert.expiresAt).toISOString(),
+        });
+      }
+    });
+
+    // Cleanup on unmount
+    return () => {
+      stopTradeAlertsCron();
+      unsubscribe();
+    };
+  }, []);
+
+  // Update watched symbols when symbol or watchlist changes
+  useEffect(() => {
+    const watchedSymbols = [symbol, ...recentSymbols].filter(
+      (s, index, arr) => arr.indexOf(s) === index
+    );
+    updateWatchedSymbols(watchedSymbols);
+  }, [symbol, recentSymbols]);
 
   // Listen for handoff events from Research mode
   useEffect(() => {

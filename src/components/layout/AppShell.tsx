@@ -107,6 +107,7 @@ import { ToastHost } from '../common/ToastHost';
 import { reopenMostRecentClosedTab } from '../../lib/tabLifecycle';
 import { toast } from '../../utils/toast';
 import { startSnapshotting } from '../../core/recovery';
+import { initTradeAlertsCron } from '../../services/tradeAlertsCron';
 import { useAppError } from '../../hooks/useAppError';
 import { LoopResumeModal } from '../agents/LoopResumeModal';
 import { checkForCrashedLoops } from '../../core/agents/loopResume';
@@ -535,6 +536,11 @@ export function AppShell() {
     }
 
     return () => observer.disconnect();
+  }, []);
+
+  // Initialize Trade Alerts Cron service on app start
+  useEffect(() => {
+    initTradeAlertsCron();
   }, []);
 
   // Check Ollama availability when offline
