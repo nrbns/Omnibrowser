@@ -9,57 +9,68 @@ export function testOmniDesk() {
   // Test 1: Check if OmniDesk container exists
   const dashboard = document.querySelector('[data-onboarding="dashboard"]');
   if (dashboard) {
-    results.push({ test: 'Dashboard Container Exists', passed: true, message: 'OmniDesk container found' });
-    
+    results.push({
+      test: 'Dashboard Container Exists',
+      passed: true,
+      message: 'OmniDesk container found',
+    });
+
     // Test 2: Check visibility
     const styles = window.getComputedStyle(dashboard as HTMLElement);
-    const isVisible = styles.display !== 'none' && styles.visibility !== 'hidden' && styles.opacity !== '0';
-    results.push({ 
-      test: 'Dashboard Visibility', 
-      passed: isVisible, 
-      message: isVisible ? 'Dashboard is visible' : 'Dashboard is hidden' 
+    const isVisible =
+      styles.display !== 'none' && styles.visibility !== 'hidden' && styles.opacity !== '0';
+    results.push({
+      test: 'Dashboard Visibility',
+      passed: isVisible,
+      message: isVisible ? 'Dashboard is visible' : 'Dashboard is hidden',
     });
 
     // Test 3: Check z-index
     const zIndex = parseInt(styles.zIndex || '0');
-    results.push({ 
-      test: 'Z-Index Check', 
-      passed: zIndex >= 10, 
-      message: `Z-index is ${zIndex} (should be >= 10)` 
+    results.push({
+      test: 'Z-Index Check',
+      passed: zIndex >= 10,
+      message: `Z-index is ${zIndex} (should be >= 10)`,
     });
 
     // Test 4: Check pointer events
     const pointerEvents = styles.pointerEvents;
-    results.push({ 
-      test: 'Pointer Events', 
-      passed: pointerEvents === 'auto', 
-      message: `Pointer events: ${pointerEvents} (should be 'auto')` 
+    results.push({
+      test: 'Pointer Events',
+      passed: pointerEvents === 'auto',
+      message: `Pointer events: ${pointerEvents} (should be 'auto')`,
     });
   } else {
-    results.push({ test: 'Dashboard Container Exists', passed: false, message: 'OmniDesk container not found' });
+    results.push({
+      test: 'Dashboard Container Exists',
+      passed: false,
+      message: 'OmniDesk container not found',
+    });
   }
 
   // Test 5: Check search input
-  const searchInput = document.querySelector('input[placeholder*="Search the open web"]') as HTMLInputElement;
+  const searchInput = document.querySelector(
+    'input[placeholder*="Search the open web"]'
+  ) as HTMLInputElement;
   if (searchInput) {
     results.push({ test: 'Search Input Exists', passed: true, message: 'Search input found' });
-    
+
     // Test if input is clickable
     const inputStyles = window.getComputedStyle(searchInput);
-    results.push({ 
-      test: 'Search Input Clickable', 
-      passed: inputStyles.pointerEvents !== 'none', 
-      message: `Input pointer events: ${inputStyles.pointerEvents}` 
+    results.push({
+      test: 'Search Input Clickable',
+      passed: inputStyles.pointerEvents !== 'none',
+      message: `Input pointer events: ${inputStyles.pointerEvents}`,
     });
 
     // Test input focus
     try {
       searchInput.focus();
       const isFocused = document.activeElement === searchInput;
-      results.push({ 
-        test: 'Search Input Focusable', 
-        passed: isFocused, 
-        message: isFocused ? 'Input can be focused' : 'Input cannot be focused' 
+      results.push({
+        test: 'Search Input Focusable',
+        passed: isFocused,
+        message: isFocused ? 'Input can be focused' : 'Input cannot be focused',
       });
     } catch (e) {
       results.push({ test: 'Search Input Focusable', passed: false, message: `Focus error: ${e}` });
@@ -69,44 +80,59 @@ export function testOmniDesk() {
   }
 
   // Test 6: Check Launch Flow button
-  const launchButton = Array.from(document.querySelectorAll('button')).find(
-    btn => btn.textContent?.includes('Launch Flow')
+  const launchButton = Array.from(document.querySelectorAll('button')).find(btn =>
+    btn.textContent?.includes('Launch Flow')
   );
   if (launchButton) {
-    results.push({ test: 'Launch Flow Button Exists', passed: true, message: 'Launch Flow button found' });
-    
+    results.push({
+      test: 'Launch Flow Button Exists',
+      passed: true,
+      message: 'Launch Flow button found',
+    });
+
     const btnStyles = window.getComputedStyle(launchButton);
-    results.push({ 
-      test: 'Launch Flow Button Clickable', 
-      passed: btnStyles.pointerEvents !== 'none', 
-      message: `Button pointer events: ${btnStyles.pointerEvents}` 
+    results.push({
+      test: 'Launch Flow Button Clickable',
+      passed: btnStyles.pointerEvents !== 'none',
+      message: `Button pointer events: ${btnStyles.pointerEvents}`,
     });
   } else {
-    results.push({ test: 'Launch Flow Button Exists', passed: false, message: 'Launch Flow button not found' });
+    results.push({
+      test: 'Launch Flow Button Exists',
+      passed: false,
+      message: 'Launch Flow button not found',
+    });
   }
 
   // Test 7: Check suggested prompts
   const suggestedButtons = Array.from(document.querySelectorAll('button')).filter(
-    btn => btn.textContent && ['graph the AI ethics landscape', 'summarize today\'s markets', 'compare battery life', 'find regenerative'].some(
-      text => btn.textContent?.toLowerCase().includes(text.toLowerCase())
-    )
+    btn =>
+      btn.textContent &&
+      [
+        'graph the AI ethics landscape',
+        "summarize today's markets",
+        'compare battery life',
+        'find regenerative',
+      ].some(text => btn.textContent?.toLowerCase().includes(text.toLowerCase()))
   );
-  results.push({ 
-    test: 'Suggested Prompts Exist', 
-    passed: suggestedButtons.length > 0, 
-    message: `Found ${suggestedButtons.length} suggested prompt buttons` 
+  results.push({
+    test: 'Suggested Prompts Exist',
+    passed: suggestedButtons.length > 0,
+    message: `Found ${suggestedButtons.length} suggested prompt buttons`,
   });
 
   // Test 8: Check quick action buttons
   const quickActionButtons = Array.from(document.querySelectorAll('button')).filter(
-    btn => btn.textContent && ['Ask Agent', 'Search Topic', 'Research Notes', 'Run Playbook'].some(
-      text => btn.textContent?.includes(text)
-    )
+    btn =>
+      btn.textContent &&
+      ['Ask Agent', 'Search Topic', 'Research Notes', 'Run Playbook'].some(text =>
+        btn.textContent?.includes(text)
+      )
   );
-  results.push({ 
-    test: 'Quick Action Buttons Exist', 
-    passed: quickActionButtons.length > 0, 
-    message: `Found ${quickActionButtons.length} quick action buttons` 
+  results.push({
+    test: 'Quick Action Buttons Exist',
+    passed: quickActionButtons.length > 0,
+    message: `Found ${quickActionButtons.length} quick action buttons`,
   });
 
   // Test 9: Check if elements are not blocked by overlays
@@ -119,7 +145,7 @@ export function testOmniDesk() {
   ].filter(Boolean) as HTMLElement[];
 
   let blockedCount = 0;
-  allInteractiveElements.forEach((el) => {
+  allInteractiveElements.forEach(el => {
     const rect = el.getBoundingClientRect();
     // Only check if element is visible and has size
     if (rect.width > 0 && rect.height > 0) {
@@ -129,7 +155,9 @@ export function testOmniDesk() {
       // Check if element is actually blocked (not just covered by its own children)
       if (topElement && topElement !== el && !el.contains(topElement)) {
         // Check if the blocking element is a known overlay (like a modal or tooltip)
-        const isKnownOverlay = topElement.closest('[role="dialog"], [role="tooltip"], [data-onboarding]');
+        const isKnownOverlay = topElement.closest(
+          '[role="dialog"], [role="tooltip"], [data-onboarding]'
+        );
         if (!isKnownOverlay) {
           blockedCount++;
         }
@@ -138,10 +166,10 @@ export function testOmniDesk() {
   });
   // Allow up to 30% of elements to be blocked (some may be intentionally blocked for layout reasons)
   const maxAllowed = Math.max(1, Math.ceil(allInteractiveElements.length * 0.3));
-  results.push({ 
-    test: 'Elements Not Blocked', 
-    passed: blockedCount <= maxAllowed, 
-    message: `${blockedCount} of ${allInteractiveElements.length} elements are blocked (max allowed: ${maxAllowed})` 
+  results.push({
+    test: 'Elements Not Blocked',
+    passed: blockedCount <= maxAllowed,
+    message: `${blockedCount} of ${allInteractiveElements.length} elements are blocked (max allowed: ${maxAllowed})`,
   });
 
   // Print results
@@ -161,22 +189,7 @@ export function testOmniDesk() {
   return results;
 }
 
-// Auto-run test when DOM is ready
+// Expose test function to window for manual testing (disabled auto-run)
 if (typeof window !== 'undefined') {
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      setTimeout(() => {
-        console.log('🧪 Running OmniDesk UI/UX tests...');
-        (window as any).testOmniDesk = testOmniDesk;
-        testOmniDesk();
-      }, 2000); // Wait 2 seconds for React to render
-    });
-  } else {
-    setTimeout(() => {
-      console.log('🧪 Running OmniDesk UI/UX tests...');
-      (window as any).testOmniDesk = testOmniDesk;
-      testOmniDesk();
-    }, 2000);
-  }
+  (window as any).testOmniDesk = testOmniDesk;
 }
-
