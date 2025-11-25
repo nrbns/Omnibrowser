@@ -387,8 +387,8 @@ export function AppShell() {
       // Auto-resurrect tabs after delay
       scheduleAutoResurrection(3000);
     }
-    // Initialize extension API
-    import('../../core/extensions/api').then(m => m.initializeExtensionAPI());
+    // Initialize extension API (handled by extensions/platform.ts)
+    // Extension registration is handled automatically via window.regenExtensions
     return () => {
       // Cleanup handled by stopAutoSaveTabs
     };
