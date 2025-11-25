@@ -27,6 +27,7 @@ import { semanticSearchMemories } from '../../core/supermemory/search';
 import { parsePdfFile } from '../docs/parsers/pdf';
 import { parseDocxFile } from '../docs/parsers/docx';
 import { LoadingSkeleton } from '../../components/common/LoadingSkeleton';
+import { parseResearchVoiceCommand } from '../../utils/voiceCommandParser';
 import {
   ResearchResult,
   ResearchSource,
@@ -43,7 +44,7 @@ import { EvidenceOverlay } from '../../components/research/EvidenceOverlay';
 import { CompareAnswersPanel } from '../../components/research/CompareAnswers';
 import { LayoutEngine, LayoutHeader, LayoutBody } from '../../ui/layout-engine';
 import { useResearchCompareStore } from '../../state/researchCompareStore';
-import { showToast } from '../../state/toastStore';
+import { toast } from 'react-hot-toast';
 import { runDeepScan, type DeepScanStep, type DeepScanSource } from '../../services/deepScan';
 import { CursorChat } from '../../components/cursor/CursorChat';
 import { OmniAgentInput } from '../../components/OmniAgentInput';
@@ -511,14 +512,14 @@ export default function ResearchPanel() {
     (id: string) => {
       removeCompareEntry(id);
       setCompareSelection(prev => prev.filter(entryId => entryId !== id));
-      showToast('info', 'Removed saved answer.');
+      toast.info('Removed saved answer.');
     },
     [removeCompareEntry]
   );
 
   const handleSaveForCompare = useCallback(() => {
     if (!result) {
-      showToast('info', 'Run a research query before saving.');
+      toast.info('Run a research query before saving.');
       return;
     }
     const saved = addCompareEntry({
@@ -537,7 +538,7 @@ export default function ResearchPanel() {
     });
     setCompareSelection([saved.id]);
     setComparePanelOpen(true);
-    showToast('success', 'Answer saved to compare drawer.');
+    toast.success('Answer saved to compare drawer.');
   }, [result, addCompareEntry, includeCounterpoints, authorityBias, region]);
 
   const runDeepScanFlow = useCallback(async (searchQuery: string) => {
@@ -551,7 +552,7 @@ export default function ResearchPanel() {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Deep scan failed.';
       setDeepScanError(message);
-      showToast('error', message);
+      toast.error(message);
       throw error;
     } finally {
       setDeepScanLoading(false);
@@ -1520,8 +1521,27 @@ export default function ResearchPanel() {
                 </button>
                 <VoiceButton
                   onResult={text => {
-                    setQuery(text);
-                    setTimeout(() => handleSearch(text), 120);
+                    // Parse voice command for research triggers and language
+                    const parsed = parseResearchVoiceCommand(text);
+
+                    if (parsed.isResearchCommand) {
+                      // Update language if detected in voice command
+                      if (parsed.language) {
+                        const settingsStore = useSettingsStore.getState();
+                        if (settingsStore.language !== parsed.language) {
+                          settingsStore.setLanguage(parsed.language);
+                          toast.success(`Language set to ${parsed.language.toUpperCase()}`);
+                        }
+                      }
+
+                      // Set query and trigger search
+                      setQuery(parsed.query);
+                      setTimeout(() => handleSearch(parsed.query), 120);
+                    } else {
+                      // Regular voice input - just set query and search
+                      setQuery(text);
+                      setTimeout(() => handleSearch(text), 120);
+                    }
                   }}
                   small
                 />
