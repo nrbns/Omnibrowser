@@ -8,21 +8,30 @@ import { Globe, ChevronDown, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSettingsStore } from '../../state/settingsStore';
 
+// All 22 Indic languages supported by Bhashini
 const INDIC_LANGUAGES = [
+  { code: 'as', label: 'অসমীয়া', english: 'Assamese', flag: '🇮🇳' },
+  { code: 'bn', label: 'বাংলা', english: 'Bengali', flag: '🇮🇳' },
+  { code: 'brx', label: 'बड़ो', english: 'Bodo', flag: '🇮🇳' },
+  { code: 'doi', label: 'डोगरी', english: 'Dogri', flag: '🇮🇳' },
+  { code: 'gom', label: 'कोंकणी', english: 'Konkani', flag: '🇮🇳' },
+  { code: 'gu', label: 'ગુજરાતી', english: 'Gujarati', flag: '🇮🇳' },
   { code: 'hi', label: 'हिंदी', english: 'Hindi', flag: '🇮🇳' },
+  { code: 'kn', label: 'ಕನ್ನಡ', english: 'Kannada', flag: '🇮🇳' },
+  { code: 'ks', label: 'کٲشُر', english: 'Kashmiri', flag: '🇮🇳' },
+  { code: 'mai', label: 'मैथिली', english: 'Maithili', flag: '🇮🇳' },
+  { code: 'ml', label: 'മലയാളം', english: 'Malayalam', flag: '🇮🇳' },
+  { code: 'mni', label: 'ꯃꯤꯇꯩꯂꯣꯟ', english: 'Manipuri', flag: '🇮🇳' },
+  { code: 'mr', label: 'मराठी', english: 'Marathi', flag: '🇮🇳' },
+  { code: 'ne', label: 'नेपाली', english: 'Nepali', flag: '🇳🇵' },
+  { code: 'or', label: 'ଓଡ଼ିଆ', english: 'Odia', flag: '🇮🇳' },
+  { code: 'pa', label: 'ਪੰਜਾਬੀ', english: 'Punjabi', flag: '🇮🇳' },
+  { code: 'sa', label: 'संस्कृतम्', english: 'Sanskrit', flag: '🇮🇳' },
+  { code: 'sat', label: 'ᱥᱟᱱᱛᱟᱲᱤ', english: 'Santali', flag: '🇮🇳' },
+  { code: 'sd', label: 'سنڌي', english: 'Sindhi', flag: '🇵🇰' },
   { code: 'ta', label: 'தமிழ்', english: 'Tamil', flag: '🇮🇳' },
   { code: 'te', label: 'తెలుగు', english: 'Telugu', flag: '🇮🇳' },
-  { code: 'bn', label: 'বাংলা', english: 'Bengali', flag: '🇮🇳' },
-  { code: 'mr', label: 'मराठी', english: 'Marathi', flag: '🇮🇳' },
-  { code: 'kn', label: 'ಕನ್ನಡ', english: 'Kannada', flag: '🇮🇳' },
-  { code: 'ml', label: 'മലയാളം', english: 'Malayalam', flag: '🇮🇳' },
-  { code: 'gu', label: 'ગુજરાતી', english: 'Gujarati', flag: '🇮🇳' },
-  { code: 'pa', label: 'ਪੰਜਾਬੀ', english: 'Punjabi', flag: '🇮🇳' },
-  { code: 'ur', label: 'اردو', english: 'Urdu', flag: '🇮🇳' },
-  { code: 'ne', label: 'नेपाली', english: 'Nepali', flag: '🇳🇵' },
-  { code: 'as', label: 'অসমীয়া', english: 'Assamese', flag: '🇮🇳' },
-  { code: 'or', label: 'ଓଡ଼ିଆ', english: 'Odia', flag: '🇮🇳' },
-  { code: 'si', label: 'සිංහල', english: 'Sinhala', flag: '🇱🇰' },
+  { code: 'ur', label: 'اردو', english: 'Urdu', flag: '🇵🇰' },
 ];
 
 const GLOBAL_LANGUAGES = [
