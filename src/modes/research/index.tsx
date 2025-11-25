@@ -29,6 +29,7 @@ import { parseDocxFile } from '../docs/parsers/docx';
 import { LoadingSkeleton } from '../../components/common/LoadingSkeleton';
 import { parseResearchVoiceCommand } from '../../utils/voiceCommandParser';
 import { detectLanguage } from '../../services/languageDetection';
+import { summarizeOffline } from '../../services/offlineSummarizer';
 import {
   ResearchResult,
   ResearchSource,

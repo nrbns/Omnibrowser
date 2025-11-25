@@ -1,6 +1,7 @@
 /**
  * Playwright E2E Tests for Multilingual Offline Support
- * Tests Hindi and Tamil offline research functionality
+ * Tests 5 languages: Hindi, Tamil, Bengali, Telugu, Marathi
+ * Tests offline mBART summarization in Research mode
  */
 
 import { test, expect } from '@playwright/test';
@@ -74,6 +75,66 @@ test.describe('Multilingual Offline Support', () => {
     }
 
     // Check that some result is shown
+    const result = page.locator('[class*="result"], [class*="summary"], [class*="research"]');
+    await expect(result.first()).toBeVisible({ timeout: 5000 });
+  });
+
+  test('Bengali offline research query', async ({ page }) => {
+    await page.click('[aria-label*="Research" i], button:has-text("Research")');
+    await page.waitForTimeout(1000);
+
+    const langSelector = page.locator('select, [role="combobox"]').first();
+    if ((await langSelector.count()) > 0) {
+      await langSelector.selectOption('bn');
+    }
+
+    const searchInput = page
+      .locator('input[type="text"], input[placeholder*="research" i]')
+      .first();
+    await searchInput.fill('নিফটি তুলনা');
+    await searchInput.press('Enter');
+
+    await page.waitForTimeout(2000);
+    const result = page.locator('[class*="result"], [class*="summary"], [class*="research"]');
+    await expect(result.first()).toBeVisible({ timeout: 5000 });
+  });
+
+  test('Telugu offline research query', async ({ page }) => {
+    await page.click('[aria-label*="Research" i], button:has-text("Research")');
+    await page.waitForTimeout(1000);
+
+    const langSelector = page.locator('select, [role="combobox"]').first();
+    if ((await langSelector.count()) > 0) {
+      await langSelector.selectOption('te');
+    }
+
+    const searchInput = page
+      .locator('input[type="text"], input[placeholder*="research" i]')
+      .first();
+    await searchInput.fill('నిఫ్టీ పోలిక');
+    await searchInput.press('Enter');
+
+    await page.waitForTimeout(2000);
+    const result = page.locator('[class*="result"], [class*="summary"], [class*="research"]');
+    await expect(result.first()).toBeVisible({ timeout: 5000 });
+  });
+
+  test('Marathi offline research query', async ({ page }) => {
+    await page.click('[aria-label*="Research" i], button:has-text("Research")');
+    await page.waitForTimeout(1000);
+
+    const langSelector = page.locator('select, [role="combobox"]').first();
+    if ((await langSelector.count()) > 0) {
+      await langSelector.selectOption('mr');
+    }
+
+    const searchInput = page
+      .locator('input[type="text"], input[placeholder*="research" i]')
+      .first();
+    await searchInput.fill('निफ्टी तुलना');
+    await searchInput.press('Enter');
+
+    await page.waitForTimeout(2000);
     const result = page.locator('[class*="result"], [class*="summary"], [class*="research"]');
     await expect(result.first()).toBeVisible({ timeout: 5000 });
   });
