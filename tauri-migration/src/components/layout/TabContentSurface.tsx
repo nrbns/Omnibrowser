@@ -4,10 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ExternalLink, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Tab } from '../../state/tabsStore';
-import { isElectronRuntime } from '../../lib/env';
+import { isElectronRuntime, isTauriRuntime } from '../../lib/env';
 import { OmniDesk } from '../OmniDesk';
 import { ipc } from '../../lib/ipc-typed';
 import { useTabsStore } from '../../state/tabsStore';
+import { BrowserTab } from '../tabs/BrowserTab';
 
 interface TabContentSurfaceProps {
   tab: Tab | undefined;
@@ -23,12 +24,31 @@ function isInternalUrl(url?: string | null): boolean {
 
 export function TabContentSurface({ tab, overlayActive }: TabContentSurfaceProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  // const webviewRef = useRef<any>(null); // Not used - BrowserView managed by main process
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
-  const isElectron = isElectronRuntime();
+  const isTauri = isTauriRuntime();
+  const isElectron = isElectronRuntime() && !isTauri;
+  const useIframeFallback = !isElectron && !isTauri;
   const [loading, setLoading] = useState(false);
   const [failedMessage, setFailedMessage] = useState<string | null>(null);
   const [blockedExternal, setBlockedExternal] = useState(false);
+  const handleNativeLoadState = useCallback((state: 'start' | 'finish' | 'error') => {
+    if (state === 'start') {
+      setLoading(true);
+      setFailedMessage(null);
+      setBlockedExternal(false);
+      return;
+    }
+    if (state === 'finish') {
+      setLoading(false);
+      setFailedMessage(null);
+      setBlockedExternal(false);
+      return;
+    }
+    setLoading(false);
+    setFailedMessage('Failed to load this page. Please check the URL or your connection.');
+    setBlockedExternal(true);
+  }, []);
+
   // const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null); // Not used - BrowserView managed by main process
   // const retryCountRef = useRef(0); // Not used - BrowserView managed by main process
 
@@ -162,7 +182,7 @@ export function TabContentSurface({ tab, overlayActive }: TabContentSurfaceProps
   }, [isElectron, targetUrl]);
 
   useEffect(() => {
-    if (isElectron || !iframeRef.current || !targetUrl) {
+    if (!useIframeFallback || !iframeRef.current || !targetUrl) {
       return;
     }
 
@@ -227,7 +247,7 @@ export function TabContentSurface({ tab, overlayActive }: TabContentSurfaceProps
       setFailedMessage(null);
       setBlockedExternal(false);
     };
-  }, [isElectron, targetUrl]);
+  }, [useIframeFallback, targetUrl]);
 
   const launchExternal = useCallback(() => {
     if (!targetUrl) return;
@@ -246,12 +266,17 @@ export function TabContentSurface({ tab, overlayActive }: TabContentSurfaceProps
       return;
     }
 
-    // In Electron, BrowserView navigation is handled by electron/services/tabs.ts
-    // We don't need to update webview src here
+    // Desktop Electron handles navigation in the host process
     if (isElectron) {
-      // BrowserView is managed by main process
       return;
-    } else {
+    }
+
+    // Tauri-managed tabs rely on BrowserTab which handles src updates internally
+    if (isTauri) {
+      return;
+    }
+
+    if (useIframeFallback) {
       const iframe = iframeRef.current;
       if (!iframe) return;
       if (iframe.src !== targetUrl) {
@@ -260,7 +285,7 @@ export function TabContentSurface({ tab, overlayActive }: TabContentSurfaceProps
       }
       setBlockedExternal(false);
     }
-  }, [isElectron, targetUrl]);
+  }, [isElectron, isTauri, targetUrl, useIframeFallback]);
 
   const panelId = tab?.id ? `tabpanel-${tab.id}` : 'tabpanel-empty';
   const labelledById = tab?.id ? `tab-${tab.id}` : undefined;
@@ -313,10 +338,16 @@ export function TabContentSurface({ tab, overlayActive }: TabContentSurfaceProps
         zIndex: isInactive ? 0 : 1,
       }}
     >
-      {/* In Electron, BrowserView is managed by main process, so we don't render webview tag here */}
-      {/* The BrowserView is positioned by electron/services/tabs.ts */}
-      {/* For non-Electron builds, use iframe fallback */}
-      {!isElectron && (
+      {isTauri && (
+        <BrowserTab
+          url={targetUrl}
+          title={tab?.title}
+          className="absolute inset-0 h-full w-full border-0"
+          onLoadStateChange={handleNativeLoadState}
+        />
+      )}
+
+      {useIframeFallback && (
         <iframe
           ref={iframeRef}
           className="w-full h-full border-0"

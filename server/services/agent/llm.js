@@ -8,7 +8,8 @@ const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-const LLM_PROVIDER = process.env.LLM_PROVIDER || (OPENAI_API_KEY ? 'openai' : 'ollama');
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022';
 
 /**
  * Extract plain text from HTML
@@ -87,6 +88,7 @@ async function callOllama(messages, options = {}) {
     answer: data.response || '',
     model: data.model || model,
     tokensUsed: data.eval_count || 0,
+    provider: 'ollama',
   };
 }
 
@@ -126,6 +128,61 @@ async function callOpenAI(messages, options = {}) {
     answer: choice?.message?.content || '',
     model: data.model || model,
     tokensUsed: data.usage?.total_tokens || 0,
+    provider: 'openai',
+  };
+}
+
+/**
+ * Call Anthropic API
+ */
+async function callAnthropic(messages, options = {}) {
+  if (!ANTHROPIC_API_KEY) {
+    throw new Error('Anthropic API key missing');
+  }
+
+  const model = options.model || ANTHROPIC_MODEL;
+  const temperature = options.temperature ?? 0.0;
+  const maxTokens = options.maxTokens ?? 2000;
+
+  const systemMessage = messages.find(m => m.role === 'system')?.content;
+  const userMessages = messages
+    .filter(m => m.role !== 'system')
+    .map(m => ({
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: m.content,
+    }));
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model,
+      temperature,
+      max_tokens: maxTokens,
+      system: systemMessage,
+      messages: userMessages,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Anthropic API error: ${response.status} ${error}`);
+  }
+
+  const data = await response.json();
+  const content = Array.isArray(data.content)
+    ? data.content.map(chunk => chunk?.text || '').join('\n')
+    : '';
+
+  return {
+    answer: content,
+    model,
+    tokensUsed: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0),
+    provider: 'anthropic',
   };
 }
 
@@ -193,16 +250,31 @@ export async function analyzeWithLLM({
   ];
 
   // Call LLM
-  let llmResult;
-  try {
-    if (LLM_PROVIDER === 'openai' && OPENAI_API_KEY) {
-      llmResult = await callOpenAI(messages, { temperature: 0.0 });
-    } else {
-      llmResult = await callOllama(messages, { temperature: 0.0 });
+  const providerChain = [
+    OPENAI_API_KEY && { name: 'openai', runner: () => callOpenAI(messages, { temperature: 0.0 }) },
+    ANTHROPIC_API_KEY && {
+      name: 'anthropic',
+      runner: () => callAnthropic(messages, { temperature: 0.0 }),
+    },
+    { name: 'ollama', runner: () => callOllama(messages, { temperature: 0.0 }) },
+  ].filter(Boolean);
+
+  let llmResult = null;
+  let lastError = null;
+
+  for (const provider of providerChain) {
+    try {
+      llmResult = await provider.runner();
+      break;
+    } catch (error) {
+      lastError = error;
+      console.warn(`[llm] ${provider.name} provider failed`, error);
     }
-  } catch (error) {
-    // Fallback to simple extraction if LLM fails
-    console.warn('[llm] LLM call failed, using fallback', error);
+  }
+
+  if (!llmResult) {
+    // Fallback to simple extraction if all LLMs fail
+    console.warn('[llm] All providers failed, using fallback', lastError);
     const fallbackAnswer =
       task === 'summarize'
         ? `Summary: ${text.slice(0, 500)}...`
@@ -213,6 +285,7 @@ export async function analyzeWithLLM({
       answer: fallbackAnswer,
       model: 'fallback-extractor',
       tokensUsed: 0,
+      provider: 'fallback',
     };
   }
 
@@ -231,7 +304,7 @@ export async function analyzeWithLLM({
     highlights: highlights.length > 0 ? highlights : [llmResult.answer.slice(0, 150)],
     model: {
       name: llmResult.model,
-      provider: LLM_PROVIDER,
+      provider: llmResult.provider || 'unknown',
       temperature: 0.0,
       tokensUsed: llmResult.tokensUsed,
     },

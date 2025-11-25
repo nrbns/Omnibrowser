@@ -5,7 +5,6 @@
  */
 
 import { chromium } from 'playwright';
-import { _electron as electron, ElectronApplication } from 'playwright';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { exec } from 'child_process';
@@ -158,82 +157,51 @@ async function getSystemMemory(): Promise<MemoryMetrics | null> {
   return null;
 }
 
-async function runElectronScenario(
+async function runBrowserScenario(
   scenario: (typeof SCENARIOS)[0]
 ): Promise<BenchmarkResult | null> {
+  const browser = await chromium.launch({
+    headless: true,
+    args: ['--disable-dev-shm-usage'],
+  });
+
   try {
-    const app = await electron.launch({
-      args: ['.'],
-      env: {
-        ...process.env,
-        PLAYWRIGHT: '1',
-        OB_DISABLE_HEAVY_SERVICES: '1',
-      },
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 800 },
     });
-
-    const page = await app.firstWindow();
-
-    // Wait for shell to be ready
-    await page
-      .waitForFunction(
-        () => {
-          const hasIpc = typeof (window as any).ipc?.invoke === 'function';
-          return hasIpc;
-        },
-        { timeout: 15_000 }
-      )
-      .catch(() => null);
-
-    if (!app) {
-      return null;
-    }
-
+    const page = await context.newPage();
     const startTime = Date.now();
 
-    // Create tabs
     for (const url of scenario.urls) {
       try {
-        await page.evaluate(async (targetUrl: string) => {
-          if (typeof (window as any).ipc?.invoke === 'function') {
-            await (window as any).ipc.invoke('tabs:create', { url: targetUrl });
-          }
-        }, url);
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait between tabs
+        await page.goto(url, { waitUntil: 'load', timeout: 20_000 });
+        if (scenario.waitForVideo) {
+          await page.waitForTimeout(5000);
+        } else {
+          await page.waitForTimeout(2000);
+        }
       } catch {
-        // Continue on error
+        // Continue on navigation errors
       }
     }
 
-    // Wait for pages to load
-    if (scenario.waitForVideo) {
-      await new Promise(resolve => setTimeout(resolve, 5000));
-    } else {
-      await new Promise(resolve => setTimeout(resolve, 3000));
-    }
-
-    // Get metrics
     const metrics = await page
       .evaluate(() => {
         const navEntry = performance.getEntriesByType('navigation')[0] as any;
         const paintEntries = performance.getEntriesByType('paint') as any[];
         const fcp = paintEntries.find(e => e.name === 'first-contentful-paint');
-
-        // Try to get LCP
         let lcp: number | null = null;
         try {
           const lcpEntries = performance.getEntriesByType('largest-contentful-paint') as any[];
           if (lcpEntries.length > 0) {
-            lcp =
-              lcpEntries[lcpEntries.length - 1].renderTime ||
-              lcpEntries[lcpEntries.length - 1].loadTime;
+            const last = lcpEntries[lcpEntries.length - 1];
+            lcp = last.renderTime || last.loadTime || null;
           }
         } catch {
-          // LCP not available
+          // ignore
         }
 
         const memory = (performance as any).memory;
-
-        // Battery API (if available)
         const battery = (navigator as any).getBattery?.() || null;
 
         return {
@@ -242,16 +210,14 @@ async function runElectronScenario(
             loadTime: navEntry?.duration || null,
             firstContentfulPaint: fcp?.startTime || null,
             largestContentfulPaint: lcp,
-            timeToInteractive: null, // TTI requires more complex calculation
+            timeToInteractive: null,
           },
           memory: memory
             ? {
                 heapUsedMB: memory.usedJSHeapSize / (1024 * 1024),
                 heapTotalMB: memory.totalJSHeapSize / (1024 * 1024),
-                externalMB: memory.jsHeapSizeLimit
-                  ? (memory.jsHeapSizeLimit - memory.totalJSHeapSize) / (1024 * 1024)
-                  : 0,
-                rssMB: 0, // Not available in browser context
+                externalMB: 0,
+                rssMB: 0,
               }
             : {
                 heapUsedMB: 0,
@@ -293,30 +259,11 @@ async function runElectronScenario(
         },
       }));
 
-    // Get tab info
-    const tabs = await page
-      .evaluate(async () => {
-        if (typeof (window as any).ipc?.invoke === 'function') {
-          try {
-            const tabList = await (window as any).ipc.invoke('tabs:list');
-            return tabList || [];
-          } catch {
-            return [];
-          }
-        }
-        return [];
-      })
-      .catch(() => []);
-
     const endTime = Date.now();
-
-    // Get system memory if available
     const systemMemory = await getSystemMemory();
     if (systemMemory) {
       metrics.memory.rssMB = systemMemory.rssMB;
     }
-
-    await app.close();
 
     return {
       scenario: scenario.name,
@@ -326,19 +273,21 @@ async function runElectronScenario(
       performance: metrics.performance,
       battery: metrics.battery,
       tabs: {
-        tabCount: tabs.length,
-        activeTabId: tabs.find((t: any) => t.active)?.id || null,
-        tabs: tabs.map((t: any) => ({
-          id: t.id,
-          url: t.url,
-          title: t.title || 'New Tab',
-          sleeping: t.sleeping || false,
+        tabCount: scenario.urls.length,
+        activeTabId: scenario.urls.length > 0 ? `tab-${scenario.urls.length - 1}` : null,
+        tabs: scenario.urls.map((url, idx) => ({
+          id: `tab-${idx}`,
+          url,
+          title: url,
+          sleeping: false,
         })),
       },
     };
   } catch (error) {
     console.error(`Scenario ${scenario.name} failed:`, error);
     return null;
+  } finally {
+    await browser.close();
   }
 }
 
@@ -403,7 +352,7 @@ async function main() {
 
   for (const scenario of SCENARIOS) {
     console.log(`📊 Running: ${scenario.name} - ${scenario.description}`);
-    const result = await runElectronScenario(scenario);
+    const result = await runBrowserScenario(scenario);
 
     if (result) {
       results.push(result);

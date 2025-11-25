@@ -3,6 +3,7 @@
 import React, { Suspense } from 'react';
 import ReactDOM from 'react-dom/client';
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
 import './styles/globals.css';
 import './styles/mode-themes.css';
 import './lib/battery';
@@ -117,18 +118,102 @@ const router = createBrowserRouter(
         </Suspense>
       ),
       children: [
-        { index: true, element: <Suspense fallback={<LoadingFallback />}><Home /></Suspense> },
-        { path: 'settings', element: <Suspense fallback={<LoadingFallback />}><Settings /></Suspense> },
-        { path: 'w/:id', element: <Suspense fallback={<LoadingFallback />}><Workspace /></Suspense> },
-        { path: 'agent', element: <Suspense fallback={<LoadingFallback />}><AgentConsole /></Suspense> },
-        { path: 'runs', element: <Suspense fallback={<LoadingFallback />}><Runs /></Suspense> },
-        { path: 'replay/:id', element: <Suspense fallback={<LoadingFallback />}><Replay /></Suspense> },
-        { path: 'playbooks', element: <Suspense fallback={<LoadingFallback />}><PlaybookForge /></Suspense> },
-        { path: 'history', element: <Suspense fallback={<LoadingFallback />}><HistoryPage /></Suspense> },
-        { path: 'downloads', element: <Suspense fallback={<LoadingFallback />}><DownloadsPage /></Suspense> },
-        { path: 'watchers', element: <Suspense fallback={<LoadingFallback />}><WatchersPage /></Suspense> },
-        { path: 'video', element: <Suspense fallback={<LoadingFallback />}><VideoPage /></Suspense> },
-        { path: 'consent-timeline', element: <Suspense fallback={<LoadingFallback />}><ConsentTimelinePage /></Suspense> },
+        {
+          index: true,
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <Home />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'settings',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <Settings />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'w/:id',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <Workspace />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'agent',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <AgentConsole />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'runs',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <Runs />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'replay/:id',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <Replay />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'playbooks',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <PlaybookForge />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'history',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <HistoryPage />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'downloads',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <DownloadsPage />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'watchers',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <WatchersPage />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'video',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <VideoPage />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'consent-timeline',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <ConsentTimelinePage />
+            </Suspense>
+          ),
+        },
       ],
     },
   ],
@@ -143,9 +228,9 @@ if (!rootElement) {
 try {
   const root = ReactDOM.createRoot(rootElement);
   setupClipperHandlers();
-  
+
   crashReporter.initialize();
-  
+
   const initializeHeavyServices = async () => {
     try {
       await authService.initialize();
@@ -169,7 +254,7 @@ try {
   };
 
   setTimeout(initializeHeavyServices, 100);
-  
+
   setTimeout(() => {
     syncRendererTelemetry().catch(() => {});
     syncAnalyticsOptIn()
@@ -201,6 +286,14 @@ try {
             <RouterProvider router={router} future={{ v7_startTransition: true }} />
           </Suspense>
         </GlobalErrorBoundary>
+        <Toaster
+          position="top-center"
+          toastOptions={{
+            className:
+              'bg-slate-900/95 text-slate-50 border border-slate-700/70 shadow-lg shadow-black/30',
+            duration: 4000,
+          }}
+        />
       </ThemeProvider>
     </React.StrictMode>
   );

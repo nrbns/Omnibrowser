@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Kill all development processes (Vite, Redix, Engine, Electron)
+ * Kill all development processes (Vite, Redix, Engine, Tauri)
  * Useful for cleaning up orphaned processes
  */
 
@@ -45,10 +45,11 @@ try {
       console.log('✅ Killed node processes with project path');
     } catch {}
 
-    // Kill electron processes
+    // Kill Tauri CLI processes
     try {
-      execSync('taskkill /F /IM electron.exe 2>NUL', { stdio: 'ignore' });
-      console.log('✅ Killed Electron processes');
+      execSync('taskkill /F /IM tauri.exe 2>NUL', { stdio: 'ignore' });
+      execSync('taskkill /F /IM tauri-cli.exe 2>NUL', { stdio: 'ignore' });
+      console.log('✅ Killed Tauri processes');
     } catch {}
   } else {
     // Unix: Kill by port
@@ -67,10 +68,10 @@ try {
       console.log('✅ Killed processes with project path');
     } catch {}
 
-    // Kill electron processes
+    // Kill Tauri CLI processes
     try {
-      execSync('pkill -f electron || true', { stdio: 'ignore' });
-      console.log('✅ Killed Electron processes');
+      execSync('pkill -f tauri || true', { stdio: 'ignore' });
+      console.log('✅ Killed Tauri processes');
     } catch {}
   }
 

@@ -36,10 +36,14 @@ export async function get(id: string): Promise<Workflow | null> {
   return workflows.get(id) || null;
 }
 
+type WorkflowInput = Omit<Workflow, 'createdAt' | 'updatedAt'> & {
+  createdAt?: number;
+};
+
 /**
  * Save a workflow
  */
-export async function save(workflow: Omit<Workflow, 'createdAt' | 'updatedAt'>): Promise<Workflow> {
+export async function save(workflow: WorkflowInput): Promise<Workflow> {
   const now = Date.now();
   const saved: Workflow = {
     ...workflow,

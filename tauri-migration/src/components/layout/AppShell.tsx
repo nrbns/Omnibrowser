@@ -3,7 +3,15 @@
  */
 
 import React, { useState, useEffect, Suspense, useMemo, useCallback, useRef } from 'react';
-import { AlertTriangle, RotateCcw, Loader2, PanelsTopLeft, PanelRightOpen, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  RotateCcw,
+  Loader2,
+  PanelsTopLeft,
+  PanelRightOpen,
+  X,
+  Mic,
+} from 'lucide-react';
 import { Outlet } from 'react-router-dom';
 import { PermissionRequest, ConsentRequest, ipcEvents } from '../../lib/ipc-events';
 import { useIPCEvent } from '../../lib/use-ipc-event';
@@ -15,6 +23,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { useTabGraphStore } from '../../state/tabGraphStore';
 import { isDevEnv, isElectronRuntime } from '../../lib/env';
 import { TabContentSurface } from './TabContentSurface';
+import { toast as hotToast } from 'react-hot-toast';
 // Voice components disabled by user request
 // import { VoiceTips } from '../voice/VoiceTips';
 // import VoiceCompanion from '../voice/VoiceCompanion';
@@ -34,8 +43,8 @@ const updatePolicyMetrics = () =>
 const getPolicyRecommendations = () =>
   import('../../core/redix/policies').then(m => m.getPolicyRecommendations);
 import { CrashRecoveryDialog, useCrashRecovery } from '../CrashRecoveryDialog';
-import { ResearchMemoryPanel } from '../research/ResearchMemoryPanel';
 import { trackVisit } from '../../core/supermemory/tracker';
+import { toast } from '../../utils/toast';
 // Lazy load heavy summarization service to avoid blocking initial render
 const initNightlySummarization = () =>
   import('../../core/supermemory/summarizer').then(m => m.initNightlySummarization());
@@ -47,7 +56,6 @@ import { SuspensionIndicator } from '../redix/SuspensionIndicator';
 import { BatteryIndicator } from '../redix/BatteryIndicator';
 import { MemoryMonitor } from '../redix/MemoryMonitor';
 import { MiniHoverAI } from '../interaction/MiniHoverAI';
-import { UnifiedSidePanel } from '../side-panel/UnifiedSidePanel';
 import { CommandBar } from '../command-bar/CommandBar';
 import { SessionRestorePrompt } from '../SessionRestorePrompt';
 const SessionRestoreModal = React.lazy(() => import('../SessionRestoreModal'));
@@ -58,7 +66,6 @@ import { useHistoryStore } from '../../state/historyStore';
 import { useSettingsStore } from '../../state/settingsStore';
 // import { ModeManager } from '../../core/modes/manager'; // Unused for now
 import { useTradeStore } from '../../state/tradeStore';
-import { TradeSidebar } from '../trade/TradeSidebar';
 import { TermsAcceptance } from '../Onboarding/TermsAcceptance';
 import {
   CookieConsent,
@@ -77,6 +84,24 @@ declare global {
     __omnix_apply_topbar?: () => void;
   }
 }
+
+const buildNavigationTarget = (input: string): string => {
+  const value = input.trim();
+  if (!value) return 'https://www.google.com';
+
+  const hasProtocol = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(value);
+  const candidate = hasProtocol ? value : `https://${value}`;
+
+  try {
+    const url = new URL(candidate);
+    return url.toString();
+  } catch {
+    return `https://www.google.com/search?q=${encodeURIComponent(value)}`;
+  }
+};
+
+const ellipsize = (value: string, limit = 96) =>
+  value.length > limit ? `${value.slice(0, limit)}…` : value;
 
 type ErrorBoundaryState = {
   hasError: boolean;
@@ -276,9 +301,18 @@ const RegenSidebar = React.lazy(() =>
 );
 
 const RegenSidebarWrapper = () => (
-  <div className="h-full min-h-0 w-[400px] overflow-hidden border-l border-slate-800/60 fixed right-0 top-0 bottom-0 z-50 bg-gray-900">
+  <div className="fixed inset-y-0 right-0 z-50 w-full max-w-md overflow-hidden border-l border-slate-800/60 bg-gray-900 shadow-2xl md:w-[400px]">
     <RegenSidebar />
   </div>
+);
+const ResearchMemoryPanel = React.lazy(() =>
+  import('../research/ResearchMemoryPanel').then(m => ({ default: m.ResearchMemoryPanel }))
+);
+const TradeSidebar = React.lazy(() =>
+  import('../trade/TradeSidebar').then(m => ({ default: m.TradeSidebar }))
+);
+const UnifiedSidePanel = React.lazy(() =>
+  import('../side-panel/UnifiedSidePanel').then(m => ({ default: m.UnifiedSidePanel }))
 );
 const ClipperOverlay = React.lazy(() =>
   import('../Overlays/ClipperOverlay').then(m => ({ default: m.ClipperOverlay }))
@@ -314,11 +348,13 @@ export function AppShell() {
   const setMemorySidebarOpen = useAppStore(state => state.setMemorySidebarOpen);
   const setMode = useAppStore(state => state.setMode);
   const [redixDebugOpen, setRedixDebugOpen] = useState(false);
+  const [voicePromptVisible, setVoicePromptVisible] = useState(false);
   const isDev = isDevEnv();
   const themePreference = useSettingsStore(state => state.appearance.theme);
   const compactUI = useSettingsStore(state => state.appearance.compactUI);
   const clearOnExit = useSettingsStore(state => state.privacy.clearOnExit);
   const { crashedTab, setCrashedTab, handleReload } = useCrashRecovery();
+  const agentToastActive = useRef(false);
 
   // Initialize fullscreen state on mount - ensure it starts as false
   useEffect(() => {
@@ -361,6 +397,22 @@ export function AppShell() {
   const onboardingVisible = useOnboardingStore(state => state.visible);
   const startOnboarding = useOnboardingStore(state => state.start);
   const _finishOnboarding = useOnboardingStore(state => state.finish);
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const seenVoiceModal = localStorage.getItem('omnibrowser:voice-onboarding');
+    if (!seenVoiceModal) {
+      setVoicePromptVisible(true);
+    }
+  }, []);
+
+  const dismissVoicePrompt = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('omnibrowser:voice-onboarding', Date.now().toString());
+    }
+    setVoicePromptVisible(false);
+  }, []);
 
   // Debug: log visibility changes (removed for production performance)
   const [graphDropHint, setGraphDropHint] = useState(false);
@@ -1206,6 +1258,52 @@ export function AppShell() {
     []
   );
 
+  useIPCEvent<{ goal?: string }>(
+    'agent:plan',
+    payload => {
+      agentToastActive.current = true;
+      hotToast.loading(
+        payload?.goal ? `Analyzing: ${ellipsize(payload.goal)}` : 'Analyzing your request…',
+        {
+          id: 'agent-progress',
+          duration: Infinity,
+        }
+      );
+    },
+    []
+  );
+
+  useIPCEvent<{ thought?: string }>(
+    'agent:step',
+    payload => {
+      if (!agentToastActive.current || !payload?.thought) {
+        return;
+      }
+      hotToast.loading(ellipsize(payload.thought), {
+        id: 'agent-progress',
+        duration: Infinity,
+      });
+    },
+    []
+  );
+
+  useIPCEvent(
+    'agent:complete',
+    () => {
+      if (!agentToastActive.current) return;
+      agentToastActive.current = false;
+      hotToast.success('Analysis ready', { id: 'agent-progress', duration: 2000 });
+    },
+    []
+  );
+
+  useEffect(
+    () => () => {
+      hotToast.dismiss('agent-progress');
+    },
+    []
+  );
+
   // Listen for fullscreen changes from Electron IPC
   useEffect(() => {
     const handleFullscreen = (data: { fullscreen: boolean }) => {
@@ -1555,15 +1653,7 @@ export function AppShell() {
                   try {
                     const activeTab = tabsState.tabs.find(t => t.id === tabsState.activeId);
                     const isAboutBlank = activeTab?.url === 'about:blank' || !activeTab?.url;
-
-                    // Check if it's a URL or search query
-                    const isUrl =
-                      /^https?:\/\//i.test(query) || /^[a-z0-9]+(\.[a-z0-9]+)+/i.test(query);
-                    const targetUrl = isUrl
-                      ? query.startsWith('http')
-                        ? query
-                        : `https://${query}`
-                      : `https://duckduckgo.com/?q=${encodeURIComponent(query)}`;
+                    const targetUrl = buildNavigationTarget(query);
 
                     if (isAboutBlank && activeTab) {
                       await ipc.tabs.navigate(activeTab.id, targetUrl);
@@ -1836,6 +1926,30 @@ export function AppShell() {
         </Suspense>
       )}
 
+      {voicePromptVisible && !showTOS && !showCookieConsent && !onboardingVisible && (
+        <Portal>
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 px-4 backdrop-blur">
+            <div className="w-full max-w-md rounded-3xl border border-emerald-400/40 bg-slate-900/95 p-6 text-center shadow-2xl shadow-black/40">
+              <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-emerald-500/30 px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-emerald-200/80">
+                <Mic size={14} />
+                Voice Beta
+              </div>
+              <h2 className="text-2xl font-semibold text-white">“हिंदी में सर्च करो”</h2>
+              <p className="mt-3 text-sm text-slate-300">
+                Say the phrase above (or speak in Tamil/English) to start voice browsing instantly.
+                We keep everything on-device for privacy.
+              </p>
+              <button
+                onClick={dismissVoicePrompt}
+                className="mt-6 w-full rounded-xl bg-emerald-500/90 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-400"
+              >
+                Got it
+              </button>
+            </div>
+          </div>
+        </Portal>
+      )}
+
       {/* Onboarding Tour - Only show if TOS and Cookie Consent are not showing */}
       {onboardingVisible && !showTOS && !showCookieConsent && (
         <Suspense fallback={null}>
@@ -1897,20 +2011,24 @@ export function AppShell() {
       )}
 
       {/* Memory Sidebar - Using new ResearchMemoryPanel for improved UI/UX */}
-      <ResearchMemoryPanel
-        open={memorySidebarOpen}
-        onClose={() => {
-          setMemorySidebarOpen(false);
-          // Dispatch event for TopBar to sync state
-          window.dispatchEvent(
-            new CustomEvent('memory-sidebar:toggle', { detail: { open: false } })
-          );
-        }}
-        onCreateMemory={() => {
-          // Handled by ResearchMemoryPanel internally via CreateMemoryDialog
-        }}
-      />
-      <TradeSidebar open={tradeSidebarOpen} onClose={() => setTradeSidebarOpen(false)} />
+      <Suspense fallback={null}>
+        <ResearchMemoryPanel
+          open={memorySidebarOpen}
+          onClose={() => {
+            setMemorySidebarOpen(false);
+            // Dispatch event for TopBar to sync state
+            window.dispatchEvent(
+              new CustomEvent('memory-sidebar:toggle', { detail: { open: false } })
+            );
+          }}
+          onCreateMemory={() => {
+            // Handled by ResearchMemoryPanel internally via CreateMemoryDialog
+          }}
+        />
+      </Suspense>
+      <Suspense fallback={null}>
+        <TradeSidebar open={tradeSidebarOpen} onClose={() => setTradeSidebarOpen(false)} />
+      </Suspense>
 
       {/* Regen Sidebar */}
       {!isFullscreen && isDesktopLayout && regenSidebarOpen && (
@@ -2008,10 +2126,12 @@ export function AppShell() {
 
       {/* Unified Side Panel - History, Bookmarks, Downloads */}
       {!isFullscreen && isDesktopLayout && (
-        <UnifiedSidePanel
-          open={unifiedSidePanelOpen}
-          onClose={() => setUnifiedSidePanelOpen(false)}
-        />
+        <Suspense fallback={null}>
+          <UnifiedSidePanel
+            open={unifiedSidePanelOpen}
+            onClose={() => setUnifiedSidePanelOpen(false)}
+          />
+        </Suspense>
       )}
 
       {/* Tier 3: Global Command Bar */}

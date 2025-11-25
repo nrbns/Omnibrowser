@@ -6,11 +6,13 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { v4: uuidv4 } = require('uuid');
 const { sendToClient } = require('./websocket-server');
-const { handleMessage } = require('../../electron/services/regen/core');
-const { getResponseLanguage } = require('../../electron/services/regen/session');
-const { createLogger } = require('../../electron/services/utils/logger');
+const regen = require('../regen/core');
 
-const log = createLogger('regen-streamer');
+const log = {
+  info: (...args) => console.info('[regen-streamer]', ...args),
+  warn: (...args) => console.warn('[regen-streamer]', ...args),
+  error: (...args) => console.error('[regen-streamer]', ...args),
+};
 
 /**
  * Handle message with real-time streaming
@@ -32,7 +34,7 @@ async function handleMessageSafe(input) {
     });
 
     // Call Regen core with streaming callback
-    const response = await handleMessage({
+    const response = await regen.handleMessage({
       sessionId,
       message,
       mode,
@@ -42,7 +44,7 @@ async function handleMessageSafe(input) {
     });
 
     // Get response language from session
-    const responseLanguage = getResponseLanguage(sessionId);
+    const responseLanguage = regen.getResponseLanguage(sessionId);
 
     // Stream response text in chunks (optimized for real-time)
     const text = response.text || '';

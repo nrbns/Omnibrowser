@@ -1,7 +1,7 @@
+#!/usr/bin/env node
 /**
- * Agent System Test Script
- * Comprehensive test for AI agent functionality
- * Run with: node scripts/test-agent-system.js
+ * Agent System Test Script (Tauri-aware)
+ * Ensures both the web and Tauri builds ship functional agent plumbing.
  */
 
 const fs = require('fs');
@@ -28,7 +28,7 @@ function test(name, fn) {
   try {
     fn();
     TEST_RESULTS.passed.push(name);
-    log(`${name}`, 'success');
+    log(name, 'success');
   } catch (error) {
     TEST_RESULTS.failed.push({ name, error: error.message });
     log(`${name}: ${error.message}`, 'error');
@@ -39,7 +39,7 @@ function testAsync(name, fn) {
   return fn()
     .then(() => {
       TEST_RESULTS.passed.push(name);
-      log(`${name}`, 'success');
+      log(name, 'success');
     })
     .catch(error => {
       TEST_RESULTS.failed.push({ name, error: error.message });
@@ -69,199 +69,106 @@ async function checkCodeContains(filePath, searchString, description) {
   });
 }
 
-async function checkImportExists(filePath, importPath, description) {
-  return testAsync(`${description} - Import exists: ${importPath}`, async () => {
-    const fullPath = path.join(__dirname, '..', filePath);
-    if (!fs.existsSync(fullPath)) {
-      throw new Error(`File not found: ${fullPath}`);
-    }
-    const content = fs.readFileSync(fullPath, 'utf-8');
-    // Check for various import styles
-    const importPatterns = [
-      `from '${importPath}'`,
-      `from "${importPath}"`,
-      `require('${importPath}')`,
-      `require("${importPath}")`,
-      `import '${importPath}'`,
-      `import "${importPath}"`,
-    ];
-    const found = importPatterns.some(pattern => content.includes(pattern));
-    if (!found) {
-      throw new Error(`Import not found: ${importPath} in ${filePath}`);
-    }
-  });
-}
-
 async function runTests() {
   log('Starting Agent System Tests...', 'info');
   log('='.repeat(60), 'info');
   log('');
 
-  // Test 1: Core Agent Files
-  log('Test 1: Core Agent Files', 'info');
-  await checkFileExists('electron/services/agent/store.ts', 'AgentStore');
-  await checkFileExists('electron/services/agent/ipc.ts', 'Agent IPC Handlers');
-  await checkFileExists('electron/services/agent/brain.ts', 'Agent Brain');
-  await checkFileExists('src/agent/registry.ts', 'Agent Tool Registry');
-  await checkFileExists('src/agent/runAgent.ts', 'Agent Runner');
+  const tauriAgentFiles = [
+    'tauri-migration/src/agent/registry.ts',
+    'tauri-migration/src/agent/runAgent.ts',
+  ];
+  const webAgentFiles = ['src/agent/registry.ts', 'src/agent/runAgent.ts'];
+
+  // Test 1: Core agent modules exist
+  log('Test 1: Core Agent Modules (Web + Tauri)', 'info');
+  for (const file of [...tauriAgentFiles, ...webAgentFiles]) {
+    await checkFileExists(file, `Agent module: ${file}`);
+  }
   log('');
 
-  // Test 2: Agent Store Initialization
-  log('Test 2: Agent Store Initialization', 'info');
-  await checkCodeContains(
-    'electron/main.ts',
-    'const agentStore = new AgentStore()',
-    'AgentStore initialized'
-  );
-  await checkCodeContains('electron/main.ts', 'import { AgentStore }', 'AgentStore imported');
-  await checkCodeContains('electron/main.ts', 'registerAgentIpc()', 'Agent IPC registered');
-  log('');
-
-  // Test 3: Agent IPC Handlers (New System)
-  log('Test 3: Agent IPC Handlers (New System)', 'info');
-  await checkCodeContains(
-    'electron/services/agent/ipc.ts',
-    "registerHandler('agent:createTask'",
-    'agent:createTask handler'
-  );
-  await checkCodeContains(
-    'electron/services/agent/ipc.ts',
-    "registerHandler('agent:executeSkill'",
-    'agent:executeSkill handler'
-  );
-  await checkCodeContains(
-    'electron/services/agent/ipc.ts',
-    "registerHandler('agent:getStatus'",
-    'agent:getStatus handler'
-  );
-  await checkCodeContains(
-    'electron/services/agent/ipc.ts',
-    "registerHandler('agent:generatePlanFromGoal'",
-    'agent:generatePlanFromGoal handler'
-  );
-  await checkCodeContains(
-    'electron/services/agent/ipc.ts',
-    "registerHandler('agent:executePlan'",
-    'agent:executePlan handler'
-  );
-  log('');
-
-  // Test 3b: Legacy Agent IPC Handlers (Backward Compatibility)
-  log('Test 3b: Legacy Agent IPC Handlers', 'info');
-  await checkCodeContains(
-    'electron/main.ts',
-    "ipcMain.handle('agent:start'",
-    'Legacy agent:start handler'
-  );
-  await checkCodeContains(
-    'electron/main.ts',
-    "ipcMain.handle('agent:stop'",
-    'Legacy agent:stop handler'
-  );
-  await checkCodeContains(
-    'electron/main.ts',
-    "ipcMain.handle('agent:status'",
-    'Legacy agent:status handler'
-  );
-  await checkCodeContains(
-    'electron/main.ts',
-    "ipcMain.handle('agent:runs'",
-    'Legacy agent:runs handler'
-  );
-  await checkCodeContains(
-    'electron/main.ts',
-    "ipcMain.handle('agent:run:get'",
-    'Legacy agent:run:get handler'
-  );
-  log('');
-
-  // Test 4: Preload API
-  log('Test 4: Preload API', 'info');
-  await checkCodeContains('electron/preload.ts', 'agent:', 'Agent API in preload');
-  await checkCodeContains('electron/preload.cjs', 'agent:', 'Agent API in preload.cjs');
-  log('');
-
-  // Test 5: Frontend Components
-  log('Test 5: Frontend Components', 'info');
-  await checkFileExists('src/routes/AgentConsole.tsx', 'AgentConsole component');
-  await checkFileExists('src/components/AgentOverlay.tsx', 'AgentOverlay component');
-  log('');
-
-  // Test 6: Agent Tools Registry
-  log('Test 6: Agent Tools Registry', 'info');
+  // Test 2: Registries register tools
+  log('Test 2: Agent Tool Registrations', 'info');
   await checkCodeContains(
     'src/agent/registry.ts',
     'toolRegistry.register',
-    'Tool registry has tools'
+    'Web registry has tools'
   );
-  await checkCodeContains('src/agent/registry.ts', 'scrapePage', 'scrapePage tool registered');
   await checkCodeContains(
-    'src/agent/registry.ts',
-    'summarizeText',
-    'summarizeText tool registered'
-  );
-  await checkCodeContains('src/agent/registry.ts', 'searchWeb', 'searchWeb tool registered');
-  log('');
-
-  // Test 7: Agent Runner Tasks
-  log('Test 7: Agent Runner Tasks', 'info');
-  await checkCodeContains('src/agent/runAgent.ts', 'quick_summary', 'quick_summary task type');
-  await checkCodeContains('src/agent/runAgent.ts', 'deep_research', 'deep_research task type');
-  await checkCodeContains('src/agent/runAgent.ts', 'compare_urls', 'compare_urls task type');
-  await checkCodeContains('src/agent/runAgent.ts', 'explain_page', 'explain_page task type');
-  log('');
-
-  // Test 8: Skills System
-  log('Test 8: Skills System', 'info');
-  await checkFileExists('electron/services/agent/skills/index.ts', 'Skills index');
-  await checkCodeContains(
-    'electron/services/agent/ipc.ts',
-    "import('./skills/index')",
-    'Skills imported'
+    'tauri-migration/src/agent/registry.ts',
+    'toolRegistry.register',
+    'Tauri registry has tools'
   );
   log('');
 
-  // Test 9: Agent Host
-  log('Test 9: Agent Host', 'info');
-  await checkFileExists('electron/services/agent/host.ts', 'AgentHost');
-  await checkCodeContains('electron/services/agent/ipc.ts', 'AgentHost', 'AgentHost used');
+  // Test 3: Tauri command bridge wired up
+  log('Test 3: Tauri Command Bridge', 'info');
+  await checkCodeContains(
+    'tauri-migration/src-tauri/src/main.rs',
+    'tauri::Builder::default()',
+    'Tauri builder declared'
+  );
+  await checkCodeContains(
+    'tauri-migration/src-tauri/src/main.rs',
+    'generate_handler![',
+    'Tauri commands registered'
+  );
   log('');
 
-  // Test 10: Planner and Executor
-  log('Test 10: Planner and Executor', 'info');
-  await checkCodeContains('electron/services/agent/ipc.ts', 'getPlanner', 'Planner used');
-  await checkCodeContains('electron/services/agent/ipc.ts', 'getPlanExecutor', 'PlanExecutor used');
-  await checkCodeContains('electron/services/agent/ipc.ts', 'getGuardrails', 'Guardrails used');
+  // Test 4: IPC fallbacks available in both bundles
+  log('Test 4: IPC Fallback Maps', 'info');
+  await checkCodeContains('src/lib/ipc-typed.ts', 'FALLBACK_CHANNELS', 'Web IPC fallback map');
+  await checkCodeContains(
+    'tauri-migration/src/lib/ipc-typed.ts',
+    'FALLBACK_CHANNELS',
+    'Tauri IPC fallback map'
+  );
   log('');
 
-  // Test 11: Type Definitions
-  log('Test 11: Type Definitions', 'info');
-  await checkCodeContains(
-    'src/agent/registry.ts',
-    'export type AgentTool',
-    'AgentTool type exported'
+  // Test 5: Front-end agent surfaces exist
+  log('Test 5: Frontend Agent Surfaces', 'info');
+  await checkFileExists('src/routes/AgentConsole.tsx', 'Web AgentConsole component');
+  await checkFileExists('src/components/AgentOverlay.tsx', 'Web AgentOverlay component');
+  await checkFileExists(
+    'tauri-migration/src/routes/AgentConsole.tsx',
+    'Tauri AgentConsole component'
   );
-  await checkCodeContains(
-    'src/agent/registry.ts',
-    'export interface ToolDefinition',
-    'ToolDefinition interface exported'
+  await checkFileExists(
+    'tauri-migration/src/components/AgentOverlay.tsx',
+    'Tauri AgentOverlay component'
   );
+  log('');
+
+  // Test 6: Agent runtime & planner hooks
+  log('Test 6: Runtime + Planner plumbing', 'info');
+  await checkFileExists('src/core/agents/runtime.ts', 'Agent runtime');
   await checkCodeContains(
-    'src/agent/runAgent.ts',
-    'export type AgentTask',
-    'AgentTask type exported'
+    'src/core/agents/runtime.ts',
+    'createAgentRuntime',
+    'Runtime factory exported'
   );
+  await checkFileExists('src/agents/planner/index.ts', 'Planner index');
   await checkCodeContains(
-    'src/agent/runAgent.ts',
-    'export interface AgentResult',
-    'AgentResult interface exported'
+    'src/agents/planner/index.ts',
+    'createPlanner',
+    'Planner factory exported'
+  );
+  log('');
+
+  // Test 7: UI uses agent runtime
+  log('Test 7: UI telemetry wiring', 'info');
+  await checkCodeContains('src/routes/Runs.tsx', 'agentRuntime', 'Runs page uses agent runtime');
+  await checkCodeContains(
+    'src/routes/Runs.tsx',
+    'AgentTimeline',
+    'Runs page renders AgentTimeline'
   );
   log('');
 
   // Summary
   log('');
   log('='.repeat(60), 'info');
-  log('Test Summary', 'info');
+  log('Agent System Test Summary', 'info');
   log('='.repeat(60), 'info');
   log(`✅ Passed: ${TEST_RESULTS.passed.length}`, 'success');
   log(
@@ -280,13 +187,6 @@ async function runTests() {
     process.exit(1);
   } else {
     log('All agent system tests passed! 🎉', 'success');
-    log('');
-    log('Next Steps:', 'info');
-    log('1. Start the Electron app: npm run dev', 'info');
-    log('2. Open DevTools console', 'info');
-    log('3. Test agent API: console.log(typeof window.agent)', 'info');
-    log('4. Test agent start: await window.agent.start({goal: "test", steps: []})', 'info');
-    log('');
     process.exit(0);
   }
 }

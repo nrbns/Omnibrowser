@@ -4,7 +4,7 @@
  */
 
 /* eslint-disable @typescript-eslint/no-require-imports */
-const { handleMessage } = require('../../electron/services/regen/core');
+const { handleMessage } = require('../services/regen/core');
 
 /**
  * Handle voice recognition

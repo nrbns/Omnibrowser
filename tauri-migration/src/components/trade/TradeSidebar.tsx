@@ -9,7 +9,8 @@ interface TradeSidebarProps {
 }
 
 export function TradeSidebar({ open, onClose }: TradeSidebarProps) {
-  const { activeSymbol, setActiveSymbol, watchlist, addToWatchlist, quotes, updateQuote } = useTradeStore();
+  const { activeSymbol, setActiveSymbol, watchlist, addToWatchlist, quotes, updateQuote } =
+    useTradeStore();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newSymbol, setNewSymbol] = useState('');
@@ -51,7 +52,7 @@ export function TradeSidebar({ open, onClose }: TradeSidebarProps) {
 
   return (
     <div
-      className={`fixed right-0 top-0 bottom-0 w-96 bg-gray-900/95 backdrop-blur-xl border-l border-gray-800 z-40 transform transition-transform duration-300 ${
+      className={`fixed right-0 top-0 bottom-0 z-50 w-full max-w-md md:w-80 lg:w-96 bg-gray-900/95 backdrop-blur-xl border-l border-gray-800 transform transition-transform duration-300 ${
         open ? 'translate-x-0' : 'translate-x-full'
       }`}
     >
@@ -92,7 +93,9 @@ export function TradeSidebar({ open, onClose }: TradeSidebarProps) {
               )}
             </div>
             <button
-              onClick={() => quotes[activeSymbol] && updateQuote(activeSymbol, quotes[activeSymbol]!)}
+              onClick={() =>
+                quotes[activeSymbol] && updateQuote(activeSymbol, quotes[activeSymbol]!)
+              }
               className="p-2 rounded-lg bg-gray-800 text-gray-300 hover:text-white hover:bg-gray-700"
               title="Refresh quote"
             >
@@ -109,8 +112,7 @@ export function TradeSidebar({ open, onClose }: TradeSidebarProps) {
               </div>
             )}
           </div>
-
-  </div>
+        </div>
 
         <div className="bg-gray-800/50 rounded-xl border border-gray-700/50 p-4 space-y-2">
           <div className="flex items-center justify-between">
@@ -118,7 +120,7 @@ export function TradeSidebar({ open, onClose }: TradeSidebarProps) {
             <div className="flex items-center gap-2">
               <input
                 value={newSymbol}
-                onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
+                onChange={e => setNewSymbol(e.target.value.toUpperCase())}
                 placeholder="Add symbol"
                 className="bg-gray-900 border border-gray-700 text-sm text-white rounded px-2 py-1 w-24"
               />
@@ -136,7 +138,7 @@ export function TradeSidebar({ open, onClose }: TradeSidebarProps) {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            {watchlist.map((symbol) => {
+            {watchlist.map(symbol => {
               const quote = quotes[symbol];
               const positive = quote ? quote.change >= 0 : true;
               return (
@@ -173,8 +175,8 @@ export function TradeSidebar({ open, onClose }: TradeSidebarProps) {
                   quote.sentiment === 'bullish'
                     ? 'bg-green-500/20 text-green-300'
                     : quote.sentiment === 'bearish'
-                    ? 'bg-red-500/20 text-red-300'
-                    : 'bg-gray-700 text-gray-300'
+                      ? 'bg-red-500/20 text-red-300'
+                      : 'bg-gray-700 text-gray-300'
                 }`}
               >
                 {quote.sentiment}
@@ -226,4 +228,3 @@ function Sparkline({ values, positive }: { values: number[]; positive: boolean }
     </div>
   );
 }
-

@@ -67,15 +67,15 @@ jobs:
 
       - name: Verify build outputs
         run: |
-          if [ ! -d "dist-electron" ]; then
-            echo "❌ dist-electron directory not found"
+          if [ ! -d "dist-web" ]; then
+            echo "❌ dist-web directory not found"
             exit 1
           fi
-          if [ ! -f "dist-electron/main.js" ]; then
-            echo "❌ dist-electron/main.js not found"
+          if [ -z "$(ls -A dist-web 2>/dev/null)" ]; then
+            echo "❌ dist-web is empty"
             exit 1
           fi
-          echo "✅ Build outputs verified"
+          echo "✅ Web build outputs verified"
 
       - name: Upload build artifacts
         if: success()
@@ -84,7 +84,6 @@ jobs:
           name: build-artifacts
           path: |
             dist-web/**
-            dist-electron/**
           retention-days: 7
 
   storybook-build:
