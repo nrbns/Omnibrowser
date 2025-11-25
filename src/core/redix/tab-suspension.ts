@@ -28,6 +28,28 @@ let evaluateTimer: ReturnType<typeof setInterval> | null = null;
 let latestTabs: TabSummary[] = [];
 const suspendQueue = new Set<string>();
 
+// Cleanup function to prevent memory leaks
+function cleanupStaleData(): void {
+  // Remove tabs from latestTabs that no longer exist
+  const currentTabIds = new Set(useTabsStore.getState().tabs.map(t => t.id));
+  latestTabs = latestTabs.filter(tab => currentTabIds.has(tab.id));
+
+  // Clean up suspend queue for tabs that no longer exist
+  suspendQueue.forEach(tabId => {
+    if (!currentTabIds.has(tabId)) {
+      suspendQueue.delete(tabId);
+    }
+  });
+
+  // Clean up suspensions for closed tabs
+  const suspensionStore = useTabSuspensionStore.getState();
+  Object.keys(suspensionStore.suspensions).forEach(tabId => {
+    if (!currentTabIds.has(tabId)) {
+      suspensionStore.resolve(tabId, { silent: true });
+    }
+  });
+}
+
 export function startTabSuspensionService(): void {
   if (initialized || typeof window === 'undefined' || !isElectronRuntime()) {
     return;
@@ -53,6 +75,7 @@ export function startTabSuspensionService(): void {
   const handleTabsUpdated = (payload: any) => {
     if (Array.isArray(payload)) {
       latestTabs = payload as TabSummary[];
+      cleanupStaleData(); // Clean up stale data first
       cleanupResolvedSuspensions();
     }
   };
@@ -81,6 +104,7 @@ export function startTabSuspensionService(): void {
   );
 
   evaluateTimer = setInterval(() => {
+    cleanupStaleData(); // Clean up stale data periodically
     evaluateSuspensions(inactivityThresholdMs).catch(() => {});
   }, EVALUATION_INTERVAL);
 
@@ -188,8 +212,20 @@ async function suspendTabWithSnapshot(tab: TabSummary, reason: SuspensionReason)
 function cleanupResolvedSuspensions(): void {
   const state = useTabSuspensionStore.getState();
   const tabMap = new Map(latestTabs.map(tab => [tab.id, tab]));
+  const currentTabIds = new Set(useTabsStore.getState().tabs.map(t => t.id));
+
+  // Periodic cleanup of old suspensions
+  state.cleanup();
+
   Object.keys(state.suspensions).forEach(tabId => {
+    // Remove suspensions for tabs that no longer exist
+    if (!currentTabIds.has(tabId)) {
+      state.resolve(tabId, { silent: true });
+      return;
+    }
+
     const meta = tabMap.get(tabId);
+    // Resolve if tab is no longer sleeping (was resumed or closed)
     if (!meta || !meta.sleeping) {
       state.resolve(tabId, { silent: true });
     }

@@ -188,10 +188,12 @@ export function TabContentSurface({ tab, overlayActive }: TabContentSurfaceProps
     }
 
     const iframe = iframeRef.current;
+    let isMounted = true; // Track if component is still mounted
     const LOADING_TIMEOUT_MS = 30000; // 30 seconds
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const handleLoad = () => {
+      if (!isMounted) return; // Don't update state if unmounted
       if (timeoutId) {
         clearTimeout(timeoutId);
         timeoutId = null;
@@ -212,6 +214,7 @@ export function TabContentSurface({ tab, overlayActive }: TabContentSurfaceProps
     };
 
     const handleError = () => {
+      if (!isMounted) return; // Don't update state if unmounted
       if (timeoutId) {
         clearTimeout(timeoutId);
         timeoutId = null;
@@ -235,6 +238,7 @@ export function TabContentSurface({ tab, overlayActive }: TabContentSurfaceProps
 
     // Cleanup function to prevent memory leaks on tab hibernation/close
     return () => {
+      isMounted = false; // Mark as unmounted to prevent state updates
       if (timeoutId) {
         clearTimeout(timeoutId);
         timeoutId = null;
@@ -243,7 +247,7 @@ export function TabContentSurface({ tab, overlayActive }: TabContentSurfaceProps
         iframe.removeEventListener('load', handleLoad);
         iframe.removeEventListener('error', handleError);
       }
-      // Clear refs to prevent stale references
+      // Clear state to prevent memory leaks
       setLoading(false);
       setFailedMessage(null);
       setBlockedExternal(false);
