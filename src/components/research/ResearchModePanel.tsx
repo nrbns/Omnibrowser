@@ -78,28 +78,49 @@ interface ResearchResult {
   };
 }
 
+// All 22 Indic languages + global languages
+const INDIC_LANGUAGES = [
+  { code: 'as', label: 'অসমীয়া', english: 'Assamese' },
+  { code: 'bn', label: 'বাংলা', english: 'Bengali' },
+  { code: 'brx', label: 'बड़ो', english: 'Bodo' },
+  { code: 'doi', label: 'डोगरी', english: 'Dogri' },
+  { code: 'gom', label: 'कोंकणी', english: 'Konkani' },
+  { code: 'gu', label: 'ગુજરાતી', english: 'Gujarati' },
+  { code: 'hi', label: 'हिंदी', english: 'Hindi' },
+  { code: 'kn', label: 'ಕನ್ನಡ', english: 'Kannada' },
+  { code: 'ks', label: 'کٲشُر', english: 'Kashmiri' },
+  { code: 'mai', label: 'मैथिली', english: 'Maithili' },
+  { code: 'ml', label: 'മലയാളം', english: 'Malayalam' },
+  { code: 'mni', label: 'ꯃꯤꯇꯩꯂꯣꯟ', english: 'Manipuri' },
+  { code: 'mr', label: 'मराठी', english: 'Marathi' },
+  { code: 'ne', label: 'नेपाली', english: 'Nepali' },
+  { code: 'or', label: 'ଓଡ଼ିଆ', english: 'Odia' },
+  { code: 'pa', label: 'ਪੰਜਾਬੀ', english: 'Punjabi' },
+  { code: 'sa', label: 'संस्कृतम्', english: 'Sanskrit' },
+  { code: 'sat', label: 'ᱥᱟᱱᱛᱟᱲᱤ', english: 'Santali' },
+  { code: 'sd', label: 'سنڌي', english: 'Sindhi' },
+  { code: 'ta', label: 'தமிழ்', english: 'Tamil' },
+  { code: 'te', label: 'తెలుగు', english: 'Telugu' },
+  { code: 'ur', label: 'اردو', english: 'Urdu' },
+];
+
+const GLOBAL_LANGUAGES = [
+  { code: 'en', label: 'English', english: 'English' },
+  { code: 'es', label: 'Español', english: 'Spanish' },
+  { code: 'fr', label: 'Français', english: 'French' },
+  { code: 'de', label: 'Deutsch', english: 'German' },
+  { code: 'zh', label: '中文', english: 'Chinese' },
+  { code: 'ja', label: '日本語', english: 'Japanese' },
+  { code: 'ko', label: '한국어', english: 'Korean' },
+  { code: 'ru', label: 'Русский', english: 'Russian' },
+  { code: 'pt', label: 'Português', english: 'Portuguese' },
+  { code: 'ar', label: 'العربية', english: 'Arabic' },
+];
+
 const SUPPORTED_LANGUAGES = [
-  { code: 'auto', label: 'Auto-detect' },
-  { code: 'en', label: 'English' },
-  { code: 'hi', label: 'Hindi' },
-  { code: 'ta', label: 'Tamil' },
-  { code: 'te', label: 'Telugu' },
-  { code: 'bn', label: 'Bengali' },
-  { code: 'mr', label: 'Marathi' },
-  { code: 'kn', label: 'Kannada' },
-  { code: 'ml', label: 'Malayalam' },
-  { code: 'gu', label: 'Gujarati' },
-  { code: 'pa', label: 'Punjabi' },
-  { code: 'ur', label: 'Urdu' },
-  { code: 'es', label: 'Spanish' },
-  { code: 'fr', label: 'French' },
-  { code: 'de', label: 'German' },
-  { code: 'zh', label: 'Chinese' },
-  { code: 'ja', label: 'Japanese' },
-  { code: 'ko', label: 'Korean' },
-  { code: 'ru', label: 'Russian' },
-  { code: 'pt', label: 'Portuguese' },
-  { code: 'ar', label: 'Arabic' },
+  { code: 'auto', label: 'Auto-detect', english: 'Auto-detect' },
+  ...INDIC_LANGUAGES.map(l => ({ code: l.code, label: l.label, english: l.english })),
+  ...GLOBAL_LANGUAGES.map(l => ({ code: l.code, label: l.label, english: l.english })),
 ];
 
 export default function ResearchModePanel() {
