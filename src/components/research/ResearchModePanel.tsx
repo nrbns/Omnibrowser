@@ -361,6 +361,39 @@ export default function ResearchModePanel() {
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-semibold text-lg">Summary</h3>
                 <div className="flex items-center gap-2">
+                  {/* Handoff to Trade Button */}
+                  {(() => {
+                    const symbolMatch = result.query.match(/\b([A-Z]{2,5})\b/);
+                    const isTradingQuery =
+                      /nifty|sensex|stock|trade|price|market|buy|sell|symbol|ticker/i.test(
+                        result.query
+                      );
+                    if (symbolMatch || isTradingQuery) {
+                      return (
+                        <button
+                          onClick={async () => {
+                            const symbol = symbolMatch ? symbolMatch[1] : undefined;
+                            const handoffResult = await researchToTrade(
+                              result.summary,
+                              symbol,
+                              result.language || 'auto'
+                            );
+                            if (handoffResult.success) {
+                              toast.success(`Sent to Trade mode${symbol ? ` for ${symbol}` : ''}!`);
+                            } else {
+                              toast.error(handoffResult.error || 'Handoff failed');
+                            }
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-medium rounded-lg transition-colors"
+                          title="Send research results to Trade mode"
+                        >
+                          <TrendingUp size={14} />
+                          Send to Trade
+                        </button>
+                      );
+                    }
+                    return null;
+                  })()}
                   {result.languageLabel && (
                     <span className="text-xs text-gray-500">
                       Language:&nbsp;

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Search, TrendingUp, Loader2, AlertCircle } from 'lucide-react';
+import { Search, TrendingUp, Loader2, AlertCircle, BookOpen } from 'lucide-react';
 import { useDebounce } from '../../utils/useDebounce';
 import { searchTradingSymbols, type SymbolResult } from '../../services/tradingSymbols';
+import { tradeToResearch } from '../../core/agents/handoff';
+import { toast } from 'react-hot-toast';
 
 type SymbolSearchProps = {
   activeSymbol: string;
@@ -56,11 +58,34 @@ export default function SymbolSearch({ activeSymbol, recentSymbols, onSelect }: 
 
   return (
     <div className="rounded-2xl border border-white/10 bg-[#090b12] p-4 text-sm text-white shadow-inner shadow-black/40">
-      <div className="mb-3 flex items-center gap-2">
-        <Search size={16} className="text-indigo-400" />
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-indigo-200">
-          Symbol search
-        </h3>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Search size={16} className="text-indigo-400" />
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-indigo-200">
+            Symbol search
+          </h3>
+        </div>
+        {activeSymbol && (
+          <button
+            onClick={async () => {
+              const result = await tradeToResearch(
+                activeSymbol,
+                'fundamentals and recent news',
+                'auto'
+              );
+              if (result.success) {
+                toast.success(`Researching ${activeSymbol}...`);
+              } else {
+                toast.error(result.error || 'Failed to start research');
+              }
+            }}
+            className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+            title={`Research ${activeSymbol} in Research mode`}
+          >
+            <BookOpen size={12} />
+            Research
+          </button>
+        )}
       </div>
 
       <div className="relative mb-3">

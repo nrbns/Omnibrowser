@@ -74,21 +74,57 @@ async function handoffToResearch(
       return { success: false, error: 'No query or summary provided for research' };
     }
 
+    // Switch to Research mode if not already there
+    try {
+      const { useAppStore } = await import('../../state/appStore');
+      const currentMode = useAppStore.getState().mode;
+      if (currentMode !== 'Research') {
+        useAppStore.getState().setMode('Research');
+        // Small delay to allow mode switch
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+    } catch (error) {
+      console.debug('[Handoff] Failed to switch to Research mode:', error);
+    }
+
+    // Dispatch custom event for research mode to handle
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('handoff:research', {
+          detail: {
+            query,
+            language,
+            symbol: payload.data.symbol,
+            sourceMode: payload.sourceMode,
+          },
+        })
+      );
+    }
+
     // Trigger research query
-    const researchResult = await ipc.research.queryEnhanced({
-      query,
-      maxSources: 12,
-      language: language !== 'auto' ? language : undefined,
-    });
+    try {
+      const researchResult = await ipc.research.queryEnhanced({
+        query,
+        maxSources: 12,
+        language: language !== 'auto' ? language : undefined,
+      });
 
-    toast.success(`Research complete: ${query.slice(0, 50)}...`, {
-      duration: 3000,
-    });
+      toast.success(`Research complete: ${query.slice(0, 50)}...`, {
+        duration: 3000,
+      });
 
-    return {
-      success: true,
-      data: researchResult,
-    };
+      return {
+        success: true,
+        data: researchResult,
+      };
+    } catch (error) {
+      // If IPC fails, still return success since we dispatched the event
+      console.debug('[Handoff] Research IPC failed, using event only:', error);
+      return {
+        success: true,
+        data: { query, language },
+      };
+    }
   } catch (error: any) {
     return {
       success: false,
@@ -110,6 +146,19 @@ async function handoffToTrade(payload: HandoffPayload, _language: string): Promi
       return { success: false, error: 'No symbol or message provided for trade' };
     }
 
+    // Switch to Trade mode if not already there
+    try {
+      const { useAppStore } = await import('../../state/appStore');
+      const currentMode = useAppStore.getState().mode;
+      if (currentMode !== 'Trade') {
+        useAppStore.getState().setMode('Trade');
+        // Small delay to allow mode switch
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+    } catch (error) {
+      console.debug('[Handoff] Failed to switch to Trade mode:', error);
+    }
+
     // Create trade alert or signal
     if (action === 'alert' || action === 'signal') {
       const alertMessage = message || `Alert for ${symbol}`;
@@ -119,6 +168,21 @@ async function handoffToTrade(payload: HandoffPayload, _language: string): Promi
         duration: 5000,
         icon: '📈',
       });
+
+      // Dispatch custom event for trade mode to handle
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('handoff:trade', {
+            detail: {
+              symbol,
+              action,
+              message,
+              summary: payload.data.summary,
+              sourceMode: payload.sourceMode,
+            },
+          })
+        );
+      }
 
       // Optionally trigger IPC event for trade mode
       try {

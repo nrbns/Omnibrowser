@@ -123,6 +123,37 @@ export default function ResearchPanel() {
     }
   }, [containers.length, setContainers]);
 
+  // Listen for handoff events from Trade mode
+  useEffect(() => {
+    const handleHandoff = (event: CustomEvent) => {
+      const { query: handoffQuery, symbol, language: handoffLanguage } = event.detail;
+      if (handoffQuery) {
+        setQuery(handoffQuery);
+        // Trigger search after a short delay to allow mode switch
+        setTimeout(() => {
+          handleSearch(handoffQuery);
+        }, 500);
+        toast.success(`Researching: ${handoffQuery}`, {
+          duration: 3000,
+        });
+      } else if (symbol) {
+        const researchQuery = `${symbol} fundamentals and recent news`;
+        setQuery(researchQuery);
+        setTimeout(() => {
+          handleSearch(researchQuery);
+        }, 500);
+        toast.success(`Researching ${symbol}...`, {
+          duration: 3000,
+        });
+      }
+    };
+
+    window.addEventListener('handoff:research', handleHandoff as EventListener);
+    return () => {
+      window.removeEventListener('handoff:research', handleHandoff as EventListener);
+    };
+  }, []);
+
   useEffect(() => {
     setCompareSelection(prev => prev.filter(id => compareEntries.some(entry => entry.id === id)));
   }, [compareEntries]);

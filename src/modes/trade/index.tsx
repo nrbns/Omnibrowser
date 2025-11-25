@@ -16,6 +16,7 @@ import { aiEngine, type AITaskResult } from '../../core/ai';
 import { semanticSearchMemories } from '../../core/supermemory/search';
 import { toast } from '../../utils/toast';
 import { useSettingsStore } from '../../state/settingsStore';
+import { tradeToResearch } from '../../core/agents/handoff';
 
 const TRADE_PREFS_STORAGE_KEY = 'trade_mode_preferences_v1';
 
@@ -193,6 +194,28 @@ export default function TradePanel() {
     });
     setRiskPreset(null);
   }, [symbol]);
+
+  // Listen for handoff events from Research mode
+  useEffect(() => {
+    const handleHandoff = (event: CustomEvent) => {
+      const { symbol: handoffSymbol, message, summary } = event.detail;
+      if (handoffSymbol) {
+        setSymbol(handoffSymbol.toUpperCase());
+        toast.success(`Switched to ${handoffSymbol.toUpperCase()} from Research`, {
+          duration: 3000,
+        });
+      }
+      if (message || summary) {
+        // Could show the message in a notification or panel
+        console.log('[Trade] Handoff message:', message || summary);
+      }
+    };
+
+    window.addEventListener('handoff:trade', handleHandoff as EventListener);
+    return () => {
+      window.removeEventListener('handoff:trade', handleHandoff as EventListener);
+    };
+  }, []);
 
   // Load initial data
   useEffect(() => {
