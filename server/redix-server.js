@@ -27,6 +27,7 @@ import cors from '@fastify/cors';
 import Redis from 'ioredis';
 import { v4 as uuidv4 } from 'uuid';
 import os from 'os';
+import pLimit from 'p-limit';
 import { runSearch } from './redix-search.js';
 import { enqueueScrape } from './services/queue/queue.js';
 import { analyzeWithLLM } from './services/agent/llm.js';
@@ -143,14 +144,14 @@ const fastify = Fastify({
 // Register CORS for Tauri migration
 fastify.register(cors, {
   origin: [
-    'http://localhost:1420',  // Tauri dev server
-    'tauri://localhost',       // Tauri production
-    'http://localhost:5173',   // Vite dev (Electron fallback)
+    'http://localhost:1420', // Tauri dev server
+    'tauri://localhost', // Tauri production
+    'http://localhost:5173', // Vite dev (Electron fallback)
     'http://127.0.0.1:1420',
     'http://127.0.0.1:5173',
-    'http://localhost:4000',   // Direct backend access
-    'http://127.0.0.1:4000',  // Direct backend access
-    '*'  // Allow all origins for development
+    'http://localhost:4000', // Direct backend access
+    'http://127.0.0.1:4000', // Direct backend access
+    '*', // Allow all origins for development
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
@@ -169,6 +170,12 @@ const LLMCircuit = createCircuit(analyzeWithLLM, {
   errorThresholdPercentage: 50,
   resetTimeout: 30_000,
 });
+const llmConcurrency =
+  Number(nodeProcess?.env.LLM_MAX_CONCURRENCY || 2) > 0
+    ? Number(nodeProcess?.env.LLM_MAX_CONCURRENCY || 2)
+    : 2;
+const llmLimit = pLimit(Math.max(1, llmConcurrency));
+const runLLMJob = args => llmLimit(() => LLMCircuit.fire(args));
 
 // Websocket plugin will be registered in async startup function below
 
@@ -680,7 +687,7 @@ fastify.post('/api/agent/query', async (request, reply) => {
 
   // Call LLM through circuit breaker
   try {
-    const llmResult = await LLMCircuit.fire({
+    const llmResult = await runLLMJob({
       task,
       inputText: body,
       url: url || null,
@@ -1258,16 +1265,16 @@ fastify.post('/api/agent/ask', async (request, reply) => {
     reply.code(400);
     return { error: 'Prompt is required' };
   }
-  
+
   try {
     // Use existing agent query endpoint logic
     const jobId = uuidv4();
-    const result = await LLMCircuit.fire({
+    const result = await runLLMJob({
       prompt,
       sessionId,
       jobId,
     });
-    
+
     return {
       response: result?.response || 'Agent response unavailable',
       jobId,
@@ -1406,7 +1413,7 @@ fastify.get('/api/storage/accounts', async () => {
 // ============================================================================
 const historyStore = [];
 
-fastify.get('/api/history', async (request) => {
+fastify.get('/api/history', async request => {
   const limit = Number(request.query?.limit) || 100;
   return historyStore.slice(0, limit);
 });
@@ -1428,16 +1435,17 @@ fastify.post('/api/history', async (request, reply) => {
   return { success: true, id: entry.id };
 });
 
-fastify.get('/api/history/search', async (request) => {
+fastify.get('/api/history/search', async request => {
   const { query, limit = 50 } = request.query;
   if (!query) {
     return [];
   }
   const searchTerm = query.toLowerCase();
   const results = historyStore
-    .filter(entry => 
-      entry.url.toLowerCase().includes(searchTerm) ||
-      entry.title.toLowerCase().includes(searchTerm)
+    .filter(
+      entry =>
+        entry.url.toLowerCase().includes(searchTerm) ||
+        entry.title.toLowerCase().includes(searchTerm)
     )
     .slice(0, Number(limit));
   return results;
@@ -1452,7 +1460,7 @@ fastify.post('/api/research/query', async (request, reply) => {
     reply.code(400);
     return { error: 'Query is required' };
   }
-  
+
   // Use existing search functionality
   try {
     const results = await runSearch(query, { limit: 10 });
@@ -1474,16 +1482,16 @@ fastify.post('/api/research/enhanced', async (request, reply) => {
     reply.code(400);
     return { error: 'Query is required' };
   }
-  
+
   try {
     // Enhanced research with LLM
     const jobId = uuidv4();
-    const result = await LLMCircuit.fire({
+    const result = await runLLMJob({
       prompt: `Research: ${query}`,
       mode: mode || 'research',
       jobId,
     });
-    
+
     return {
       query,
       response: result?.response || 'Research unavailable',
@@ -1515,7 +1523,7 @@ fastify.post('/api/graph', async (request, reply) => {
     reply.code(400);
     return { error: 'Node with ID is required' };
   }
-  
+
   const graphNode = {
     id: node.id,
     type: node.type || 'default',
@@ -1532,7 +1540,7 @@ fastify.post('/api/graph/node', async (request, reply) => {
     reply.code(400);
     return { error: 'Node ID is required' };
   }
-  
+
   const node = {
     id,
     type: type || 'default',
@@ -1566,30 +1574,31 @@ fastify.get('/api/graph/node/:id', async (request, reply) => {
 // ============================================================================
 const ledgerStore = [];
 
-fastify.get('/api/ledger', async (request) => {
+fastify.get('/api/ledger', async request => {
   const limit = Number(request.query?.limit) || 100;
   return ledgerStore.slice(0, limit);
 });
 
 fastify.post('/api/ledger', async (request, reply) => {
   const { url, passage, action, domain, timestamp, metadata } = request.body;
-  
+
   // Support both formats: { url, passage } and { action, domain, ... }
-  const entry = url && passage
-    ? {
-        id: uuidv4(),
-        url,
-        passage,
-        timestamp: Date.now(),
-      }
-    : {
-        id: uuidv4(),
-        action: action || 'unknown',
-        domain: domain || 'unknown',
-        timestamp: timestamp || Date.now(),
-        metadata: metadata || {},
-      };
-  
+  const entry =
+    url && passage
+      ? {
+          id: uuidv4(),
+          url,
+          passage,
+          timestamp: Date.now(),
+        }
+      : {
+          id: uuidv4(),
+          action: action || 'unknown',
+          domain: domain || 'unknown',
+          timestamp: timestamp || Date.now(),
+          metadata: metadata || {},
+        };
+
   ledgerStore.unshift(entry);
   if (ledgerStore.length > 10000) {
     ledgerStore.length = 10000;
@@ -1663,7 +1672,7 @@ fastify.post('/api/proxy/enable', async (request, reply) => {
   return { success: true, enabled: true, type, address, port };
 });
 
-fastify.post('/api/proxy', async (request) => {
+fastify.post('/api/proxy', async request => {
   const rules = request.body;
   return { success: true, rules };
 });
@@ -1672,7 +1681,7 @@ fastify.post('/api/proxy/disable', async () => {
   return { success: true, enabled: false };
 });
 
-fastify.post('/api/proxy/kill-switch', async (request) => {
+fastify.post('/api/proxy/kill-switch', async request => {
   const { enabled } = request.body;
   return { success: true, enabled: enabled || false };
 });
@@ -1686,7 +1695,7 @@ fastify.post('/api/threats/scan', async (request, reply) => {
     reply.code(400);
     return { error: 'URL is required' };
   }
-  
+
   return {
     url,
     safe: true,
@@ -1701,7 +1710,7 @@ fastify.post('/api/threats/scan-url', async (request, reply) => {
     reply.code(400);
     return { error: 'URL is required' };
   }
-  
+
   return {
     url,
     safe: true,
@@ -1716,7 +1725,7 @@ fastify.post('/api/threats/scan-file', async (request, reply) => {
     reply.code(400);
     return { error: 'File path is required' };
   }
-  
+
   return {
     filePath,
     safe: true,
@@ -1753,7 +1762,7 @@ fastify.get('/api/video/consent', async () => {
   return false;
 });
 
-fastify.post('/api/video/consent', async (request) => {
+fastify.post('/api/video/consent', async request => {
   const { value } = request.body;
   return { success: true, value: value || false };
 });
@@ -1761,12 +1770,12 @@ fastify.post('/api/video/consent', async (request) => {
 // ============================================================================
 // UI API - For Tauri migration
 // ============================================================================
-fastify.post('/api/ui/chrome-offsets', async (request) => {
+fastify.post('/api/ui/chrome-offsets', async request => {
   const offsets = request.body;
   return { success: true, offsets };
 });
 
-fastify.post('/api/ui/right-dock', async (request) => {
+fastify.post('/api/ui/right-dock', async request => {
   const { px } = request.body;
   return { success: true, px: px || 0 };
 });
@@ -1830,7 +1839,7 @@ fastify.post('/api/session/add-history', async (request, reply) => {
   return { success: true, id: entry.id };
 });
 
-fastify.get('/api/session/history', async (request) => {
+fastify.get('/api/session/history', async request => {
   const limit = Number(request.query?.limit) || 100;
   return { history: historyStore.slice(0, limit) };
 });
@@ -1843,9 +1852,10 @@ fastify.post('/api/session/search-history', async (request, reply) => {
   }
   const searchTerm = query.toLowerCase();
   const results = historyStore
-    .filter(entry => 
-      entry.url.toLowerCase().includes(searchTerm) ||
-      entry.title.toLowerCase().includes(searchTerm)
+    .filter(
+      entry =>
+        entry.url.toLowerCase().includes(searchTerm) ||
+        entry.title.toLowerCase().includes(searchTerm)
     )
     .slice(0, Number(limit));
   return { results };

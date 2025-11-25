@@ -43,8 +43,8 @@ const updatePolicyMetrics = () =>
 const getPolicyRecommendations = () =>
   import('../../core/redix/policies').then(m => m.getPolicyRecommendations);
 import { CrashRecoveryDialog, useCrashRecovery } from '../CrashRecoveryDialog';
-import { ResearchMemoryPanel } from '../research/ResearchMemoryPanel';
 import { trackVisit } from '../../core/supermemory/tracker';
+import { toast } from '../../utils/toast';
 // Lazy load heavy summarization service to avoid blocking initial render
 const initNightlySummarization = () =>
   import('../../core/supermemory/summarizer').then(m => m.initNightlySummarization());
@@ -56,7 +56,6 @@ import { SuspensionIndicator } from '../redix/SuspensionIndicator';
 import { BatteryIndicator } from '../redix/BatteryIndicator';
 import { MemoryMonitor } from '../redix/MemoryMonitor';
 import { MiniHoverAI } from '../interaction/MiniHoverAI';
-import { UnifiedSidePanel } from '../side-panel/UnifiedSidePanel';
 import { CommandBar } from '../command-bar/CommandBar';
 import { SessionRestorePrompt } from '../SessionRestorePrompt';
 const SessionRestoreModal = React.lazy(() => import('../SessionRestoreModal'));
@@ -67,7 +66,6 @@ import { useHistoryStore } from '../../state/historyStore';
 import { useSettingsStore } from '../../state/settingsStore';
 // import { ModeManager } from '../../core/modes/manager'; // Unused for now
 import { useTradeStore } from '../../state/tradeStore';
-import { TradeSidebar } from '../trade/TradeSidebar';
 import { TermsAcceptance } from '../Onboarding/TermsAcceptance';
 import {
   CookieConsent,
@@ -306,6 +304,15 @@ const RegenSidebarWrapper = () => (
   <div className="fixed inset-y-0 right-0 z-50 w-full max-w-md overflow-hidden border-l border-slate-800/60 bg-gray-900 shadow-2xl md:w-[400px]">
     <RegenSidebar />
   </div>
+);
+const ResearchMemoryPanel = React.lazy(() =>
+  import('../research/ResearchMemoryPanel').then(m => ({ default: m.ResearchMemoryPanel }))
+);
+const TradeSidebar = React.lazy(() =>
+  import('../trade/TradeSidebar').then(m => ({ default: m.TradeSidebar }))
+);
+const UnifiedSidePanel = React.lazy(() =>
+  import('../side-panel/UnifiedSidePanel').then(m => ({ default: m.UnifiedSidePanel }))
 );
 const ClipperOverlay = React.lazy(() =>
   import('../Overlays/ClipperOverlay').then(m => ({ default: m.ClipperOverlay }))
@@ -2004,20 +2011,24 @@ export function AppShell() {
       )}
 
       {/* Memory Sidebar - Using new ResearchMemoryPanel for improved UI/UX */}
-      <ResearchMemoryPanel
-        open={memorySidebarOpen}
-        onClose={() => {
-          setMemorySidebarOpen(false);
-          // Dispatch event for TopBar to sync state
-          window.dispatchEvent(
-            new CustomEvent('memory-sidebar:toggle', { detail: { open: false } })
-          );
-        }}
-        onCreateMemory={() => {
-          // Handled by ResearchMemoryPanel internally via CreateMemoryDialog
-        }}
-      />
-      <TradeSidebar open={tradeSidebarOpen} onClose={() => setTradeSidebarOpen(false)} />
+      <Suspense fallback={null}>
+        <ResearchMemoryPanel
+          open={memorySidebarOpen}
+          onClose={() => {
+            setMemorySidebarOpen(false);
+            // Dispatch event for TopBar to sync state
+            window.dispatchEvent(
+              new CustomEvent('memory-sidebar:toggle', { detail: { open: false } })
+            );
+          }}
+          onCreateMemory={() => {
+            // Handled by ResearchMemoryPanel internally via CreateMemoryDialog
+          }}
+        />
+      </Suspense>
+      <Suspense fallback={null}>
+        <TradeSidebar open={tradeSidebarOpen} onClose={() => setTradeSidebarOpen(false)} />
+      </Suspense>
 
       {/* Regen Sidebar */}
       {!isFullscreen && isDesktopLayout && regenSidebarOpen && (
@@ -2115,10 +2126,12 @@ export function AppShell() {
 
       {/* Unified Side Panel - History, Bookmarks, Downloads */}
       {!isFullscreen && isDesktopLayout && (
-        <UnifiedSidePanel
-          open={unifiedSidePanelOpen}
-          onClose={() => setUnifiedSidePanelOpen(false)}
-        />
+        <Suspense fallback={null}>
+          <UnifiedSidePanel
+            open={unifiedSidePanelOpen}
+            onClose={() => setUnifiedSidePanelOpen(false)}
+          />
+        </Suspense>
       )}
 
       {/* Tier 3: Global Command Bar */}
