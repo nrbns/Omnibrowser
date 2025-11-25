@@ -22,7 +22,9 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "dangerousDisableAssetCspModification": false,
+      "freezePrototype": false
     },
     "macOSPrivateApi": false,
     "withGlobalTauri": false

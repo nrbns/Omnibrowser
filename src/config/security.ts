@@ -3,6 +3,7 @@
  */
 
 // Relaxed CSP for web build - allows all sites to load
+// This is permissive to avoid blocking legitimate sites like Zerodha and YouTube
 export const CSP_DIRECTIVE = [
   "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;",
   'base-uri *;',
@@ -10,11 +11,14 @@ export const CSP_DIRECTIVE = [
   'font-src * data:;',
   "style-src * 'unsafe-inline';",
   "script-src * 'unsafe-inline' 'unsafe-eval';",
-  'connect-src *;',
+  'connect-src * wss: ws:;',
   'frame-src *;',
+  'frame-ancestors *;',
   'media-src * data: blob:;',
   'object-src *;',
   'form-action *;',
+  'worker-src * blob:;',
+  'manifest-src *;',
 ].join(' ');
 
 export const SAFE_IFRAME_SANDBOX =
