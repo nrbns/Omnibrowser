@@ -12,6 +12,10 @@ import { syncRendererTelemetry } from './lib/monitoring/sentry-client';
 import { syncAnalyticsOptIn, trackPageView } from './lib/monitoring/analytics-client';
 import { ipc } from './lib/ipc-typed';
 import { ThemeProvider } from './ui/theme';
+import { Toaster } from 'react-hot-toast';
+import { QuickTour } from './components/Onboarding/QuickTour';
+import { PerformanceMonitor } from './components/PerformanceMonitor';
+import { AgentOverlay } from './components/AgentOverlay';
 
 // Import test utility in dev mode
 if (isDevEnv()) {
@@ -79,6 +83,22 @@ const ConsentTimelinePage = lazyWithErrorHandling(
   () => import('./routes/ConsentTimeline'),
   'ConsentTimelinePage'
 );
+const SkillStorePage = lazyWithErrorHandling(
+  () => import('./components/skills/SkillStore').then(m => ({ default: m.SkillStore })),
+  'SkillStore'
+);
+const BountyPage = lazyWithErrorHandling(
+  () => import('./components/bounty/BountySubmission').then(m => ({ default: m.BountySubmission })),
+  'BountySubmission'
+);
+const ResumeFixerPage = lazyWithErrorHandling(
+  () => import('./components/resume/ResumeFixer').then(m => ({ default: m.ResumeFixer })),
+  'ResumeFixer'
+);
+const ClipRecorderPage = lazyWithErrorHandling(
+  () => import('./components/recorder/ClipRecorder').then(m => ({ default: m.ClipRecorder })),
+  'ClipRecorder'
+);
 
 function LoadingFallback() {
   return (
@@ -117,18 +137,134 @@ const router = createBrowserRouter(
         </Suspense>
       ),
       children: [
-        { index: true, element: <Suspense fallback={<LoadingFallback />}><Home /></Suspense> },
-        { path: 'settings', element: <Suspense fallback={<LoadingFallback />}><Settings /></Suspense> },
-        { path: 'w/:id', element: <Suspense fallback={<LoadingFallback />}><Workspace /></Suspense> },
-        { path: 'agent', element: <Suspense fallback={<LoadingFallback />}><AgentConsole /></Suspense> },
-        { path: 'runs', element: <Suspense fallback={<LoadingFallback />}><Runs /></Suspense> },
-        { path: 'replay/:id', element: <Suspense fallback={<LoadingFallback />}><Replay /></Suspense> },
-        { path: 'playbooks', element: <Suspense fallback={<LoadingFallback />}><PlaybookForge /></Suspense> },
-        { path: 'history', element: <Suspense fallback={<LoadingFallback />}><HistoryPage /></Suspense> },
-        { path: 'downloads', element: <Suspense fallback={<LoadingFallback />}><DownloadsPage /></Suspense> },
-        { path: 'watchers', element: <Suspense fallback={<LoadingFallback />}><WatchersPage /></Suspense> },
-        { path: 'video', element: <Suspense fallback={<LoadingFallback />}><VideoPage /></Suspense> },
-        { path: 'consent-timeline', element: <Suspense fallback={<LoadingFallback />}><ConsentTimelinePage /></Suspense> },
+        {
+          index: true,
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <Home />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'settings',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <Settings />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'w/:id',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <Workspace />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'agent',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <AgentConsole />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'runs',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <Runs />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'replay/:id',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <Replay />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'playbooks',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <PlaybookForge />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'history',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <HistoryPage />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'downloads',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <DownloadsPage />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'watchers',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <WatchersPage />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'video',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <VideoPage />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'consent-timeline',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <ConsentTimelinePage />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'skills',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <SkillStorePage />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'bounty',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <BountyPage />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'resume',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <ResumeFixerPage />
+            </Suspense>
+          ),
+        },
+        {
+          path: 'recorder',
+          element: (
+            <Suspense fallback={<LoadingFallback />}>
+              <ClipRecorderPage />
+            </Suspense>
+          ),
+        },
       ],
     },
   ],
@@ -143,9 +279,9 @@ if (!rootElement) {
 try {
   const root = ReactDOM.createRoot(rootElement);
   setupClipperHandlers();
-  
+
   crashReporter.initialize();
-  
+
   const initializeHeavyServices = async () => {
     try {
       await authService.initialize();
@@ -169,7 +305,7 @@ try {
   };
 
   setTimeout(initializeHeavyServices, 100);
-  
+
   setTimeout(() => {
     syncRendererTelemetry().catch(() => {});
     syncAnalyticsOptIn()
@@ -201,6 +337,10 @@ try {
             <RouterProvider router={router} future={{ v7_startTransition: true }} />
           </Suspense>
         </GlobalErrorBoundary>
+        <AgentOverlay />
+        <Toaster position="bottom-center" />
+        <QuickTour />
+        <PerformanceMonitor />
       </ThemeProvider>
     </React.StrictMode>
   );

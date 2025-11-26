@@ -3,7 +3,7 @@
  * Shows multi-source results with citations, confidence bars, contradictions, and verification
  */
 
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Search,
   AlertTriangle,
@@ -15,6 +15,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { ipc } from '../../lib/ipc-typed';
 import { useTabsStore } from '../../state/tabsStore';
+import { toast } from '../../utils/toast';
 
 interface ResearchResult {
   query: string;
@@ -65,18 +66,58 @@ export default function ResearchModePanel() {
   const [recencyWeight, setRecencyWeight] = useState(0.5);
   const [authorityWeight, setAuthorityWeight] = useState(0.5);
   const [includeCounterpoints, setIncludeCounterpoints] = useState(false);
+  const [streamedSummary, setStreamedSummary] = useState('');
+  const [streamingSummary, setStreamingSummary] = useState(false);
+  const [followUps, setFollowUps] = useState<string[]>([]);
+  const [recentSearches, setRecentSearches] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const stored = window.localStorage.getItem('regen:research-history');
+      return stored ? (JSON.parse(stored) as string[]) : [];
+    } catch {
+      return [];
+    }
+  });
   const { activeId } = useTabsStore();
 
-  const handleSearch = async () => {
-    if (!query.trim()) return;
+  const persistRecentSearches = (items: string[]) => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('regen:research-history', JSON.stringify(items));
+  };
 
+  const generateFollowUps = (baseQuery: string, summary?: string) => {
+    const core = baseQuery.replace(/\?$/, '');
+    const ideas = [
+      `Give me counter arguments to ${core}`,
+      `Explain ${core} like I'm 12 years old`,
+      `List real-world case studies for ${core}`,
+      `What should I do next after ${core}?`,
+      `Summarize ${core} using bullet points`,
+    ];
+    if (summary) {
+      const firstSentence = summary.split('.').map(s => s.trim())[0];
+      if (firstSentence) {
+        ideas.unshift(`Why ${firstSentence.toLowerCase()}?`);
+      }
+    }
+    return ideas.slice(0, 4);
+  };
+
+  const handleSearch = async (custom?: string) => {
+    const nextQuery = (custom ?? query).trim();
+    if (!nextQuery) return;
+
+    setQuery(nextQuery);
     setLoading(true);
     setResult(null);
+    setStreamingSummary(true);
+    setStreamedSummary('');
+    setFollowUps([]);
 
     try {
       // Call enhanced research API
       const researchResult = (await ipc.research.queryEnhanced({
-        query: query.trim(),
+        query: nextQuery,
         maxSources: 12,
         includeCounterpoints,
         recencyWeight,
@@ -84,8 +125,18 @@ export default function ResearchModePanel() {
       })) as ResearchResult;
 
       setResult(researchResult);
+      setFollowUps(generateFollowUps(nextQuery, researchResult.summary));
+
+      setRecentSearches(prev => {
+        const next = [nextQuery, ...prev.filter(item => item !== nextQuery)].slice(0, 6);
+        persistRecentSearches(next);
+        return next;
+      });
+
+      toast.success('Research summary ready');
     } catch (error) {
       console.error('Research query failed:', error);
+      toast.error('Research query failed');
     } finally {
       setLoading(false);
     }
@@ -100,8 +151,55 @@ export default function ResearchModePanel() {
       }
     } catch (error) {
       console.error('Failed to open URL:', error);
+      toast.error('Failed to open source');
     }
   };
+
+  const handleOpenTopSources = async () => {
+    if (!result?.sources?.length) return;
+    const topSources = result.sources.slice(0, 3);
+    for (const source of topSources) {
+      await handleOpenUrl(source.url);
+      await new Promise(resolve => setTimeout(resolve, 400));
+    }
+    toast.success('Opened top sources in tabs');
+  };
+
+  const handleCopySummary = async () => {
+    try {
+      await navigator.clipboard.writeText(result?.summary ?? '');
+      toast.success('Summary copied');
+    } catch {
+      toast.error('Clipboard unavailable');
+    }
+  };
+
+  const pros = useMemo(() => {
+    if (!result?.sources) return [];
+    return result.sources.filter((_, idx) => idx % 2 === 0).slice(0, 3);
+  }, [result]);
+
+  const cons = useMemo(() => {
+    if (!result?.sources) return [];
+    return result.sources.filter((_, idx) => idx % 2 === 1).slice(0, 3);
+  }, [result]);
+
+  useEffect(() => {
+    if (!result?.summary) return;
+    setStreamedSummary('');
+    setStreamingSummary(true);
+    const words = result.summary.split(' ');
+    let index = 0;
+    const interval = window.setInterval(() => {
+      setStreamedSummary(prev => `${prev}${index === 0 ? '' : ' '}${words[index]}`);
+      index += 1;
+      if (index >= words.length) {
+        setStreamingSummary(false);
+        clearInterval(interval);
+      }
+    }, 40);
+    return () => clearInterval(interval);
+  }, [result?.summary]);
 
   const getSourceTypeColor = (type: string) => {
     switch (type) {
@@ -168,6 +266,22 @@ export default function ResearchModePanel() {
             {loading ? 'Searching...' : 'Search'}
           </button>
         </form>
+
+        {recentSearches.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+            <span className="uppercase tracking-[0.2em] text-gray-400">Recent</span>
+            {recentSearches.map(item => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => handleSearch(item)}
+                className="rounded-full border border-gray-700/70 bg-gray-900/60 px-3 py-1 text-gray-200 transition hover:border-blue-500/60 hover:text-blue-200"
+              >
+                {item.length > 32 ? `${item.slice(0, 32)}…` : item}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Controls */}
         <AnimatePresence>
@@ -241,7 +355,21 @@ export default function ResearchModePanel() {
             <div className="bg-gray-900/60 rounded-lg p-4 border border-gray-800/50">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-semibold text-lg">Summary</h3>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2 justify-end">
+                  <button
+                    type="button"
+                    onClick={handleOpenTopSources}
+                    className="rounded-lg border border-gray-700/60 bg-gray-900/60 px-3 py-1.5 text-xs font-semibold text-gray-200 transition hover:border-blue-500/60 hover:text-blue-200"
+                  >
+                    Open top sources
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopySummary}
+                    className="rounded-lg border border-gray-700/60 bg-gray-900/60 px-3 py-1.5 text-xs font-semibold text-gray-200 transition hover:border-emerald-500/60 hover:text-emerald-200"
+                  >
+                    Copy summary
+                  </button>
                   {result.languageLabel && (
                     <span className="text-xs text-gray-500">
                       Language:&nbsp;
@@ -267,9 +395,10 @@ export default function ResearchModePanel() {
               </div>
 
               <div className="prose prose-invert max-w-none text-sm text-gray-300 whitespace-pre-wrap">
-                {result.summary.split('\n').map((para, idx) => (
+                {(streamedSummary || result.summary).split('\n').map((para, idx) => (
                   <p key={idx} className="mb-2">
                     {para}
+                    {idx === 0 && streamingSummary && <span className="ml-2 animate-pulse">▌</span>}
                   </p>
                 ))}
               </div>
@@ -330,6 +459,50 @@ export default function ResearchModePanel() {
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {(pros.length > 0 || cons.length > 0) && (
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4">
+                  <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-emerald-200">
+                    👍 Key Supporting Evidence
+                  </h3>
+                  <div className="space-y-2 text-sm text-emerald-100/80">
+                    {pros.map((source, idx) => (
+                      <div
+                        key={`${source.url}-${idx}`}
+                        className="rounded border border-emerald-500/30 bg-emerald-500/5 p-2"
+                      >
+                        <div className="text-emerald-100 font-medium text-xs mb-1">
+                          {source.title}
+                        </div>
+                        <p className="text-xs text-emerald-200/80 line-clamp-2">{source.snippet}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-4">
+                  <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-rose-200">
+                    ⚠️ Counterpoints / Risks
+                  </h3>
+                  <div className="space-y-2 text-sm text-rose-100/80">
+                    {cons.map((source, idx) => (
+                      <div
+                        key={`${source.url}-${idx}`}
+                        className="rounded border border-rose-500/30 bg-rose-500/5 p-2"
+                      >
+                        <div className="text-rose-100 font-medium text-xs mb-1">{source.title}</div>
+                        <p className="text-xs text-rose-200/80 line-clamp-2">{source.snippet}</p>
+                      </div>
+                    ))}
+                    {cons.length === 0 && (
+                      <div className="text-xs text-rose-200/70">
+                        No strong counterpoints surfaced.
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -420,6 +593,24 @@ export default function ResearchModePanel() {
                       </div>
                     );
                   })}
+                </div>
+              </div>
+            )}
+
+            {followUps.length > 0 && (
+              <div className="bg-gray-900/60 rounded-lg p-4 border border-gray-800/50">
+                <h3 className="font-semibold mb-3">Follow-up questions</h3>
+                <div className="flex flex-wrap gap-2">
+                  {followUps.map(item => (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => handleSearch(item)}
+                      className="rounded-full border border-gray-800/70 bg-gray-900/40 px-3 py-1 text-xs text-gray-200 transition hover:border-blue-500/60 hover:text-blue-200"
+                    >
+                      {item}
+                    </button>
+                  ))}
                 </div>
               </div>
             )}

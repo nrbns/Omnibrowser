@@ -42,8 +42,6 @@ export async function performLiveWebSearch(
   const language = options?.language;
   const preferBing = options?.preferBing !== false; // Default to true
 
-  const results: LiveSearchResult[] = [];
-
   // Try Bing first if preferred and API key is available
   if (preferBing) {
     try {

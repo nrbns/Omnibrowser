@@ -43,9 +43,9 @@ class EcoScorer {
   estimateEnergy(provider: string, tokens: number): number {
     const energyPer1K: Record<string, number> = {
       ollama: 0.01,
-      'openai': 0.05,
-      'anthropic': 0.06,
-      'mistral': 0.04,
+      openai: 0.05,
+      anthropic: 0.06,
+      mistral: 0.04,
     };
     const base = energyPer1K[provider] || 0.05;
     return (tokens / 1000) * base;
@@ -54,7 +54,10 @@ class EcoScorer {
 
 // Model Router
 class ModelRouter {
-  async route(query: string, options?: { provider?: string }): Promise<{
+  async route(
+    query: string,
+    options?: { provider?: string }
+  ): Promise<{
     provider: string;
     model: string;
   }> {
@@ -67,12 +70,12 @@ class ModelRouter {
     if (queryLower.includes('code') || queryLower.includes('function')) {
       return this.getProviderConfig('openai'); // Use GPT for code (DeepSeek not in our list)
     }
-    
+
     const ollamaAvailable = await this.checkOllama();
     if (ollamaAvailable) {
       return this.getProviderConfig('ollama');
     }
-    
+
     return this.getProviderConfig('openai');
   }
 
@@ -89,9 +92,12 @@ class ModelRouter {
 
   private async checkOllama(): Promise<boolean> {
     try {
-      const response = await fetch(`${process.env.OLLAMA_BASE_URL || 'http://localhost:11434'}/api/tags`, {
-        signal: AbortSignal.timeout(1000),
-      });
+      const response = await fetch(
+        `${process.env.OLLAMA_BASE_URL || 'http://localhost:11434'}/api/tags`,
+        {
+          signal: AbortSignal.timeout(1000),
+        }
+      );
       return response.ok;
     } catch {
       return false;
@@ -109,7 +115,7 @@ class LLMAdapter {
   ): Promise<{ text: string; tokensUsed: number; latency: number }> {
     const startTime = Date.now();
     const apiKey = this.getApiKey(provider);
-    
+
     if (!apiKey && provider !== 'ollama') {
       throw new Error(`API key required for ${provider}`);
     }
@@ -134,15 +140,18 @@ class LLMAdapter {
     const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: { message: response.statusText } }));
+      const error = await response
+        .json()
+        .catch(() => ({ error: { message: response.statusText } }));
       throw new Error(error.error?.message || `API error: ${response.statusText}`);
     }
 
     const data = await response.json();
     const latency = Date.now() - startTime;
-    const text = provider === 'anthropic'
-      ? data.content[0]?.text || ''
-      : data.choices?.[0]?.message?.content || data.message?.content || '';
+    const text =
+      provider === 'anthropic'
+        ? data.content[0]?.text || ''
+        : data.choices?.[0]?.message?.content || data.message?.content || '';
     const tokensUsed = data.usage?.total_tokens || Math.ceil(text.length / 4);
 
     return { text, tokensUsed, latency };
@@ -160,7 +169,8 @@ class LLMAdapter {
 
   private getApiUrl(provider: string): string {
     if (provider === 'anthropic') return 'https://api.anthropic.com/v1/messages';
-    if (provider === 'ollama') return `${process.env.OLLAMA_BASE_URL || 'http://localhost:11434'}/api/chat`;
+    if (provider === 'ollama')
+      return `${process.env.OLLAMA_BASE_URL || 'http://localhost:11434'}/api/chat`;
     const baseUrl = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
     return `${baseUrl}/chat/completions`;
   }
@@ -211,16 +221,16 @@ export class RedixServer {
           reply.raw.setHeader('Cache-Control', 'no-cache');
           reply.raw.setHeader('Connection', 'keep-alive');
           reply.raw.setHeader('X-Accel-Buffering', 'no');
-          
+
           const route = await this.router.route(query, { provider: options?.provider });
           const startTime = Date.now();
-          
+
           try {
             const result = await this.llm.sendPrompt(query, route.provider, route.model, {
               maxTokens: options?.maxTokens,
               temperature: options?.temperature,
             });
-            
+
             // Stream response in chunks
             const words = result.text.split(' ');
             for (let i = 0; i < words.length; i++) {
@@ -228,15 +238,19 @@ export class RedixServer {
               reply.raw.write(`data: ${JSON.stringify({ type: 'token', text: chunk })}\n\n`);
               await new Promise(resolve => setTimeout(resolve, 20));
             }
-            
+
             const latency = Date.now() - startTime;
             const energy = this.ecoScorer.estimateEnergy(route.provider, result.tokensUsed);
             const greenScore = this.ecoScorer.calculateGreenScore(energy, result.tokensUsed);
-            
-            reply.raw.write(`data: ${JSON.stringify({ type: 'done', greenScore, latency, tokensUsed: result.tokensUsed, provider: route.provider })}\n\n`);
+
+            reply.raw.write(
+              `data: ${JSON.stringify({ type: 'done', greenScore, latency, tokensUsed: result.tokensUsed, provider: route.provider })}\n\n`
+            );
             reply.raw.end();
           } catch (error: any) {
-            reply.raw.write(`data: ${JSON.stringify({ type: 'error', error: error.message || 'Streaming failed' })}\n\n`);
+            reply.raw.write(
+              `data: ${JSON.stringify({ type: 'error', error: error.message || 'Streaming failed' })}\n\n`
+            );
             reply.raw.end();
           }
           return;
@@ -283,7 +297,7 @@ export class RedixServer {
     this.app.post<{ Body: FusionRequest }>('/fuse', async (request, reply) => {
       try {
         const { query, context, chainType, options } = request.body;
-        
+
         if (!query?.trim()) {
           reply.code(400).send({ error: 'Query is required' });
           return;
@@ -307,66 +321,74 @@ export class RedixServer {
     });
 
     // /workflow endpoint - LangChain agentic workflows
-    this.app.post<{ Body: AgenticWorkflowRequest & { stream?: boolean } }>('/workflow', async (request, reply) => {
-      try {
-        const { query, context, workflowType, tools, options, stream } = request.body;
-        
-        if (!query?.trim()) {
-          reply.code(400).send({ error: 'Query is required' });
-          return;
-        }
+    this.app.post<{ Body: AgenticWorkflowRequest & { stream?: boolean } }>(
+      '/workflow',
+      async (request, reply) => {
+        try {
+          const { query, context, workflowType, tools, options, stream } = request.body;
 
-        // SSE streaming mode
-        if (stream) {
-          reply.raw.setHeader('Content-Type', 'text/event-stream');
-          reply.raw.setHeader('Cache-Control', 'no-cache');
-          reply.raw.setHeader('Connection', 'keep-alive');
-          reply.raw.setHeader('X-Accel-Buffering', 'no');
-          
-          const workflowEngine = getAgenticWorkflowEngine();
-          const streamCallback = (chunk: any) => {
-            reply.raw.write(`data: ${JSON.stringify(chunk)}\n\n`);
-          };
-          
-          try {
-            await workflowEngine.runWorkflow({
-              query,
-              context,
-              workflowType,
-              tools,
-              options: { ...options, stream: true },
-            }, streamCallback);
-          } catch (error: any) {
-            reply.raw.write(`data: ${JSON.stringify({ type: 'error', content: error.message })}\n\n`);
-            reply.raw.end();
+          if (!query?.trim()) {
+            reply.code(400).send({ error: 'Query is required' });
+            return;
           }
-          return;
+
+          // SSE streaming mode
+          if (stream) {
+            reply.raw.setHeader('Content-Type', 'text/event-stream');
+            reply.raw.setHeader('Cache-Control', 'no-cache');
+            reply.raw.setHeader('Connection', 'keep-alive');
+            reply.raw.setHeader('X-Accel-Buffering', 'no');
+
+            const workflowEngine = getAgenticWorkflowEngine();
+            const streamCallback = (chunk: any) => {
+              reply.raw.write(`data: ${JSON.stringify(chunk)}\n\n`);
+            };
+
+            try {
+              await workflowEngine.runWorkflow(
+                {
+                  query,
+                  context,
+                  workflowType,
+                  tools,
+                  options: { ...options, stream: true },
+                },
+                streamCallback
+              );
+            } catch (error: any) {
+              reply.raw.write(
+                `data: ${JSON.stringify({ type: 'error', content: error.message })}\n\n`
+              );
+              reply.raw.end();
+            }
+            return;
+          }
+
+          // Non-streaming mode
+          const workflowEngine = getAgenticWorkflowEngine();
+          const result = await workflowEngine.runWorkflow({
+            query,
+            context,
+            workflowType,
+            tools,
+            options,
+          });
+
+          reply.code(200).send(result);
+        } catch (error: any) {
+          console.error('[Redix] /workflow error:', error);
+          reply.code(500).send({
+            error: error.message || 'Workflow failed',
+          });
         }
-
-        // Non-streaming mode
-        const workflowEngine = getAgenticWorkflowEngine();
-        const result = await workflowEngine.runWorkflow({
-          query,
-          context,
-          workflowType,
-          tools,
-          options,
-        });
-
-        reply.code(200).send(result);
-      } catch (error: any) {
-        console.error('[Redix] /workflow error:', error);
-        reply.code(500).send({
-          error: error.message || 'Workflow failed',
-        });
       }
-    });
+    );
 
     // /voice endpoint - Voice Companion
     this.app.post<{ Body: VoiceRequest }>('/voice', async (request, reply) => {
       try {
         const { transcript, url, title, selection, tabId, context } = request.body;
-        
+
         if (!transcript?.trim()) {
           reply.code(400).send({ error: 'Transcript is required' });
           return;
@@ -411,7 +433,11 @@ export function createRedixServer(port?: number): RedixServer {
   return redixServerInstance;
 }
 
-if (require.main === module) {
+// ES module equivalent of require.main === module
+if (
+  import.meta.url === `file://${process.argv[1]}` ||
+  import.meta.url.endsWith(process.argv[1]?.replace(/\\/g, '/'))
+) {
   const port = parseInt(process.env.REDIX_PORT || '8001', 10);
   const server = createRedixServer(port);
   server.start().catch(console.error);

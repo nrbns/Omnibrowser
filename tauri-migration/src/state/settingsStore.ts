@@ -48,11 +48,13 @@ type SettingsData = {
   account: AccountSettings;
   videoDownloadConsent: boolean;
   searchEngine: SearchEngine;
+  language?: string;
 };
 
 type SettingsState = SettingsData & {
   setConsent: (value: boolean) => void;
   setSearchEngine: (engine: SearchEngine) => void;
+  setLanguage: (language: string) => void;
   updateGeneral: (partial: Partial<GeneralSettings>) => void;
   updatePrivacy: (partial: Partial<PrivacySettings>) => void;
   updateAppearance: (partial: Partial<AppearanceSettings>) => void;
@@ -96,6 +98,7 @@ const createDefaults = (): SettingsData => ({
   },
   videoDownloadConsent: false,
   searchEngine: 'duckduckgo',
+  language: 'auto',
 });
 
 const dataKeys: Array<keyof SettingsData> = [
@@ -105,6 +108,7 @@ const dataKeys: Array<keyof SettingsData> = [
   'account',
   'videoDownloadConsent',
   'searchEngine',
+  'language',
 ];
 
 export const useSettingsStore = create<SettingsState>()(
@@ -113,6 +117,7 @@ export const useSettingsStore = create<SettingsState>()(
       ...createDefaults(),
       setConsent: value => set({ videoDownloadConsent: value }),
       setSearchEngine: searchEngine => set({ searchEngine }),
+      setLanguage: language => set({ language }),
       updateGeneral: partial => set(state => ({ general: { ...state.general, ...partial } })),
       updatePrivacy: partial => set(state => ({ privacy: { ...state.privacy, ...partial } })),
       updateAppearance: partial =>

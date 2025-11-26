@@ -1,976 +1,528 @@
-import { useState, useEffect } from 'react';
-import TradeDashboard, { MarketSnapshot, RiskMetrics } from '../../components/trade/TradeDashboard';
-import type { CandleData } from '../../components/trade/TradingChart';
-import OrderEntry, { OrderRequest } from '../../components/trade/OrderEntry';
-import AISignalPanel, { AISignal } from '../../components/trade/AISignalPanel';
-import SafeExitControls, { SafeExitConfig } from '../../components/trade/SafeExitControls';
-import OrderBlotter from '../../components/trade/OrderBlotter';
-import SymbolSearch from '../../components/trade/SymbolSearch';
-import Watchlist from '../../components/trade/Watchlist';
-import RiskManager, { type RiskPlanSummary } from '../../components/trade/RiskManager';
-import TradingViewChart, { type IndicatorConfig } from './components/TradingViewChart';
-import TimeframeSelector from './components/TimeframeSelector';
-import IndicatorsPanel from './components/Indicators';
-import { ipc } from '../../lib/ipc-typed';
-import { aiEngine, type AITaskResult } from '../../core/ai';
-import { semanticSearchMemories } from '../../core/supermemory/search';
-import { toast } from '../../utils/toast';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createChart, ColorType, type IChartApi, type ISeriesApi } from 'lightweight-charts';
+import toast from 'react-hot-toast';
+import {
+  ArrowDownRight,
+  ArrowUpRight,
+  BellRing,
+  Bot,
+  RefreshCcw,
+  Sparkles,
+  TrendingDown,
+  TrendingUp,
+  Wallet2,
+} from 'lucide-react';
 
-const TRADE_PREFS_STORAGE_KEY = 'trade_mode_preferences_v1';
-
-type TradePreferences = {
-  timeframe: string;
-  indicators: IndicatorConfig[];
+type CandlePoint = {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
 };
 
+const API_BASE = import.meta.env.VITE_REDIX_CORE_URL || 'http://localhost:4000';
+const WATCHLIST = ['NIFTY', 'BANKNIFTY', 'RELIANCE.NS', 'TCS.NS', 'INFY.NS', 'HDFCBANK.NS'];
+const TIMEFRAMES = [
+  { id: '1D', label: '1D', range: '1d', interval: '5m', seconds: 300 },
+  { id: '5D', label: '5D', range: '5d', interval: '15m', seconds: 900 },
+  { id: '1M', label: '1M', range: '1mo', interval: '60m', seconds: 3600 },
+  { id: '6M', label: '6M', range: '6mo', interval: '1d', seconds: 86400 },
+  { id: '1Y', label: '1Y', range: '1y', interval: '1d', seconds: 86400 },
+];
+
+const MOCK_POSITIONS = [
+  { symbol: 'RELIANCE.NS', qty: 40, avg: 2885.5, pnl: 2.8 },
+  { symbol: 'TCS.NS', qty: 20, avg: 4042.2, pnl: -1.1 },
+  { symbol: 'HDFCBANK.NS', qty: 30, avg: 1580.4, pnl: 0.7 },
+];
+
 export default function TradePanel() {
-  const [balance, setBalance] = useState({
-    cash: 100000,
-    buyingPower: 200000,
-    portfolioValue: 100000,
-  });
-  const [symbol, setSymbol] = useState('AAPL');
-  const [timeframe, setTimeframe] = useState('60');
-  const [currentPrice, setCurrentPrice] = useState(150.0);
-  const [atr] = useState(1.2);
-  const [chartData, setChartData] = useState<CandleData[]>([]);
-  const [, setIsLoadingChart] = useState(false);
-  const [indicatorConfig, setIndicatorConfig] = useState<IndicatorConfig[]>([
-    { id: 'sma20', label: 'SMA 20', type: 'sma', period: 20, color: '#f97316', enabled: true },
-    { id: 'ema50', label: 'EMA 50', type: 'ema', period: 50, color: '#a855f7', enabled: false },
-    {
-      id: 'rsi14',
-      label: 'RSI 14',
-      type: 'rsi',
-      period: 14,
-      color: '#22d3ee',
-      enabled: false,
-      upperBand: 70,
-      lowerBand: 30,
-    },
-    {
-      id: 'macd',
-      label: 'MACD 12/26/9',
-      type: 'macd',
-      fastPeriod: 12,
-      slowPeriod: 26,
-      signalPeriod: 9,
-      color: '#34d399',
-      signalColor: '#facc15',
-      histogramColor: '#f87171',
-      enabled: false,
-    },
-  ]);
-  const [recentSymbols, setRecentSymbols] = useState<string[]>(['AAPL', 'MSFT', 'TSLA', 'BTC-USD']);
-  const [riskPreset, setRiskPreset] = useState<{
-    side: 'buy' | 'sell';
-    price: number;
-    stopLoss: number;
-    takeProfit: number;
-    quantity: number;
-  } | null>(null);
+  const chartContainerRef = useRef<HTMLDivElement | null>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
 
-  // Market snapshots (will be updated from real data)
-  const [marketSnapshots, setMarketSnapshots] = useState<MarketSnapshot[]>([
-    { symbol: 'AAPL', price: 150.25, change: 2.5, changePercent: 1.69, volume: 1250000 },
-    { symbol: 'MSFT', price: 380.5, change: -1.2, changePercent: -0.31, volume: 890000 },
-    { symbol: 'GOOGL', price: 142.3, change: 0.8, changePercent: 0.56, volume: 2100000 },
-    { symbol: 'TSLA', price: 245.75, change: -5.2, changePercent: -2.07, volume: 3200000 },
+  const [symbol, setSymbol] = useState('NIFTY');
+  const [timeframe, setTimeframe] = useState(TIMEFRAMES[0]);
+  const [candles, setCandles] = useState<CandlePoint[]>([]);
+  const [livePrice, setLivePrice] = useState<number | null>(null);
+  const [previousClose, setPreviousClose] = useState<number | null>(null);
+  const [streamStatus, setStreamStatus] = useState<'connecting' | 'live' | 'disconnected'>(
+    'connecting'
+  );
+  const [orderQty, setOrderQty] = useState(25);
+  const [orderPrice, setOrderPrice] = useState<number | ''>('');
+  const [notes, setNotes] = useState('');
+  const [alerts, setAlerts] = useState<
+    { id: string; price: number; direction: 'above' | 'below' }[]
+  >([
+    { id: '1', price: 22500, direction: 'above' },
+    { id: '2', price: 21350, direction: 'below' },
   ]);
 
-  // Risk metrics (will be calculated from real positions)
-  const [riskMetrics, setRiskMetrics] = useState<RiskMetrics>({
-    totalExposure: 50000,
-    dailyPnL: 1250.5,
-    marginUsed: 15000,
-    marginAvailable: 35000,
-    worstOpenTrade: -350.0,
-    maxDrawdown: 2.5,
-    portfolioValue: 100000,
-    riskScore: 45,
-  });
-
-  // Positions
-  const [openPositions, setOpenPositions] = useState<
-    Array<{ symbol: string; unrealizedPnL: number }>
-  >([]);
-
-  // AI Signal state
-  const [aiSignal, setAiSignal] = useState<AISignal | undefined>();
-  const [isGeneratingSignal, setIsGeneratingSignal] = useState(false);
-
-  // Safe Exit Config
-  const [safeExitConfig, setSafeExitConfig] = useState<SafeExitConfig>({
-    maxDrawdown: 5.0,
-    portfolioStopLoss: 2000,
-    volatilityThreshold: 2.0,
-    globalKillSwitch: false,
-  });
-
-  // Load persisted preferences
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const raw = localStorage.getItem(TRADE_PREFS_STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<TradePreferences>;
-      if (parsed.timeframe && typeof parsed.timeframe === 'string') {
-        setTimeframe(parsed.timeframe);
-      }
-      if (Array.isArray(parsed.indicators)) {
-        setIndicatorConfig(prev =>
-          prev.map(indicator => {
-            const saved = parsed.indicators?.find(item => item?.id === indicator.id);
-            return saved ? ({ ...indicator, ...saved } as IndicatorConfig) : indicator;
-          })
-        );
-      }
-    } catch (error) {
-      console.warn('[Trade] Failed to load trade preferences:', error);
-    }
-  }, []);
+  const priceChange = useMemo(() => {
+    if (livePrice == null || previousClose == null) return { abs: 0, pct: 0 };
+    const abs = livePrice - previousClose;
+    return { abs, pct: (abs / previousClose) * 100 };
+  }, [livePrice, previousClose]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const preferences: TradePreferences = {
-        timeframe,
-        indicators: indicatorConfig,
-      };
-      localStorage.setItem(TRADE_PREFS_STORAGE_KEY, JSON.stringify(preferences));
-    } catch (error) {
-      console.warn('[Trade] Failed to persist trade preferences:', error);
-    }
-  }, [timeframe, indicatorConfig]);
+    if (!chartContainerRef.current || chartRef.current) return;
+    const chart = createChart(chartContainerRef.current, {
+      layout: {
+        background: { type: ColorType.Solid, color: '#030711' },
+        textColor: '#e2e8f0',
+      },
+      width: chartContainerRef.current.clientWidth,
+      height: chartContainerRef.current.clientHeight,
+      grid: {
+        vertLines: { color: 'rgba(30,41,59,0.4)' },
+        horzLines: { color: 'rgba(30,41,59,0.4)' },
+      },
+      rightPriceScale: {
+        borderColor: 'rgba(51,65,85,0.6)',
+      },
+      timeScale: {
+        borderColor: 'rgba(51,65,85,0.6)',
+        timeVisible: true,
+        secondsVisible: false,
+      },
+    });
 
-  // Eco-balanced mode: Auto-hibernate on high RAM in Trade mode
-  useEffect(() => {
-    const checkMemoryAndHibernate = async () => {
-      try {
-        // Get memory usage from Redix metrics endpoint
-        const redixUrl = import.meta.env.VITE_REDIX_CORE_URL || 'http://localhost:8001';
-        const metricsResponse = await fetch(`${redixUrl}/metrics`).catch(() => null);
+    const series = chart.addCandlestickSeries({
+      upColor: '#22c55e',
+      downColor: '#ef4444',
+      borderUpColor: '#22c55e',
+      borderDownColor: '#ef4444',
+      wickUpColor: '#22c55e',
+      wickDownColor: '#ef4444',
+    });
 
-        if (metricsResponse?.ok) {
-          const metrics = await metricsResponse.json();
-          const memoryMB = metrics.memory || 0;
+    chartRef.current = chart;
+    seriesRef.current = series;
 
-          // If memory > 2GB, suggest hibernating inactive tabs
-          if (memoryMB > 2048) {
-            try {
-              if (typeof (ipc as any).efficiency?.hibernateInactiveTabs === 'function') {
-                await (ipc as any).efficiency.hibernateInactiveTabs();
-                console.debug(
-                  '[Trade] Auto-hibernated inactive tabs due to high memory:',
-                  memoryMB,
-                  'MB'
-                );
-              }
-            } catch (error) {
-              console.debug('[Trade] Auto-hibernate failed:', error);
-            }
-          }
-        }
-      } catch (error) {
-        console.debug('[Trade] Memory check failed:', error);
+    const handleResize = () => {
+      if (chartContainerRef.current) {
+        chart.applyOptions({ width: chartContainerRef.current.clientWidth });
       }
     };
 
-    // Check memory every 30 seconds
-    checkMemoryAndHibernate();
-    const interval = setInterval(checkMemoryAndHibernate, 30000);
-    return () => clearInterval(interval);
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      chart.remove();
+      chartRef.current = null;
+      seriesRef.current = null;
+    };
   }, []);
 
   useEffect(() => {
-    const normalized = symbol.toUpperCase();
-    setRecentSymbols(prev => {
-      if (prev[0] === normalized) return prev;
-      const next = [normalized, ...prev.filter(sym => sym !== normalized)];
-      return next.slice(0, 8);
-    });
-    setRiskPreset(null);
-  }, [symbol]);
+    if (!candles.length) return;
+    const last = candles[candles.length - 1];
+    setLivePrice(last.close);
+    if (candles.length > 1) {
+      setPreviousClose(candles[candles.length - 2].close);
+    }
+    if (orderPrice === '') {
+      setOrderPrice(Number(last.close.toFixed(2)));
+    }
+  }, [candles, orderPrice]);
 
-  // Load initial data
   useEffect(() => {
-    loadBalance();
-    loadPositions();
-    loadChartData();
-    loadMarketSnapshots();
-  }, []);
+    const controller = new AbortController();
+    async function loadHistorical() {
+      try {
+        const params = new URLSearchParams({
+          range: timeframe.range,
+          interval: timeframe.interval,
+        });
+        const response = await fetch(
+          `${API_BASE}/stock/historical/${encodeURIComponent(symbol)}?${params.toString()}`,
+          { signal: controller.signal }
+        );
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        const points: CandlePoint[] = payload?.candles || [];
+        setCandles(points);
+        seriesRef.current?.setData(points);
+        chartRef.current?.timeScale().fitContent();
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        console.error('[Trade] loadHistorical error', error);
+        toast.error('Unable to load historical data');
+      }
+    }
 
-  // Load chart data when symbol or timeframe changes
-  useEffect(() => {
-    loadChartData();
-    loadQuote();
+    loadHistorical();
+    return () => controller.abort();
   }, [symbol, timeframe]);
 
-  // Update quote periodically
   useEffect(() => {
-    const interval = setInterval(() => {
-      loadQuote();
-      loadPositions();
-      loadBalance();
-    }, 5000); // Update every 5 seconds
+    setStreamStatus('connecting');
+    const streamUrl = `${API_BASE}/stock/stream/${encodeURIComponent(symbol)}`;
+    const source = new EventSource(streamUrl);
 
-    return () => clearInterval(interval);
-  }, [symbol]);
+    source.onopen = () => setStreamStatus('live');
+    source.onerror = () => {
+      setStreamStatus('disconnected');
+      source.close();
+    };
 
-  // AI-powered trading signals using unified AI engine
-  useEffect(() => {
-    if (!symbol) return;
-
-    // Periodically fetch AI insights for current symbol
-    const fetchAISignal = async () => {
+    source.onmessage = event => {
       try {
-        setIsGeneratingSignal(true);
-
-        // Build trading context
-        const context: any = {
-          mode: 'trade',
-          symbol,
-          currentPrice,
-          timeframe,
-          riskMetrics: {
-            totalExposure: riskMetrics.totalExposure,
-            portfolioValue: riskMetrics.portfolioValue,
-            riskScore: riskMetrics.riskScore,
-          },
-          openPositions: openPositions.length,
-        };
-
-        // Fetch relevant trading memories
-        let relevantMemories: any[] = [];
-        try {
-          const memoryMatches = await semanticSearchMemories(
-            `${symbol} trading analysis ${currentPrice}`,
-            { limit: 3, minSimilarity: 0.6 }
-          );
-          relevantMemories = memoryMatches.map(m => ({
-            value: m.event.value,
-            metadata: m.event.metadata,
-            similarity: m.similarity,
-          }));
-        } catch (error) {
-          console.warn('[Trade] Failed to fetch memory context:', error);
-        }
-
-        if (relevantMemories.length > 0) {
-          context.memories = relevantMemories;
-        }
-
-        // Use unified AI engine for trading analysis
-        const tradingPrompt = `Analyze ${symbol} stock trading opportunity. Current price: $${currentPrice.toFixed(2)}. 
-Provide a trading signal (buy/sell/hold) with:
-1. Entry price recommendation
-2. Stop loss level (risk management)
-3. Take profit target
-4. Position size suggestion
-5. Confidence level (0-100)
-6. Rationale based on technical and fundamental analysis
-7. Risk/reward ratio
-8. Key contributing factors
-
-Format the response as structured trading analysis.`;
-
-        let streamedText = '';
-        let streamedResult: AITaskResult | null = null;
-
-        const aiResult = await aiEngine.runTask(
-          {
-            kind: 'agent',
-            prompt: tradingPrompt,
-            context,
-            mode: 'trade',
-            metadata: {
-              symbol,
-              currentPrice,
-              timeframe,
-            },
-            llm: {
-              temperature: 0.3, // Lower temperature for more consistent trading signals
-              maxTokens: 800,
-            },
-          },
-          event => {
-            if (event.type === 'token' && typeof event.data === 'string') {
-              streamedText += event.data;
-            } else if (event.type === 'done' && typeof event.data !== 'string') {
-              streamedResult = event.data as AITaskResult;
+        const payload = JSON.parse(event.data || '{}');
+        if (!payload.price || !payload.timestamp) return;
+        setLivePrice(payload.price);
+        setCandles(prev => {
+          if (!prev.length) return prev;
+          const last = prev[prev.length - 1];
+          const incomingTime = Math.floor(payload.timestamp / 1000);
+          const isSameBucket = incomingTime - last.time <= timeframe.seconds;
+          const nextPoint: CandlePoint = {
+            time: isSameBucket ? last.time : incomingTime,
+            open: isSameBucket ? last.open : last.close,
+            high: Math.max(payload.price, last.high),
+            low: Math.min(payload.price, last.low),
+            close: payload.price,
+            volume: payload.volume ?? 0,
+          };
+          const updated = isSameBucket
+            ? [...prev.slice(0, -1), nextPoint]
+            : [...prev, nextPoint].slice(-600);
+          // Update chart with new data
+          if (seriesRef.current) {
+            if (isSameBucket) {
+              // Update last candle - using type assertion for update method
+              (seriesRef.current as any).update(nextPoint);
+            } else {
+              // Add new candle - set all data
+              seriesRef.current.setData(updated);
             }
           }
-        );
-
-        const finalResult = streamedResult ?? aiResult;
-        const analysis = streamedText || finalResult?.text || '';
-
-        // Parse AI response to extract trading signal
-        // Try to extract structured data from the response
-        const actionMatch = analysis.match(/(?:signal|action|recommendation):\s*(buy|sell|hold)/i);
-        const confidenceMatch = analysis.match(/(?:confidence|certainty):\s*(\d+)/i);
-        const stopLossMatch = analysis.match(/(?:stop\s*loss|stop):\s*\$?([\d.]+)/i);
-        const takeProfitMatch = analysis.match(/(?:take\s*profit|target):\s*\$?([\d.]+)/i);
-        const riskRewardMatch = analysis.match(/(?:risk[-\s]?reward|r:r):\s*([\d.]+)/i);
-
-        const action = actionMatch
-          ? (actionMatch[1].toLowerCase() as 'buy' | 'sell' | 'hold')
-          : 'hold';
-        const confidence = confidenceMatch ? parseInt(confidenceMatch[1], 10) / 100 : 0.7;
-        const stopLoss = stopLossMatch ? parseFloat(stopLossMatch[1]) : currentPrice * 0.98;
-        const takeProfit = takeProfitMatch ? parseFloat(takeProfitMatch[1]) : currentPrice * 1.05;
-        const riskReward = riskRewardMatch ? parseFloat(riskRewardMatch[1]) : 2.5;
-
-        // Calculate position size based on risk metrics
-        const portfolioRisk = riskMetrics.portfolioValue * 0.02; // 2% portfolio risk
-        const riskPerShare = Math.abs(currentPrice - stopLoss);
-        const positionSize = riskPerShare > 0 ? Math.floor(portfolioRisk / riskPerShare) : 100;
-
-        setAiSignal({
-          id: `ai-signal-${Date.now()}`,
-          symbol,
-          action,
-          confidence: Math.round(confidence * 100),
-          entryPrice: currentPrice,
-          stopLoss,
-          takeProfit,
-          positionSize,
-          rationale: analysis.substring(0, 300),
-          contributingFactors: [
-            {
-              factor: 'ai_analysis',
-              weight: 0.6,
-              value: confidence,
-              impact: action === 'buy' ? 'positive' : action === 'sell' ? 'negative' : 'neutral',
-              description: `AI analysis using ${finalResult?.provider || 'unknown'} (${finalResult?.model || 'unknown'})`,
-            },
-            ...(finalResult?.citations?.length
-              ? [
-                  {
-                    factor: 'source_count',
-                    weight: 0.2,
-                    value: finalResult.citations.length / 10,
-                    impact: 'positive' as const,
-                    description: `${finalResult.citations.length} data sources analyzed`,
-                  },
-                ]
-              : []),
-          ],
-          modelVersion: finalResult?.model || 'unknown',
-          generatedAt: new Date().toISOString(),
-          expiresAt: new Date(Date.now() + 3600000).toISOString(), // 1 hour expiry
-          riskMetrics: {
-            maxLoss: Math.abs(currentPrice - stopLoss) * positionSize,
-            maxGain: Math.abs(takeProfit - currentPrice) * positionSize,
-            riskRewardRatio: riskReward,
-            winProbability: confidence,
-            portfolioRiskPercent:
-              ((Math.abs(currentPrice - stopLoss) * positionSize) / riskMetrics.portfolioValue) *
-              100,
-          },
+          return updated;
         });
       } catch (error) {
-        console.error('[Trade] AI signal generation failed:', error);
-        // Fallback to mock signal if AI fails
-        generateAISignal(symbol);
-      } finally {
-        setIsGeneratingSignal(false);
+        console.warn('[Trade] stream parse error', error);
       }
     };
 
-    // Fetch AI signal every 30 seconds
-    fetchAISignal();
-    const interval = setInterval(fetchAISignal, 30000);
-    return () => clearInterval(interval);
-  }, [symbol, currentPrice, timeframe, riskMetrics, openPositions]);
+    return () => source.close();
+  }, [symbol, timeframe]);
 
-  const loadBalance = async () => {
-    try {
-      const balanceData = await ipc.trade.getBalance();
-      setBalance(balanceData);
-      // Update risk metrics with real balance
-      setRiskMetrics(prev => ({
-        ...prev,
-        portfolioValue: balanceData.portfolioValue,
-        marginAvailable: balanceData.buyingPower - balanceData.cash,
-      }));
-    } catch (error) {
-      console.error('Failed to load balance:', error);
+  const handleOrder = (side: 'BUY' | 'SELL') => {
+    if (livePrice == null) {
+      toast.error('Live price unavailable');
+      return;
     }
+    const executionPrice = orderPrice === '' ? livePrice : Number(orderPrice);
+    toast.success(`${side} order sent: ${orderQty} ${symbol} @ ₹${executionPrice.toFixed(2)}`);
+    setNotes('');
   };
 
-  const loadPositions = async () => {
-    try {
-      const { positions } = await ipc.trade.getPositions();
-      const positionsList = positions.map(pos => ({
-        symbol: pos.symbol,
-        unrealizedPnL: pos.unrealizedPnL,
-      }));
-      setOpenPositions(positionsList);
-
-      // Calculate risk metrics from positions
-      const totalExposure = positions.reduce(
-        (sum, pos) => sum + pos.quantity * pos.currentPrice,
-        0
-      );
-      const dailyPnL = positions.reduce((sum, pos) => sum + pos.unrealizedPnL + pos.realizedPnL, 0);
-      const worstTrade = positions.reduce(
-        (worst, pos) => (pos.unrealizedPnL < worst ? pos.unrealizedPnL : worst),
-        0
-      );
-
-      setRiskMetrics(prev => ({
-        ...prev,
-        totalExposure,
-        dailyPnL,
-        worstOpenTrade: worstTrade,
-      }));
-    } catch (error) {
-      console.error('Failed to load positions:', error);
-    }
-  };
-
-  const loadQuote = async () => {
-    try {
-      const quote = await ipc.trade.getQuote(symbol);
-      setCurrentPrice(quote.last);
-      // Update market snapshot for current symbol
-      setMarketSnapshots(prev =>
-        prev.map(snap =>
-          snap.symbol === symbol
-            ? {
-                ...snap,
-                price: quote.last,
-                change: quote.last - (snap.price - snap.change),
-                changePercent:
-                  ((quote.last - (snap.price - snap.change)) / (snap.price - snap.change)) * 100,
-                volume: quote.volume,
-              }
-            : snap
-        )
-      );
-    } catch (error) {
-      console.error('Failed to load quote:', error);
-    }
-  };
-
-  const loadChartData = async () => {
-    setIsLoadingChart(true);
-    try {
-      const to = Math.floor(Date.now() / 1000);
-      const from = to - 86400 * 7; // 7 days of data
-      const { candles } = await ipc.trade.getCandles({
-        symbol,
-        timeframe,
-        from,
-        to,
-      });
-
-      if (candles.length > 0) {
-        setChartData(candles);
-      } else {
-        // Generate mock data if no real data available
-        generateMockChartData();
-      }
-    } catch (error) {
-      console.error('Failed to load chart data:', error);
-      generateMockChartData();
-    } finally {
-      setIsLoadingChart(false);
-    }
-  };
-
-  const generateMockChartData = () => {
-    const mockData: CandleData[] = [];
-    const now = Math.floor(Date.now() / 1000);
-    let price = currentPrice;
-
-    for (let i = 100; i >= 0; i--) {
-      const change = (Math.random() - 0.5) * 2;
-      price += change;
-      const open = price;
-      const close = price + (Math.random() - 0.5) * 1;
-      const high = Math.max(open, close) + Math.random() * 0.5;
-      const low = Math.min(open, close) - Math.random() * 0.5;
-
-      mockData.push({
-        time: (now - i * 60) as any,
-        open,
-        high,
-        low,
-        close,
-        volume: Math.floor(Math.random() * 1000000),
-      });
-    }
-
-    setChartData(mockData);
-  };
-
-  const loadMarketSnapshots = async () => {
-    // Load quotes for all snapshot symbols
-    const symbols = ['AAPL', 'MSFT', 'GOOGL', 'TSLA'];
-    try {
-      const quotes = await Promise.all(
-        symbols.map(sym => ipc.trade.getQuote(sym).catch(() => null))
-      );
-      setMarketSnapshots(prev =>
-        prev.map((snap, idx) => {
-          const quote = quotes[idx];
-          if (quote) {
-            return {
-              ...snap,
-              price: quote.last,
-              volume: quote.volume,
-            };
-          }
-          return snap;
-        })
-      );
-    } catch (error) {
-      console.error('Failed to load market snapshots:', error);
-    }
-  };
-
-  const handleToggleIndicator = (id: string) => {
-    setIndicatorConfig(prev =>
-      prev.map(indicator =>
-        indicator.id === id ? { ...indicator, enabled: !indicator.enabled } : indicator
-      )
-    );
-  };
-
-  const handleUpdateIndicator = (id: string, updates: Partial<IndicatorConfig>) => {
-    setIndicatorConfig(prev =>
-      prev.map(indicator =>
-        indicator.id === id ? ({ ...indicator, ...updates } as IndicatorConfig) : indicator
-      )
-    );
-  };
-
-  const handleTimeframeChange = (nextTimeframe: string) => {
-    setTimeframe(nextTimeframe);
-  };
-
-  const handleSymbolSelect = (nextSymbol: string) => {
-    const normalized = nextSymbol.toUpperCase();
-    setSymbol(normalized);
-    generateAISignal(normalized);
-  };
-
-  const handleRiskPlanApply = (plan: RiskPlanSummary) => {
-    setRiskPreset({
-      side: plan.direction === 'long' ? 'buy' : 'sell',
-      price: plan.entryPrice,
-      stopLoss: plan.stopLoss,
-      takeProfit: plan.takeProfit,
-      quantity: plan.positionSize || 1,
-    });
-  };
-
-  // Generate mock AI signal
-  const generateAISignal = async (sym: string) => {
-    setIsGeneratingSignal(true);
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500));
-
-    const mockSignal: AISignal = {
-      id: `signal-${Date.now()}`,
-      symbol: sym,
-      action: 'buy',
-      confidence: 72,
-      entryPrice: currentPrice,
-      stopLoss: currentPrice * 0.98,
-      takeProfit: currentPrice * 1.03,
-      positionSize: 100,
-      rationale:
-        'Rising volume (1.5x average) combined with RSI oversold (42) suggests mean reversion opportunity. MACD showing bullish crossover.',
-      contributingFactors: [
-        {
-          factor: 'volume_spike',
-          weight: 0.35,
-          value: 1.52,
-          impact: 'positive',
-          description: 'Volume 1.52x 20-day average indicates strong interest',
-        },
-        {
-          factor: 'rsi_oversold',
-          weight: 0.28,
-          value: 42,
-          impact: 'positive',
-          description: 'RSI at 42 suggests oversold condition, potential bounce',
-        },
-        {
-          factor: 'macd_crossover',
-          weight: 0.22,
-          value: 0.15,
-          impact: 'positive',
-          description: 'MACD line crossed above signal line (bullish)',
-        },
-      ],
-      modelVersion: 'signal-v2.1.3',
-      generatedAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-      riskMetrics: {
-        maxLoss: 350,
-        maxGain: 550,
-        riskRewardRatio: 1.57,
-        winProbability: 0.68,
-        portfolioRiskPercent: 2.1,
+  const addAlert = () => {
+    if (orderPrice === '') return;
+    setAlerts(prev => [
+      ...prev,
+      {
+        id: String(Date.now()),
+        price: Number(orderPrice),
+        direction: 'above',
       },
-    };
-
-    setAiSignal(mockSignal);
-    setIsGeneratingSignal(false);
+    ]);
+    toast.success('Price alert added');
   };
 
-  // Handle order submission
-  const handleOrderSubmit = async (order: OrderRequest) => {
-    try {
-      await ipc.trade.placeOrder({
-        symbol: order.symbol,
-        side: order.side,
-        quantity: order.quantity,
-        orderType: order.orderType,
-        limitPrice: order.limitPrice,
-        stopPrice: order.stopPrice,
-        timeInForce: order.timeInForce || 'day',
-        bracket:
-          order.bracket &&
-          order.bracket.stopLoss !== undefined &&
-          order.bracket.takeProfit !== undefined
-            ? {
-                stopLoss: order.bracket.stopLoss,
-                takeProfit: order.bracket.takeProfit,
-                stopLossType: order.bracket.stopLossType,
-                takeProfitType: order.bracket.takeProfitType,
-              }
-            : undefined,
-        trailingStop: order.trailingStop,
-        paper: order.paper ?? true,
-        aiSignalId: aiSignal?.id,
-      });
+  const isUp = priceChange.pct >= 0;
 
-      // Reload balance and positions
-      await loadBalance();
-      await loadPositions();
-
-      // Show success notification with toast
-      toast.success(
-        `Order placed: ${order.side.toUpperCase()} ${order.quantity} ${order.symbol}${order.paper ? ' (Paper)' : ''}`
-      );
-    } catch (error) {
-      console.error('Failed to place order:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      toast.error(`Failed to place order: ${errorMessage}`);
-
-      // Retry logic for network errors
-      if (
-        errorMessage.includes('network') ||
-        errorMessage.includes('timeout') ||
-        errorMessage.includes('fetch')
-      ) {
-        const retry = window.confirm('Network error detected. Would you like to retry?');
-        if (retry) {
-          // Retry after a short delay
-          setTimeout(() => {
-            handleOrderSubmit(order);
-          }, 1000);
-        }
+  const watchlistView = useMemo(() => {
+    return WATCHLIST.map((ticker, index) => {
+      if (ticker === symbol && livePrice != null) {
+        return { symbol: ticker, price: livePrice, change: priceChange.pct };
       }
-    }
-  };
-
-  // AI-powered position sizing helper
-  const calculatePositionSize = async (
-    entryPrice: number,
-    stopLoss: number,
-    riskAmount: number = riskMetrics.portfolioValue * 0.02 // 2% default
-  ): Promise<number> => {
-    try {
-      const riskPerShare = Math.abs(entryPrice - stopLoss);
-      if (riskPerShare <= 0) return 100; // Default if invalid
-
-      // Basic calculation
-      let positionSize = Math.floor(riskAmount / riskPerShare);
-
-      // Use AI to refine position size if available
-      try {
-        const context: any = {
-          mode: 'trade',
-          symbol,
-          entryPrice,
-          stopLoss,
-          riskAmount,
-          portfolioValue: riskMetrics.portfolioValue,
-          currentExposure: riskMetrics.totalExposure,
-        };
-
-        const sizingPrompt = `Calculate optimal position size for ${symbol}:
-- Entry price: $${entryPrice.toFixed(2)}
-- Stop loss: $${stopLoss.toFixed(2)}
-- Risk amount: $${riskAmount.toFixed(2)} (${((riskAmount / riskMetrics.portfolioValue) * 100).toFixed(2)}% of portfolio)
-- Current portfolio value: $${riskMetrics.portfolioValue.toFixed(2)}
-- Current total exposure: $${riskMetrics.totalExposure.toFixed(2)}
-
-Consider:
-1. Portfolio concentration limits (max 10% per position)
-2. Liquidity constraints
-3. Volatility-adjusted sizing
-4. Correlation with existing positions
-
-Provide the recommended position size (number of shares) and brief rationale.`;
-
-        const aiResult = await aiEngine.runTask({
-          kind: 'agent',
-          prompt: sizingPrompt,
-          context,
-          mode: 'trade',
-          metadata: { symbol, entryPrice, stopLoss },
-          llm: { temperature: 0.2, maxTokens: 300 },
-        });
-
-        // Try to extract position size from AI response
-        const sizeMatch = aiResult.text.match(/(?:position\s*size|shares|quantity):\s*(\d+)/i);
-        if (sizeMatch) {
-          const aiSize = parseInt(sizeMatch[1], 10);
-          // Use AI suggestion if it's reasonable (within 50-200% of calculated)
-          if (aiSize > 0 && aiSize >= positionSize * 0.5 && aiSize <= positionSize * 2) {
-            positionSize = aiSize;
-          }
-        }
-      } catch (aiError) {
-        console.debug('[Trade] AI position sizing failed, using calculated value:', aiError);
-      }
-
-      // Apply portfolio concentration limit (max 10% per position)
-      const maxPositionValue = riskMetrics.portfolioValue * 0.1;
-      const maxSharesByValue = Math.floor(maxPositionValue / entryPrice);
-      positionSize = Math.min(positionSize, maxSharesByValue);
-
-      return Math.max(1, positionSize); // At least 1 share
-    } catch (error) {
-      console.error('[Trade] Position sizing calculation failed:', error);
-      return 100; // Fallback
-    }
-  };
-
-  // Handle AI signal application
-  const handleApplySignal = async (signal: AISignal) => {
-    // Auto-fill order entry with signal data
-    setCurrentPrice(signal.entryPrice);
-
-    // Calculate optimal position size
-    const optimalSize = await calculatePositionSize(
-      signal.entryPrice,
-      signal.stopLoss ?? signal.entryPrice * 0.98, // Default 2% stop loss if not provided
-      riskMetrics.portfolioValue * 0.02 // 2% risk
-    );
-
-    // Update signal with calculated position size
-    setAiSignal({
-      ...signal,
-      positionSize: optimalSize,
+      const base = 1500 + index * 120;
+      const swing = Math.sin(Date.now() / 60000 + index) * 40;
+      const pseudoPrice = Math.round((base + swing) * 100) / 100;
+      const pseudoChange = Math.sin(Date.now() / 300000 + index) * 1.2;
+      return { symbol: ticker, price: pseudoPrice, change: pseudoChange };
     });
+  }, [symbol, livePrice, priceChange]);
 
-    console.log('Applying signal:', signal, 'with position size:', optimalSize);
-  };
+  const totalPnL = useMemo(
+    () => MOCK_POSITIONS.reduce((sum, position) => sum + position.pnl, 0),
+    []
+  );
 
-  // Handle safe exit actions
-  const handleKillSwitch = (enabled: boolean) => {
-    console.log('Kill switch:', enabled ? 'ON' : 'OFF');
-    // TODO: Implement kill switch logic via IPC
-  };
-
-  const handleCloseAll = async () => {
-    try {
-      // Close all positions
-      for (const pos of openPositions) {
-        await ipc.trade.closePosition(pos.symbol);
-      }
-      await loadPositions();
-      await loadBalance();
-      toast.success('All positions closed');
-    } catch (error) {
-      console.error('Failed to close all positions:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      toast.error(`Failed to close all positions: ${errorMessage}`);
-
-      // Retry logic
-      if (errorMessage.includes('network') || errorMessage.includes('timeout')) {
-        const retry = window.confirm('Network error. Retry closing positions?');
-        if (retry) {
-          setTimeout(() => handleCloseAll(), 1000);
-        }
-      }
-    }
-  };
-
-  const handleClosePosition = async (sym: string) => {
-    try {
-      const result = await ipc.trade.closePosition(sym);
-      if (result.success) {
-        await loadPositions();
-        await loadBalance();
-        toast.success(`Position ${sym} closed`);
-      } else {
-        const errorMsg = result?.error || 'Unknown error';
-        toast.error(`Failed to close position: ${errorMsg}`);
-
-        // Retry logic for network errors
-        if (errorMsg.includes('network') || errorMsg.includes('timeout')) {
-          const retry = window.confirm(`Retry closing position ${sym}?`);
-          if (retry) {
-            setTimeout(() => {
-              handleClosePosition(sym).catch(console.error);
-            }, 1000);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Failed to close position:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      toast.error(`Failed to close position: ${errorMessage}`);
-
-      // Retry logic for network errors
-      if (
-        errorMessage.includes('network') ||
-        errorMessage.includes('timeout') ||
-        errorMessage.includes('fetch')
-      ) {
-        const retry = window.confirm(`Network error. Retry closing position ${sym}?`);
-        if (retry) {
-          setTimeout(() => {
-            handleClosePosition(sym).catch(console.error);
-          }, 1000);
-        }
-      }
-    }
-  };
-
-  // Update price when symbol changes
-  useEffect(() => {
-    loadQuote();
-  }, [symbol]);
+  const aiInsight = useMemo(
+    () => ({
+      title: `${symbol} liquidity pulse`,
+      summary:
+        'Volatility creeping higher as FIIs add exposure. Consider scaling entries in tranches with 0.75% risk per leg. Momentum bias stays bullish while price holds above VWAP.',
+    }),
+    [symbol]
+  );
 
   return (
-    <div className="mode-theme mode-theme--trade h-full w-full overflow-hidden">
-      <div className="h-full w-full p-4 space-y-4 overflow-y-auto">
-        {/* Dashboard */}
-        <TradeDashboard
-          marketSnapshots={marketSnapshots}
-          riskMetrics={riskMetrics}
-          onSymbolClick={handleSymbolSelect}
-        />
-
-        {/* Main Workspace */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Chart - Takes 2 columns on large screens */}
-          <div className="lg:col-span-2 space-y-4">
-            <TimeframeSelector value={timeframe} onChange={handleTimeframeChange} />
-            <TradingViewChart
-              symbol={symbol}
-              timeframe={timeframe}
-              data={chartData}
-              height={600}
-              indicatorConfig={indicatorConfig}
-            />
-            <IndicatorsPanel
-              indicators={indicatorConfig}
-              onToggle={handleToggleIndicator}
-              onUpdate={handleUpdateIndicator}
-            />
-
-            {/* Positions and Order Blotter */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Open Positions */}
-              <div className="bg-neutral-800 rounded-lg border border-neutral-700 p-4">
-                <h3 className="font-semibold text-sm mb-3">Open Positions</h3>
-                {openPositions.length === 0 ? (
-                  <div className="text-sm text-neutral-400">No open positions</div>
-                ) : (
-                  <div className="space-y-2">
-                    {openPositions.map(pos => (
-                      <div
-                        key={pos.symbol}
-                        className="flex items-center justify-between p-2 bg-neutral-900 rounded text-sm"
-                      >
-                        <span className="font-semibold">{pos.symbol}</span>
-                        <span
-                          className={pos.unrealizedPnL >= 0 ? 'text-green-400' : 'text-red-400'}
-                        >
-                          ${pos.unrealizedPnL.toFixed(2)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Order Blotter */}
-              <OrderBlotter showPaperOnly={true} />
+    <div className="flex h-full flex-col bg-[#020617] text-slate-100">
+      <header className="border-b border-slate-800 bg-[#040b1d]/80 backdrop-blur">
+        <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center">
+            <div className="flex items-center gap-2">
+              <select
+                value={symbol}
+                onChange={e => setSymbol(e.target.value)}
+                className="rounded-2xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                {WATCHLIST.map(item => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={() => setSymbol(symbol)}
+                className="rounded-full border border-slate-700/60 p-2 text-slate-300 hover:border-slate-500 hover:text-white"
+                title="Refresh data"
+              >
+                <RefreshCcw size={16} />
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {TIMEFRAMES.map(frame => (
+                <button
+                  key={frame.id}
+                  onClick={() => setTimeframe(frame)}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+                    timeframe.id === frame.id
+                      ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30'
+                      : 'bg-slate-800 text-slate-300 hover:text-white'
+                  }`}
+                >
+                  {frame.label}
+                </button>
+              ))}
             </div>
           </div>
-
-          {/* Right Sidebar */}
-          <div className="space-y-4">
-            <Watchlist activeSymbol={symbol} onSelectSymbol={handleSymbolSelect} />
-            <SymbolSearch
-              activeSymbol={symbol}
-              recentSymbols={recentSymbols}
-              onSelect={handleSymbolSelect}
-            />
-
-            {/* Order Entry */}
-            <OrderEntry
-              symbol={symbol}
-              currentPrice={currentPrice}
-              atr={atr}
-              onSubmit={handleOrderSubmit}
-              preset={riskPreset ?? undefined}
-              aiSuggestion={
-                aiSignal && (aiSignal.action === 'buy' || aiSignal.action === 'sell')
-                  ? {
-                      action: aiSignal.action as 'buy' | 'sell',
-                      price: aiSignal.entryPrice,
-                      confidence: aiSignal.confidence ?? 0,
-                      stopLoss: aiSignal.stopLoss,
-                      takeProfit: aiSignal.takeProfit,
-                    }
-                  : undefined
-              }
-            />
-
-            <RiskManager
-              symbol={symbol}
-              currentPrice={currentPrice}
-              atr={atr}
-              portfolioValue={balance.portfolioValue}
-              balance={balance}
-              riskMetrics={riskMetrics}
-              openPositions={openPositions}
-              onApplyPlan={handleRiskPlanApply}
-            />
-
-            {/* AI Signal Panel */}
-            <AISignalPanel
-              symbol={symbol}
-              signal={aiSignal}
-              onApplySignal={handleApplySignal}
-              onGenerateSignal={generateAISignal}
-              isLoading={isGeneratingSignal}
-            />
-
-            {/* Safe Exit Controls */}
-            <SafeExitControls
-              config={safeExitConfig}
-              onConfigChange={setSafeExitConfig}
-              onKillSwitch={handleKillSwitch}
-              onCloseAll={handleCloseAll}
-              onClosePosition={handleClosePosition}
-              openPositions={openPositions}
-            />
+          <div className="text-right">
+            <div className="text-3xl font-bold text-white">
+              {livePrice ? `₹${livePrice.toFixed(2)}` : '--'}
+            </div>
+            <div
+              className={`flex items-center justify-end text-sm ${
+                isUp ? 'text-emerald-400' : 'text-rose-400'
+              }`}
+            >
+              {isUp ? <ArrowUpRight size={16} /> : <ArrowDownRight size={16} />}
+              <span className="ml-1">
+                {priceChange.abs.toFixed(2)} ({priceChange.pct.toFixed(2)}%)
+              </span>
+            </div>
+            <div className="text-xs text-slate-400">Data: {streamStatus.toUpperCase()}</div>
           </div>
         </div>
+      </header>
+
+      <div className="flex flex-1 flex-col lg:flex-row">
+        <section className="relative flex-1 overflow-hidden">
+          <div ref={chartContainerRef} className="h-[420px] lg:h-full" />
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-[#020617]" />
+          <div className="absolute right-4 top-4 rounded-2xl border border-slate-700/60 bg-slate-900/80 px-4 py-3 text-sm text-slate-300">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-slate-200">Live status</span>
+              <span
+                className={`text-xs font-semibold ${
+                  streamStatus === 'live' ? 'text-emerald-400' : 'text-amber-300'
+                }`}
+              >
+                {streamStatus.toUpperCase()}
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-slate-400">
+              Finnhub websocket ticks + Yahoo Finance history blend.
+            </p>
+          </div>
+        </section>
+
+        <aside className="w-full border-t border-slate-800 bg-[#050b16] p-4 lg:w-[360px] lg:border-l lg:border-t-0 lg:max-h-full lg:overflow-y-auto">
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Order ticket</p>
+                  <p className="text-lg font-semibold text-white">{symbol}</p>
+                </div>
+                <Wallet2 size={20} className="text-indigo-300" />
+              </div>
+              <div className="space-y-3">
+                <label className="text-xs text-slate-400">
+                  Price
+                  <input
+                    type="number"
+                    value={orderPrice}
+                    onChange={e =>
+                      setOrderPrice(e.target.value === '' ? '' : Number(e.target.value))
+                    }
+                    className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none"
+                    placeholder="Market"
+                  />
+                </label>
+                <label className="text-xs text-slate-400">
+                  Quantity
+                  <input
+                    type="number"
+                    min={1}
+                    value={orderQty}
+                    onChange={e => setOrderQty(Math.max(1, Number(e.target.value)))}
+                    className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none"
+                  />
+                </label>
+                <label className="text-xs text-slate-400">
+                  Notes
+                  <textarea
+                    value={notes}
+                    onChange={e => setNotes(e.target.value)}
+                    rows={2}
+                    className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none"
+                    placeholder="Stop @ 0.8%, partial exit @ VWAP..."
+                  />
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleOrder('BUY')}
+                    className="flex-1 rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-950 hover:bg-emerald-400"
+                  >
+                    Buy
+                  </button>
+                  <button
+                    onClick={() => handleOrder('SELL')}
+                    className="flex-1 rounded-xl bg-rose-500 px-4 py-2 text-sm font-semibold text-rose-950 hover:bg-rose-400"
+                  >
+                    Sell
+                  </button>
+                </div>
+                <button
+                  onClick={addAlert}
+                  className="w-full rounded-xl border border-indigo-500/40 px-4 py-2 text-xs font-semibold text-indigo-200 hover:border-indigo-400"
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <BellRing size={14} />
+                    Add price alert
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+              <div className="mb-3 flex items-center justify-between text-xs uppercase tracking-[0.2em] text-slate-500">
+                Watchlist
+                <Sparkles size={16} className="text-indigo-300" />
+              </div>
+              <div className="space-y-2">
+                {watchlistView.map(row => (
+                  <button
+                    key={row.symbol}
+                    onClick={() => setSymbol(row.symbol)}
+                    className="flex w-full items-center justify-between rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2 text-left text-sm hover:border-indigo-500/60"
+                  >
+                    <div>
+                      <p className="font-semibold text-white">{row.symbol}</p>
+                      <p className="text-xs text-slate-500">₹{row.price.toFixed(2)}</p>
+                    </div>
+                    <div
+                      className={`text-xs font-semibold ${
+                        row.change >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                      }`}
+                    >
+                      {row.change >= 0 ? '+' : ''}
+                      {row.change.toFixed(2)}%
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+              <div className="mb-3 flex items-center justify-between text-xs uppercase tracking-[0.2em] text-slate-500">
+                Positions
+                <TrendingUp
+                  size={16}
+                  className={totalPnL >= 0 ? 'text-emerald-300' : 'text-rose-300'}
+                />
+              </div>
+              <div className="space-y-2">
+                {MOCK_POSITIONS.map(position => (
+                  <div
+                    key={position.symbol}
+                    className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm"
+                  >
+                    <div>
+                      <p className="font-semibold text-white">{position.symbol}</p>
+                      <p className="text-xs text-slate-500">
+                        {position.qty} @ ₹{position.avg.toFixed(2)}
+                      </p>
+                    </div>
+                    <div
+                      className={`text-xs font-semibold ${
+                        position.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                      }`}
+                    >
+                      {position.pnl >= 0 ? '+' : ''}
+                      {position.pnl.toFixed(1)}%
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-900/60 p-4">
+              <div className="mb-3 flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-slate-400">
+                <Bot size={14} />
+                AI Assistant
+              </div>
+              <p className="text-sm font-semibold text-white">{aiInsight.title}</p>
+              <p className="mt-2 text-xs text-slate-300">{aiInsight.summary}</p>
+              <button className="mt-3 inline-flex items-center gap-2 rounded-full bg-indigo-600 px-3 py-1 text-xs font-semibold text-white">
+                <Sparkles size={14} />
+                Generate plan
+              </button>
+            </div>
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+              <div className="mb-3 flex items-center justify-between text-xs uppercase tracking-[0.2em] text-slate-500">
+                Alerts
+                <TrendingDown size={16} className="text-amber-300" />
+              </div>
+              <div className="space-y-2">
+                {alerts.map(alert => (
+                  <div
+                    key={alert.id}
+                    className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm"
+                  >
+                    <span className="text-slate-200">
+                      {alert.direction === 'above' ? '▲' : '▼'} ₹{alert.price.toFixed(2)}
+                    </span>
+                    <span className="text-xs text-slate-500">pending</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <div className="sticky bottom-0 flex gap-3 border-t border-slate-800 bg-[#050b16] p-3 lg:hidden">
+        <button
+          onClick={() => handleOrder('BUY')}
+          className="flex-1 rounded-2xl bg-emerald-500 px-4 py-3 text-base font-semibold text-emerald-950"
+        >
+          Buy
+        </button>
+        <button
+          onClick={() => handleOrder('SELL')}
+          className="flex-1 rounded-2xl bg-rose-500 px-4 py-3 text-base font-semibold text-rose-950"
+        >
+          Sell
+        </button>
       </div>
     </div>
   );

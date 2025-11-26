@@ -158,7 +158,7 @@ export function setupPreloadHook(): void {
   }
 
   // Create preload function that extensions can call
-  (window as any).__regenExtensionsPreload = (api: typeof window.regenExtensions) => {
+  (window as any).__regenExtensionsPreload = (_api: typeof window.regenExtensions) => {
     log.info('[ExtensionsAPI] Preload hook called');
     // Extensions can use this to register before app initialization
   };

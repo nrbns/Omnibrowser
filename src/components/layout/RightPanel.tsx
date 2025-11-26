@@ -23,13 +23,9 @@ import { AgentPlan, AgentStep, ConsentRequest } from '../../lib/ipc-events';
 import { useIPCEvent } from '../../lib/use-ipc-event';
 import { AgentPlanner } from '../AgentPlanner';
 import { useConsentOverlayStore } from '../../state/consentOverlayStore';
-import { ExtensionNexusPanel } from '../plugins';
-import { EcoImpactSimulator } from '../eco';
-import { TrustWeaverPanel } from '../trust';
 import { PrivacyDashboard } from '../privacy/PrivacyDashboard';
 import type { ConsentRecord, ConsentActionType } from '../../types/consent';
 import { formatDistanceToNow } from 'date-fns';
-import { IdentityVaultPanel } from '../identity';
 import { AIDockPanel } from '../ai/AIDockPanel';
 import { EnhancedAIPanel } from '../ai/EnhancedAIPanel';
 
@@ -365,13 +361,29 @@ export function RightPanel({ open, onClose }: RightPanelProps) {
 
             {activeTab === 'privacy' && <PrivacyDashboard />}
 
-            {activeTab === 'trust' && <TrustWeaverPanel />}
+            {activeTab === 'trust' && (
+              <div className="text-xs text-gray-500 text-center py-8">
+                Trust panel is not available in this build
+              </div>
+            )}
 
-            {activeTab === 'eco' && <EcoImpactSimulator />}
+            {activeTab === 'eco' && (
+              <div className="text-xs text-gray-500 text-center py-8">
+                Eco impact panel is not available in this build
+              </div>
+            )}
 
-            {activeTab === 'identity' && <IdentityVaultPanel />}
+            {activeTab === 'identity' && (
+              <div className="text-xs text-gray-500 text-center py-8">
+                Identity vault panel is not available in this build
+              </div>
+            )}
 
-            {activeTab === 'nexus' && <ExtensionNexusPanel />}
+            {activeTab === 'nexus' && (
+              <div className="text-xs text-gray-500 text-center py-8">
+                Extension nexus panel is not available in this build
+              </div>
+            )}
           </div>
 
           {/* Footer: Controls */}

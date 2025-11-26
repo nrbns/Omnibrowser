@@ -25,9 +25,9 @@ export const MODES: Record<ModeId, ModeConfig> = {
   Browse: {
     id: 'Browse',
     label: 'Browse',
-    enabled: false,
-    comingSoon: true,
-    description: 'Standard browsing returns after the Research alpha.',
+    enabled: true,
+    comingSoon: false,
+    description: 'Standard browsing with lightweight enhancements.',
   },
   Research: {
     id: 'Research',
@@ -39,9 +39,9 @@ export const MODES: Record<ModeId, ModeConfig> = {
   Trade: {
     id: 'Trade',
     label: 'Trade',
-    enabled: false,
-    comingSoon: true,
-    description: 'Trading mode (coming after the Research alpha)',
+    enabled: true,
+    comingSoon: false,
+    description: 'Trading mode with TradingView integration (beta)',
   },
   Games: {
     id: 'Games',
@@ -81,7 +81,7 @@ export const MODES: Record<ModeId, ModeConfig> = {
 };
 
 export const ENABLED_MODES = Object.values(MODES).filter(m => m.enabled);
-export const PRIMARY_MODES: ModeId[] = ['Research'];
+export const PRIMARY_MODES: ModeId[] = ['Browse', 'Research', 'Trade'];
 export const TIER1_MODE: ModeId = 'Research';
 
 /**

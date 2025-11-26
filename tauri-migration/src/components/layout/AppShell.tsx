@@ -15,6 +15,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { useTabGraphStore } from '../../state/tabGraphStore';
 import { isDevEnv, isElectronRuntime } from '../../lib/env';
 import { TabContentSurface } from './TabContentSurface';
+import { MobileDock } from './MobileDock';
 // Voice components disabled by user request
 // import { VoiceTips } from '../voice/VoiceTips';
 // import VoiceCompanion from '../voice/VoiceCompanion';
@@ -268,9 +269,6 @@ const PermissionPrompt = React.lazy(() =>
 const ConsentPrompt = React.lazy(() =>
   import('../Overlays/ConsentPrompt').then(m => ({ default: m.ConsentPrompt }))
 );
-const AgentOverlay = React.lazy(() =>
-  import('../AgentOverlay').then(m => ({ default: m.AgentOverlay }))
-);
 const RegenSidebar = React.lazy(() =>
   import('../regen/RegenSidebar').then(m => ({ default: m.RegenSidebar }))
 );
@@ -313,6 +311,7 @@ export function AppShell() {
   const memorySidebarOpen = useAppStore(state => state.memorySidebarOpen);
   const setMemorySidebarOpen = useAppStore(state => state.setMemorySidebarOpen);
   const setMode = useAppStore(state => state.setMode);
+  const currentMode = useAppStore(state => state.mode);
   const [redixDebugOpen, setRedixDebugOpen] = useState(false);
   const isDev = isDevEnv();
   const themePreference = useSettingsStore(state => state.appearance.theme);
@@ -485,6 +484,7 @@ export function AppShell() {
     typeof window !== 'undefined' ? window.innerWidth : 1920
   );
   const isDesktopLayout = viewportWidth >= 1280;
+  const mobilePanelWidth = Math.min(Math.max(viewportWidth - 32, 280), 420);
 
   // Notify main process when right panel opens/closes so BrowserView bounds can be updated
   useEffect(() => {
@@ -1534,6 +1534,7 @@ export function AppShell() {
                 showAddressBar={true}
                 showQuickActions={true}
                 currentUrl={tabsState.tabs.find(t => t.id === tabsState.activeId)?.url}
+                onToggleLibrary={() => setUnifiedSidePanelOpen(true)}
                 onModeChange={async (mode: string) => {
                   // Map mode string to AppState mode
                   const modeMap: Record<string, 'Browse' | 'Research' | 'Trade'> = {
@@ -1735,7 +1736,7 @@ export function AppShell() {
         ref={bottomChromeRef}
         className="flex-none shrink-0 border-t border-slate-800 bg-slate-950"
       >
-        {!isFullscreen && (
+        {!isFullscreen && isDesktopLayout && (
           <Suspense fallback={null}>
             <ErrorBoundary componentName="BottomStatus">
               <BottomStatus />
@@ -1744,14 +1745,17 @@ export function AppShell() {
         )}
       </div>
 
+      {!isFullscreen && !isDesktopLayout && showWebContent && (
+        <MobileDock
+          activeMode={currentMode}
+          onSelectMode={setMode}
+          onOpenLibrary={() => setUnifiedSidePanelOpen(true)}
+          onOpenAgent={() => setRightPanelOpen(true)}
+        />
+      )}
+
       {/* Agent Overlay */}
-      <Suspense fallback={null}>
-        <Portal>
-          <ErrorBoundary componentName="AgentOverlay">
-            <AgentOverlay />
-          </ErrorBoundary>
-        </Portal>
-      </Suspense>
+      {/* Moved to main.tsx for global mounting */}
 
       <Suspense fallback={null}>
         <Portal>
@@ -2005,10 +2009,11 @@ export function AppShell() {
       <MiniHoverAI enabled={!overlayActive && showWebContent} />
 
       {/* Unified Side Panel - History, Bookmarks, Downloads */}
-      {!isFullscreen && isDesktopLayout && (
+      {!isFullscreen && (
         <UnifiedSidePanel
           open={unifiedSidePanelOpen}
           onClose={() => setUnifiedSidePanelOpen(false)}
+          width={isDesktopLayout ? 420 : mobilePanelWidth}
         />
       )}
 

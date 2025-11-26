@@ -14,6 +14,10 @@ import {
   Keyboard,
   Zap,
   Activity,
+  Settings2,
+  Trophy,
+  FileText,
+  Video,
 } from 'lucide-react';
 import { useSettingsStore } from '../state/settingsStore';
 import { useExternalApisStore } from '../state/externalApisStore';
@@ -23,6 +27,11 @@ import { crashReporter } from '../core/crash-reporting';
 import { BookmarksPanel } from '../components/bookmarks/BookmarksPanel';
 import { WorkspacesPanel } from '../components/WorkspacesPanel';
 import { ShortcutsHelp } from '../components/help/ShortcutsHelp';
+import { LaunchReadiness } from '../components/LaunchReadiness';
+import { SkillStore } from '../components/skills/SkillStore';
+import { BountySubmission } from '../components/bounty/BountySubmission';
+import { ResumeFixer } from '../components/resume/ResumeFixer';
+import { ClipRecorder } from '../components/recorder/ClipRecorder';
 import { EXTERNAL_APIS, getApisForMode, type ExternalAPI } from '../config/externalApis';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -106,6 +115,11 @@ const TABS = [
   { id: 'workspaces', label: 'Workspaces', icon: FolderOpen },
   { id: 'safety', label: 'Safety', icon: Shield },
   { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
+  { id: 'system', label: 'System', icon: Settings2 },
+  { id: 'skills', label: 'Skills', icon: Zap },
+  { id: 'bounty', label: 'Bounty', icon: Trophy },
+  { id: 'resume', label: 'Resume Fixer', icon: FileText },
+  { id: 'recorder', label: 'Clip Recorder', icon: Video },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
@@ -156,6 +170,31 @@ export default function SettingsRoute() {
         )}
         {activeTab === 'safety' && <SafetyPanel />}
         {activeTab === 'shortcuts' && <ShortcutsHelp />}
+        {activeTab === 'system' && (
+          <div className="max-w-4xl">
+            <LaunchReadiness />
+          </div>
+        )}
+        {activeTab === 'skills' && (
+          <div className="h-full">
+            <SkillStore />
+          </div>
+        )}
+        {activeTab === 'bounty' && (
+          <div className="h-full">
+            <BountySubmission />
+          </div>
+        )}
+        {activeTab === 'resume' && (
+          <div className="h-full">
+            <ResumeFixer />
+          </div>
+        )}
+        {activeTab === 'recorder' && (
+          <div className="h-full">
+            <ClipRecorder />
+          </div>
+        )}
       </div>
     </div>
   );

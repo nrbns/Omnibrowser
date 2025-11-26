@@ -1866,6 +1866,7 @@ function ResearchResultView({
           </div>
         </header>
         <AnswerWithCitations
+          query={result.query || query}
           summary={result.summary}
           citations={result.citations}
           inlineEvidence={result.inlineEvidence}

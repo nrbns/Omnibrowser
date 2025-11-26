@@ -4,7 +4,11 @@
 
 import { useMemo, useState } from 'react';
 import { ExternalLink, FileText, Download } from 'lucide-react';
-import type { ResearchInlineEvidence, ResearchCitation, ResearchSource } from '../../types/research';
+import type {
+  ResearchInlineEvidence,
+  ResearchCitation,
+  ResearchSource,
+} from '../../types/research';
 import { motion } from 'framer-motion';
 import { ipc } from '../../lib/ipc-typed';
 
@@ -17,6 +21,7 @@ interface AnswerWithCitationsProps {
   onActivate: (sourceKey: string) => void;
   onOpenSource: (url: string) => void;
   onExport?: (format: 'markdown' | 'pdf') => void;
+  query?: string;
 }
 
 export function AnswerWithCitations({
@@ -28,6 +33,7 @@ export function AnswerWithCitations({
   onActivate,
   onOpenSource,
   onExport,
+  query = 'Research',
 }: AnswerWithCitationsProps) {
   const [hoveredCitation, setHoveredCitation] = useState<number | null>(null);
   const [exporting, setExporting] = useState<'markdown' | 'pdf' | null>(null);
@@ -70,7 +76,7 @@ export function AnswerWithCitations({
     // Sort inline evidence by position
     const sortedEvidence = [...inlineEvidence].sort((a, b) => a.from - b.from);
 
-    sortedEvidence.forEach((evidence) => {
+    sortedEvidence.forEach(evidence => {
       if (evidence.from > lastPos) {
         parts.push({ text: summary.slice(lastPos, evidence.from) });
       }
@@ -109,7 +115,16 @@ export function AnswerWithCitations({
       }
       return <span key={`text-${idx}`}>{part.text}</span>;
     });
-  }, [summary, citations, inlineEvidence, sources, activeSourceId, hoveredCitation, onActivate, onOpenSource]);
+  }, [
+    summary,
+    citations,
+    inlineEvidence,
+    sources,
+    activeSourceId,
+    hoveredCitation,
+    onActivate,
+    onOpenSource,
+  ]);
 
   const handleExport = async (format: 'markdown' | 'pdf') => {
     setExporting(format);
@@ -160,12 +175,23 @@ export function AnswerWithCitations({
           a.click();
           URL.revokeObjectURL(url);
         } else {
-          // PDF export would require a library like jsPDF or IPC call
-          await ipc.research.export({
-            format: 'markdown', // Fallback to markdown for now
-            sources: sources.map(s => s.url),
-            includeNotes: true,
+          // PDF export with watermark
+          const { exportResearchToPDF, downloadPDF } = await import('../../utils/pdfExport');
+          const pdfBlob = await exportResearchToPDF({
+            query: query || 'Research',
+            summary,
+            citations: citations.map(c => ({
+              index: c.index,
+              quote: c.quote,
+              source: sources[c.sourceIndex] || { title: 'Unknown', url: '' },
+            })),
+            sources: sources.map(s => ({
+              title: s.title,
+              url: s.url,
+              domain: s.domain,
+            })),
           });
+          await downloadPDF(pdfBlob, `research-${Date.now()}.pdf`);
         }
       }
     } catch (error) {
@@ -178,9 +204,7 @@ export function AnswerWithCitations({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm leading-relaxed text-gray-200 whitespace-pre-wrap">
-          {renderedText}
-        </p>
+        <p className="text-sm leading-relaxed text-gray-200 whitespace-pre-wrap">{renderedText}</p>
         {onExport && (
           <div className="flex items-center gap-2 ml-4">
             <motion.button
@@ -237,12 +261,12 @@ function CitationMarker({
         isActive
           ? 'bg-blue-500/30 text-blue-200 border border-blue-400/50'
           : isHovered
-          ? 'bg-blue-500/20 text-blue-300 border border-blue-400/30'
-          : 'bg-white/10 text-gray-300 border border-white/10 hover:bg-white/15'
+            ? 'bg-blue-500/20 text-blue-300 border border-blue-400/30'
+            : 'bg-white/10 text-gray-300 border border-white/10 hover:bg-white/15'
       }`}
       onMouseEnter={() => onHover(index)}
       onMouseLeave={() => onHover(null)}
-      onClick={(e) => {
+      onClick={e => {
         e.preventDefault();
         e.stopPropagation();
         onActivate(sourceKey);
@@ -254,11 +278,7 @@ function CitationMarker({
       whileTap={{ scale: 0.95 }}
       title={source ? `${source.title} - ${source.domain}` : `Citation ${index}`}
     >
-      [{index}]
-      {isHovered && source && (
-        <ExternalLink size={10} className="opacity-70" />
-      )}
+      [{index}]{isHovered && source && <ExternalLink size={10} className="opacity-70" />}
     </motion.sup>
   );
 }
-

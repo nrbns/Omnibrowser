@@ -27,6 +27,8 @@ import cors from '@fastify/cors';
 import Redis from 'ioredis';
 import { v4 as uuidv4 } from 'uuid';
 import os from 'os';
+import axios from 'axios';
+import WebSocket from 'ws';
 import { runSearch } from './redix-search.js';
 import { enqueueScrape } from './services/queue/queue.js';
 import { analyzeWithLLM } from './services/agent/llm.js';
@@ -143,6 +145,126 @@ const openAIConfig = {
   model: nodeProcess?.env.OPENAI_API_MODEL || 'gpt-4o-mini',
 };
 
+const STOCK_HISTORY_CACHE = new Map();
+const STOCK_CACHE_TTL = 1000 * 60; // 1 minute
+const FINNHUB_TOKEN = nodeProcess?.env.FINNHUB_TOKEN || nodeProcess?.env.FINNHUB_API_KEY || '';
+
+const YAHOO_SYMBOL_MAP = {
+  NIFTY: '^NSEI',
+  BANKNIFTY: '^NSEBANK',
+  BANK: '^NSEBANK',
+  SENSEX: '^BSESN',
+  RELIANCE: 'RELIANCE.NS',
+  TCS: 'TCS.NS',
+  INFY: 'INFY.NS',
+};
+
+const FINNHUB_SYMBOL_MAP = {
+  NIFTY: 'NSE:NIFTY',
+  BANKNIFTY: 'NSE:NIFTY_BANK',
+  RELIANCE: 'NSE:RELIANCE',
+  TCS: 'NSE:TCS',
+  INFY: 'NSE:INFY',
+};
+
+function normalizeSymbol(inputSymbol) {
+  if (!inputSymbol) return 'NIFTY';
+  return String(inputSymbol).trim().toUpperCase();
+}
+
+function mapToYahooSymbol(inputSymbol) {
+  const symbol = normalizeSymbol(inputSymbol);
+  if (YAHOO_SYMBOL_MAP[symbol]) {
+    return YAHOO_SYMBOL_MAP[symbol];
+  }
+  if (symbol.startsWith('^')) {
+    return symbol;
+  }
+  if (symbol.endsWith('.NS') || symbol.endsWith('.BO')) {
+    return symbol;
+  }
+  return `${symbol}.NS`;
+}
+
+function mapToFinnhubSymbol(inputSymbol) {
+  const symbol = normalizeSymbol(inputSymbol);
+  if (FINNHUB_SYMBOL_MAP[symbol]) {
+    return FINNHUB_SYMBOL_MAP[symbol];
+  }
+  if (symbol.startsWith('NSE:') || symbol.startsWith('BSE:')) {
+    return symbol;
+  }
+  if (symbol.endsWith('.NS')) {
+    return `NSE:${symbol.replace('.NS', '')}`;
+  }
+  if (symbol.endsWith('.BO')) {
+    return `BSE:${symbol.replace('.BO', '')}`;
+  }
+  return `NSE:${symbol}`;
+}
+
+function roundPrice(value) {
+  if (typeof value !== 'number') return value;
+  return Math.round(value * 100) / 100;
+}
+
+async function fetchHistoricalCandles(inputSymbol, range = '1d', interval = '5m') {
+  const yahooSymbol = mapToYahooSymbol(inputSymbol);
+  const cacheKey = `${yahooSymbol}:${range}:${interval}`;
+  const cached = STOCK_HISTORY_CACHE.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < STOCK_CACHE_TTL) {
+    return cached.data;
+  }
+
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
+    yahooSymbol
+  )}`;
+
+  const params = {
+    range,
+    interval,
+    includePrePost: true,
+  };
+
+  const response = await axios.get(url, { params }).catch(error => {
+    throw new Error(
+      `Failed to fetch Yahoo Finance data for ${yahooSymbol}: ${error?.message || 'unknown'}`
+    );
+  });
+
+  const result = response?.data?.chart?.result?.[0];
+  if (!result || !Array.isArray(result.timestamp) || !result.timestamp.length) {
+    throw new Error(`No historical data available for ${yahooSymbol}`);
+  }
+
+  const quotes = result.indicators?.quote?.[0] || {};
+  const { open = [], high = [], low = [], close = [], volume = [] } = quotes;
+
+  const candles = result.timestamp
+    .map((ts, index) => {
+      if (
+        open[index] == null ||
+        high[index] == null ||
+        low[index] == null ||
+        close[index] == null
+      ) {
+        return null;
+      }
+      return {
+        time: ts,
+        open: roundPrice(open[index]),
+        high: roundPrice(high[index]),
+        low: roundPrice(low[index]),
+        close: roundPrice(close[index]),
+        volume: Number(volume[index] ?? 0),
+      };
+    })
+    .filter(Boolean);
+
+  STOCK_HISTORY_CACHE.set(cacheKey, { data: candles, timestamp: Date.now() });
+  return candles;
+}
+
 // ============================================================================
 // V1 RESEARCH API
 // ============================================================================
@@ -232,6 +354,114 @@ fastify.post('/v1/answer/stream', async (request, reply) => {
   } finally {
     reply.raw.end();
   }
+});
+
+fastify.get('/stock/historical/:symbol', async (request, reply) => {
+  const { symbol } = request.params ?? {};
+  const { range = '1d', interval = '5m' } = request.query ?? {};
+
+  if (!symbol) {
+    reply.code(400);
+    return { error: 'symbol_required', message: 'Symbol path param is required' };
+  }
+
+  try {
+    const candles = await fetchHistoricalCandles(symbol, range, interval);
+    return {
+      symbol: mapToYahooSymbol(symbol),
+      range,
+      interval,
+      candles,
+    };
+  } catch (error) {
+    fastify.log.error({ err: error, symbol, range, interval }, 'Historical data fetch failed');
+    reply.code(502);
+    return {
+      error: 'stock_fetch_failed',
+      message: error.message,
+    };
+  }
+});
+
+fastify.get('/stock/stream/:symbol', async (request, reply) => {
+  const { symbol } = request.params ?? {};
+
+  if (!symbol) {
+    reply.code(400);
+    return { error: 'symbol_required', message: 'Symbol path param is required' };
+  }
+
+  if (!FINNHUB_TOKEN) {
+    reply.code(503);
+    return {
+      error: 'finnhub_token_missing',
+      message: 'Set FINNHUB_TOKEN env var to enable streaming quotes',
+    };
+  }
+
+  const finnhubSymbol = mapToFinnhubSymbol(symbol);
+  reply.raw.setHeader('Content-Type', 'text/event-stream');
+  reply.raw.setHeader('Cache-Control', 'no-cache');
+  reply.raw.setHeader('Connection', 'keep-alive');
+  reply.raw.flushHeaders?.();
+
+  const send = payload => {
+    reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
+  };
+
+  const ws = new WebSocket(`wss://ws.finnhub.io?token=${FINNHUB_TOKEN}`);
+  let closed = false;
+
+  ws.on('open', () => {
+    ws.send(JSON.stringify({ type: 'subscribe', symbol: finnhubSymbol }));
+    send({ status: 'subscribed', symbol: finnhubSymbol, timestamp: Date.now() });
+  });
+
+  ws.on('message', buffer => {
+    if (closed) return;
+    try {
+      const payload = JSON.parse(buffer.toString());
+      if (payload.type === 'trade' && Array.isArray(payload.data)) {
+        for (const trade of payload.data) {
+          if (!trade?.p) continue;
+          send({
+            symbol,
+            price: Number(trade.p),
+            volume: trade.v ?? 0,
+            timestamp: trade.t ?? Date.now(),
+          });
+        }
+      }
+    } catch (error) {
+      fastify.log.debug({ err: error }, 'Finnhub stream parse failed');
+    }
+  });
+
+  ws.on('close', () => {
+    if (!closed) {
+      send({ status: 'closed', symbol: finnhubSymbol });
+      reply.raw.end();
+    }
+  });
+
+  ws.on('error', error => {
+    fastify.log.debug({ err: error }, 'Finnhub websocket error');
+    send({ status: 'error', message: error?.message || 'stream_error' });
+  });
+
+  const heartbeat = setInterval(() => {
+    reply.raw.write(': ping\n\n');
+  }, 15000);
+
+  request.raw.on('close', () => {
+    closed = true;
+    clearInterval(heartbeat);
+    try {
+      ws.close();
+    } catch {
+      /* noop */
+    }
+  });
 });
 
 // Register CORS for Tauri migration
@@ -455,6 +685,166 @@ if (nodeProcess?.env.MOCK_NOTIFICATIONS !== '0') {
     Number(nodeProcess?.env.MOCK_NOTIFICATION_INTERVAL || 90_000)
   );
 }
+
+// ============================================================================
+// BOUNTY SYSTEM ENDPOINTS (Week 3 - Viral Growth)
+// ============================================================================
+
+// In-memory store for bounties (in production, use database)
+const bountyStore = new Map();
+
+// Submit bounty
+fastify.post('/bounty/submit', async (request, reply) => {
+  const { title, videoUrl, platform, description, upiId, userId } = request.body || {};
+
+  if (!title || !videoUrl || !upiId) {
+    reply.code(400);
+    return { error: 'Missing required fields: title, videoUrl, upiId' };
+  }
+
+  const bountyId = uuidv4();
+  const bounty = {
+    id: bountyId,
+    title,
+    videoUrl,
+    platform,
+    description,
+    upiId,
+    userId: userId || 'anonymous',
+    status: 'pending',
+    views: 0,
+    verifiedViews: 0,
+    submittedAt: Date.now(),
+    payoutAmount: 0,
+  };
+
+  bountyStore.set(bountyId, bounty);
+
+  fastify.log.info({ bountyId, platform }, 'Bounty submitted');
+
+  return {
+    id: bountyId,
+    status: 'pending',
+    message: 'Bounty submission received. Verification in progress.',
+  };
+});
+
+// Verify video views
+fastify.post('/bounty/verify', async (request, reply) => {
+  const { videoUrl, platform } = request.body || {};
+
+  if (!videoUrl || !platform) {
+    reply.code(400);
+    return { error: 'Missing videoUrl or platform' };
+  }
+
+  // In production, would call platform APIs (YouTube Data API, X API, etc.)
+  // For now, return mock verification
+  const mockViews = Math.floor(Math.random() * 100000) + 10000; // 10K - 110K
+
+  fastify.log.info({ videoUrl, platform, views: mockViews }, 'Video views verified');
+
+  return {
+    views: mockViews,
+    verified: true,
+    platform,
+    verifiedAt: Date.now(),
+  };
+});
+
+// Get bounty status
+fastify.get('/bounty/status/:id', async (request, reply) => {
+  const { id } = request.params || {};
+
+  const bounty = bountyStore.get(id);
+  if (!bounty) {
+    reply.code(404);
+    return { error: 'Bounty not found' };
+  }
+
+  return bounty;
+});
+
+// Get leaderboard
+fastify.get('/bounty/leaderboard', async (request, reply) => {
+  const limit = Number(request.query?.limit || 10);
+
+  // In production, would query database
+  // For now, return mock leaderboard
+  const leaderboard = [
+    {
+      userId: 'user1',
+      userName: 'TechGuru',
+      totalViews: 2500000,
+      totalEarned: 12500,
+      submissionCount: 5,
+      rank: 1,
+    },
+    {
+      userId: 'user2',
+      userName: 'AIBrowser',
+      totalViews: 1800000,
+      totalEarned: 9000,
+      submissionCount: 4,
+      rank: 2,
+    },
+    {
+      userId: 'user3',
+      userName: 'DemoMaster',
+      totalViews: 1200000,
+      totalEarned: 6000,
+      submissionCount: 3,
+      rank: 3,
+    },
+  ];
+
+  return leaderboard.slice(0, limit);
+});
+
+// Get user submissions
+fastify.get('/bounty/user/:userId', async (request, reply) => {
+  const { userId } = request.params || {};
+
+  const userBounties = Array.from(bountyStore.values()).filter(b => b.userId === userId);
+
+  return userBounties;
+});
+
+// Process payout (admin endpoint - would be secured in production)
+fastify.post('/bounty/payout/:id', async (request, reply) => {
+  const { id } = request.params || {};
+
+  const bounty = bountyStore.get(id);
+  if (!bounty) {
+    reply.code(404);
+    return { error: 'Bounty not found' };
+  }
+
+  if (bounty.verifiedViews < 50000) {
+    reply.code(400);
+    return { error: 'Bounty does not meet minimum view requirement (50K)' };
+  }
+
+  // In production, would:
+  // 1. Call UPI payment API
+  // 2. Update bounty status to 'paid'
+  // 3. Log transaction
+
+  bounty.status = 'paid';
+  bounty.payoutAmount = 500; // ₹500
+  bounty.paidAt = Date.now();
+
+  bountyStore.set(id, bounty);
+
+  fastify.log.info({ bountyId: id, upiId: bounty.upiId, amount: 500 }, 'Bounty payout processed');
+
+  return {
+    success: true,
+    message: 'Payout processed',
+    payoutAmount: 500,
+    paidAt: bounty.paidAt,
+  };
+});
 
 fastify.get('/health', async () => ({
   ok: true,

@@ -39,7 +39,7 @@ import { usePeekPreviewStore } from '../../state/peekStore';
 import { Portal } from '../common/Portal';
 import { useTabGraphStore } from '../../state/tabGraphStore';
 import { PredictiveClusterChip, PredictivePrefetchHint } from './PredictiveClusterChip';
-import { HolographicPreviewOverlay } from '../hologram';
+// HolographicPreviewOverlay removed - unused component
 import { isDevEnv, isElectronRuntime } from '../../lib/env';
 import {
   DropdownMenu,
@@ -137,9 +137,6 @@ export function TabStrip() {
   >([]);
   const [predictionSummary, setPredictionSummary] = useState<string | null>(null);
   const [holographicPreviewTabId, setHolographicPreviewTabId] = useState<string | null>(null);
-  const [previewMetadata, setPreviewMetadata] = useState<{ url?: string; title?: string } | null>(
-    null
-  );
   const [hologramSupported, setHologramSupported] = useState<boolean | null>(null);
   const [handoffStatus, setHandoffStatus] = useState<{
     platform: string;
@@ -490,13 +487,11 @@ export function TabStrip() {
               tab === validFilteredTabs[validFilteredTabs.length - 1]
             ) {
               setHolographicPreviewTabId(tab.id);
-              setPreviewMetadata({ url: tab.url || '', title: tab.title || 'Untitled' });
             }
           }}
           onMouseLeave={() => {
             if (holographicPreviewTabId === tab.id) {
               setHolographicPreviewTabId(null);
-              setPreviewMetadata(null);
             }
           }}
         >
@@ -2146,16 +2141,7 @@ export function TabStrip() {
         )}
       </div>
 
-      <HolographicPreviewOverlay
-        visible={Boolean(holographicPreviewTabId)}
-        tabId={holographicPreviewTabId}
-        url={previewMetadata?.url}
-        title={previewMetadata?.title}
-        onClose={() => {
-          setHolographicPreviewTabId(null);
-          setPreviewMetadata(null);
-        }}
-      />
+      {/* HolographicPreviewOverlay removed - unused component */}
     </>
   );
 }

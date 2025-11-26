@@ -128,7 +128,7 @@ export default function ResearchPanel() {
   // Listen for handoff events from Trade mode
   useEffect(() => {
     const handleHandoff = (event: CustomEvent) => {
-      const { query: handoffQuery, symbol, language: handoffLanguage } = event.detail;
+      const { query: handoffQuery, symbol, language: _handoffLanguage } = event.detail;
       if (handoffQuery) {
         setQuery(handoffQuery);
         // Trigger search after a short delay to allow mode switch

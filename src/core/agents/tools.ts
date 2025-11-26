@@ -346,7 +346,7 @@ ${content.slice(0, 4000)}`; // Limit to 4000 chars
     id: 'n8n.workflow',
     description: 'Call an n8n workflow via webhook. Supports single calls and loops.',
     requiredCapabilities: ['web:fetch'],
-    async run(input, ctx) {
+    async run(input, _ctx) {
       const workflowId = String(input.workflowId || '');
       if (!workflowId) throw new Error('Workflow ID is required');
 
@@ -415,7 +415,7 @@ ${content.slice(0, 4000)}`; // Limit to 4000 chars
     id: 'n8n.list',
     description: 'List available n8n workflows (requires API key).',
     requiredCapabilities: ['web:fetch'],
-    async run(input, _ctx) {
+    async run(_input, _ctx) {
       try {
         const { listN8nWorkflows } = await import('../../services/n8nService');
         const workflows = await listN8nWorkflows();

@@ -6,11 +6,12 @@
  */
 
 import { log } from '../utils/logger';
-import { aiEngine, type AITaskResult } from '../core/ai';
+import { aiEngine } from '../core/ai';
+// import type { AITaskResult } from '../core/ai'; // Reserved for future use
 import { useSettingsStore } from '../state/settingsStore';
 import { translateText } from '../core/offline/translator';
-import { detectLanguage } from './languageDetection';
-import type { AISignal } from '../components/trade/AISignalPanel';
+// import { detectLanguage } from './languageDetection'; // Reserved for future use
+// import type { AISignal } from '../components/trade/AISignalPanel'; // Reserved for future use
 
 export interface TradeAlert {
   id: string;

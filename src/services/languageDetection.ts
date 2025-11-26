@@ -7,7 +7,7 @@
  */
 
 import { log } from '../utils/logger';
-import { isBhashiniSupported, getBhashiniSupportedLanguages } from './bhashiniService';
+// import { isBhashiniSupported, getBhashiniSupportedLanguages } from './bhashiniService'; // Reserved for future use
 
 // Language detection result
 export interface LanguageDetectionResult {

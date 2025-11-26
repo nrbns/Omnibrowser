@@ -4,12 +4,14 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Search } from 'lucide-react';
+import { Search, PanelsTopLeft } from 'lucide-react';
 import { ModeTabs } from './ModeTabs';
 import { useTokens } from '../useTokens';
 import { Container } from '../layout';
 import { TopRightCluster } from './top-right';
 import { BookmarkButton } from '../../components/BookmarkButton';
+import { LanguageIndicator } from './LanguageIndicator';
+import { ShareButton } from '../../components/ShareButton';
 
 export interface TopBarProps {
   className?: string;
@@ -19,6 +21,7 @@ export interface TopBarProps {
   onModeChange?: (mode: string) => void;
   onAddressBarSubmit?: (query: string) => void;
   currentUrl?: string;
+  onToggleLibrary?: () => void;
 }
 
 export function TopBar({
@@ -29,6 +32,7 @@ export function TopBar({
   onModeChange,
   onAddressBarSubmit,
   currentUrl,
+  onToggleLibrary,
 }: TopBarProps) {
   const tokens = useTokens();
   const [addressValue, setAddressValue] = useState(currentUrl || '');
@@ -61,7 +65,17 @@ export function TopBar({
         style={{ padding: tokens.spacing(3) }}
       >
         {/* Left: Mode Tabs */}
-        <div className="flex items-center gap-4 flex-shrink-0">
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {onToggleLibrary && (
+            <button
+              type="button"
+              onClick={onToggleLibrary}
+              className="inline-flex items-center gap-2 rounded-xl border border-[var(--surface-border)] bg-[var(--surface-elevated)] px-3 py-1.5 text-[var(--text-primary)] text-xs font-semibold transition hover:border-[var(--color-primary-500)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-500)]"
+            >
+              <PanelsTopLeft size={14} />
+              <span className="hidden sm:inline">Library</span>
+            </button>
+          )}
           <ModeTabs compact={compact} onModeChange={onModeChange} />
         </div>
 
@@ -91,7 +105,11 @@ export function TopBar({
         )}
 
         {/* Right: Utility cluster */}
-        {showQuickActions && <TopRightCluster />}
+        <div className="flex items-center gap-2">
+          <ShareButton url={currentUrl} title={document.title} />
+          <LanguageIndicator compact={compact} />
+          {showQuickActions && <TopRightCluster />}
+        </div>
       </Container>
     </header>
   );

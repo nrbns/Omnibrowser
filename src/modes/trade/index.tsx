@@ -16,14 +16,14 @@ import { aiEngine, type AITaskResult } from '../../core/ai';
 import { semanticSearchMemories } from '../../core/supermemory/search';
 import { toast } from '../../utils/toast';
 import { useSettingsStore } from '../../state/settingsStore';
-import { tradeToResearch } from '../../core/agents/handoff';
+// import { tradeToResearch } from '../../core/agents/handoff'; // Reserved for future use
 import {
   startTradeAlertsCron,
   stopTradeAlertsCron,
   updateWatchedSymbols,
   onAlert,
-  getUnacknowledgedAlerts,
-  acknowledgeAlert,
+  // getUnacknowledgedAlerts, // Reserved for future use
+  // acknowledgeAlert, // Reserved for future use
   initTradeAlertsCron,
   type TradeAlert,
 } from '../../services/tradeAlertsCron';

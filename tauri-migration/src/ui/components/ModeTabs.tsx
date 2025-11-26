@@ -119,6 +119,9 @@ export function ModeTabs({ className, compact, onModeChange }: ModeTabsProps) {
         return (
           <button
             key={mode.id}
+            data-tour={
+              mode.id === 'trade' ? 'trade' : mode.id === 'research' ? 'research' : undefined
+            }
             ref={el => {
               buttonRefs.current[mode.id] = el;
             }}

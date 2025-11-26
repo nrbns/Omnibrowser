@@ -108,11 +108,12 @@ import { reopenMostRecentClosedTab } from '../../lib/tabLifecycle';
 import { toast } from '../../utils/toast';
 import { startSnapshotting } from '../../core/recovery';
 import { initTradeAlertsCron } from '../../services/tradeAlertsCron';
-import {
-  startAutoSaveTabs,
-  checkForResurrectableTabs,
-  scheduleAutoResurrection,
-} from '../../core/tabs/resurrection';
+// Tab resurrection functions - imported for future use
+// import {
+//   startAutoSaveTabs,
+//   checkForResurrectableTabs,
+//   scheduleAutoResurrection,
+// } from '../../core/tabs/resurrection';
 import { initExtensionsAPI, setupPreloadHook } from '../../core/extensions/api';
 import { useAppError } from '../../hooks/useAppError';
 import { LoopResumeModal } from '../agents/LoopResumeModal';

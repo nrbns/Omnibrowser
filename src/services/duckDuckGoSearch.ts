@@ -221,7 +221,6 @@ export async function fetchDuckDuckGoWeb(
 
     // Parse HTML results - DuckDuckGo HTML structure
     // Modern structure uses data-testid or class-based selectors
-    const resultRegex = /<div[^>]*class="[^"]*result[^"]*"[^>]*>([\s\S]*?)<\/div>/gi;
     const linkRegex =
       /<a[^>]*href="([^"]+)"[^>]*class="[^"]*result__a[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
     const snippetRegex = /<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
