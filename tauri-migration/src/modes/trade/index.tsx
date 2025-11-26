@@ -11,7 +11,9 @@ import {
   TrendingDown,
   TrendingUp,
   Wallet2,
+  Download,
 } from 'lucide-react';
+import { exportChartAsImage } from '../../utils/chartExport';
 
 type CandlePoint = {
   time: number;
@@ -285,6 +287,31 @@ export default function TradePanel() {
                 title="Refresh data"
               >
                 <RefreshCcw size={16} />
+              </button>
+              <button
+                onClick={async () => {
+                  if (!chartRef.current) {
+                    toast.error('Chart not ready');
+                    return;
+                  }
+                  try {
+                    toast.loading('Exporting chart...');
+                    await exportChartAsImage(
+                      chartRef.current,
+                      `${symbol}-${timeframe.id}-${Date.now()}.png`
+                    );
+                    toast.dismiss();
+                    toast.success('Chart exported successfully!');
+                  } catch (error) {
+                    toast.dismiss();
+                    toast.error('Failed to export chart');
+                    console.error('[Trade] Export error:', error);
+                  }
+                }}
+                className="rounded-full border border-slate-700/60 p-2 text-slate-300 hover:border-slate-500 hover:text-white"
+                title="Export chart as image"
+              >
+                <Download size={16} />
               </button>
             </div>
             <div className="flex flex-wrap gap-2">

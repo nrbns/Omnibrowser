@@ -2522,6 +2522,15 @@ fastify.get('/metrics/prom', async (_request, reply) => {
     fastify.log.info('WebSocket server initialized');
 
     try {
+      // Register admin routes
+      try {
+        const { registerAdminRoutes } = await import('./admin-api.js');
+        registerAdminRoutes(fastify);
+        fastify.log.info('Admin routes registered');
+      } catch (error) {
+        fastify.log.warn({ error }, 'Failed to register admin routes');
+      }
+
       await fastify.listen({ port: PORT, host: '0.0.0.0' });
       fastify.log.info(`Redix server listening on port ${PORT}`);
     } catch (err) {

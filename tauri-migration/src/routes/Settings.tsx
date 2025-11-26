@@ -32,6 +32,7 @@ import { SkillStore } from '../components/skills/SkillStore';
 import { BountySubmission } from '../components/bounty/BountySubmission';
 import { ResumeFixer } from '../components/resume/ResumeFixer';
 import { ClipRecorder } from '../components/recorder/ClipRecorder';
+import { WatermarkSettings } from '../components/settings/WatermarkSettings';
 import { EXTERNAL_APIS, getApisForMode, type ExternalAPI } from '../config/externalApis';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -171,7 +172,8 @@ export default function SettingsRoute() {
         {activeTab === 'safety' && <SafetyPanel />}
         {activeTab === 'shortcuts' && <ShortcutsHelp />}
         {activeTab === 'system' && (
-          <div className="max-w-4xl">
+          <div className="max-w-4xl space-y-6">
+            <WatermarkSettings />
             <LaunchReadiness />
           </div>
         )}

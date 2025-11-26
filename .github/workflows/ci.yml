@@ -44,7 +44,20 @@ jobs:
           fi
 
       - name: Run TypeScript check
-        run: npm run build:types
+        continue-on-error: false
+        run: |
+          echo "Running TypeScript type check..."
+          npm run build:types 2>&1 | tee typescript-output.txt
+          TYPESCRIPT_EXIT_CODE=${PIPESTATUS[0]}
+
+          if [ $TYPESCRIPT_EXIT_CODE -ne 0 ]; then
+            echo "❌ TypeScript check failed with exit code $TYPESCRIPT_EXIT_CODE"
+            echo "TypeScript errors:"
+            cat typescript-output.txt | grep -E "(error TS|Error:|Cannot find)" | head -20 || cat typescript-output.txt
+            exit $TYPESCRIPT_EXIT_CODE
+          fi
+
+          echo "✅ TypeScript check passed"
 
   unit-tests:
     name: Unit Tests
@@ -93,22 +106,56 @@ jobs:
           echo "Node version: $(node --version)"
           echo "NPM version: $(npm --version)"
           echo "Current directory: $(pwd)"
+          echo "Directory contents before build:"
+          ls -la || echo "Cannot list directory"
           echo "Environment: NODE_ENV=${NODE_ENV:-not set}, CI=${CI:-not set}"
 
           # Set environment variables
           export NODE_ENV=production
           export CI=true
 
+          # Check if vite.config.ts exists
+          if [ ! -f "vite.config.ts" ]; then
+            echo "❌ vite.config.ts not found"
+            echo "Looking for vite config files:"
+            ls -la *.config.* 2>/dev/null || echo "No config files found"
+            exit 1
+          fi
+
+          # Check if package.json exists
+          if [ ! -f "package.json" ]; then
+            echo "❌ package.json not found"
+            exit 1
+          fi
+
           # Run build and capture output
-          npm run build 2>&1 | tee build-output.txt || {
-            BUILD_EXIT_CODE=${PIPESTATUS[0]}
+          echo "Running: npm run build"
+          npm run build 2>&1 | tee build-output.txt
+          BUILD_EXIT_CODE=${PIPESTATUS[0]}
+
+          if [ $BUILD_EXIT_CODE -ne 0 ]; then
             echo "❌ Build failed with exit code $BUILD_EXIT_CODE"
-            echo "Last 50 lines of build output:"
-            tail -50 build-output.txt
+            echo "=== Full build output ==="
+            cat build-output.txt
+            echo "=== End build output ==="
+            
+            # Check for common error patterns
+            if grep -q "Cannot find module" build-output.txt; then
+              echo "Error: Missing module detected"
+            fi
+            if grep -q "Type error" build-output.txt || grep -q "TS[0-9]" build-output.txt; then
+              echo "Error: TypeScript errors detected"
+            fi
+            if grep -q "ENOENT" build-output.txt; then
+              echo "Error: File not found"
+            fi
+            
             exit $BUILD_EXIT_CODE
-          }
+          fi
 
           echo "✅ Build completed successfully"
+          echo "Build output directory check:"
+          ls -la dist-web/ 2>/dev/null || echo "dist-web not created yet"
         env:
           NODE_ENV: production
           CI: true
@@ -116,21 +163,39 @@ jobs:
       - name: Verify build outputs
         run: |
           echo "Checking build outputs..."
-          ls -la dist-web/ || echo "dist-web directory listing failed"
+          echo "Current directory: $(pwd)"
+          echo "All files in current directory:"
+          ls -la || echo "Cannot list directory"
+
+          echo ""
+          echo "Checking for dist-web directory..."
           if [ ! -d "dist-web" ]; then
             echo "❌ dist-web directory not found"
-            echo "Current directory: $(pwd)"
-            echo "Directory contents:"
-            ls -la
+            echo "Checking for alternative output directories:"
+            ls -d dist* 2>/dev/null || echo "No dist directories found"
+            echo "Checking vite.config.ts for output directory:"
+            grep -i "outDir" vite.config.ts || echo "outDir not found in vite.config.ts"
             exit 1
           fi
+
+          echo "dist-web directory exists, listing contents:"
+          ls -la dist-web/ || {
+            echo "Cannot list dist-web contents"
+            exit 1
+          }
+
           if [ ! -f "dist-web/index.html" ]; then
             echo "❌ dist-web/index.html not found"
-            echo "dist-web contents:"
-            ls -la dist-web/ || echo "Cannot list dist-web"
+            echo "Available files in dist-web:"
+            find dist-web -type f | head -20 || echo "Cannot list files"
             exit 1
           fi
+
           echo "✅ Build outputs verified (dist-web/index.html found)"
+          echo "Build artifacts:"
+          du -sh dist-web/ || echo "Cannot get size"
+          echo "File count:"
+          find dist-web -type f | wc -l || echo "Cannot count files"
 
       - name: Upload build artifacts
         if: success()
@@ -461,16 +526,20 @@ jobs:
           # Lint warnings are non-blocking, but typecheck errors should fail
           FAILED=0
 
-          if [ "${{ needs.build.result }}" != "success" ]; then
-            echo "❌ Critical check failed: Build"
-            FAILED=1
+          # Check TypeScript compilation (part of lint-and-typecheck)
+          if [ "${{ needs.lint-and-typecheck.result }}" != "success" ]; then
+            echo "⚠️ Lint/Typecheck job completed with issues"
+            echo "Check the logs above to see if these are errors or warnings"
+            # Check if it's a typecheck failure specifically (which is critical)
+            # If typecheck step failed, that's critical
+            # We can't easily distinguish, so if lint-and-typecheck failed, we'll check build too
           fi
 
-          # Typecheck should pass, but lint warnings are OK
-          if [ "${{ needs.lint-and-typecheck.result }}" != "success" ]; then
-            echo "⚠️ Lint/Typecheck completed with issues"
-            echo "Check the logs above to see if these are errors or warnings"
-            # Don't fail on lint warnings, but warn
+          # Build is the most critical - if it fails, the app won't work
+          if [ "${{ needs.build.result }}" != "success" ]; then
+            echo "❌ Critical check failed: Build"
+            echo "The build step failed. Check the build job logs for details."
+            FAILED=1
           fi
 
           # Non-critical warnings

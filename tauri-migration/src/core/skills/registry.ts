@@ -57,8 +57,67 @@ class SkillRegistry {
    */
   async fetchSkillsFromRegistry(category?: string): Promise<SkillMetadata[]> {
     try {
-      // In production, this would fetch from GitHub API
-      // For now, return mock data
+      // Try to fetch from GitHub API first
+      try {
+        const githubToken = import.meta.env.VITE_GITHUB_TOKEN || '';
+        const headers: HeadersInit = {
+          Accept: 'application/vnd.github.v3+json',
+        };
+        if (githubToken) {
+          headers['Authorization'] = `token ${githubToken}`;
+        }
+
+        const response = await fetch(`${GITHUB_REGISTRY_URL}?ref=main`, { headers });
+
+        if (response.ok) {
+          const files = await response.json();
+          const skillFiles = files.filter(
+            (f: any) => f.type === 'file' && f.name.endsWith('.json') && f.name.startsWith('skill-')
+          );
+
+          const skills: SkillMetadata[] = [];
+          for (const file of skillFiles.slice(0, 20)) {
+            // Limit to 20 for performance
+            try {
+              const fileResponse = await fetch(file.download_url);
+              if (fileResponse.ok) {
+                const skillData = await fileResponse.json();
+                skills.push({
+                  id: skillData.id || file.name.replace('.json', ''),
+                  name: skillData.name || 'Unnamed Skill',
+                  description: skillData.description || '',
+                  author: skillData.author || 'Community',
+                  version: skillData.version || '1.0.0',
+                  category: skillData.category || 'other',
+                  tags: skillData.tags || [],
+                  language: skillData.language || 'en',
+                  rating: skillData.rating || 0,
+                  reviewCount: skillData.reviewCount || 0,
+                  downloadCount: skillData.downloadCount || 0,
+                  createdAt: skillData.createdAt || Date.now(),
+                  updatedAt: skillData.updatedAt || Date.now(),
+                  compatibility: skillData.compatibility || { minVersion: '0.1.0' },
+                });
+              }
+            } catch (error) {
+              console.warn(`[SkillRegistry] Failed to fetch skill ${file.name}:`, error);
+            }
+          }
+
+          if (skills.length > 0) {
+            // Cache the skills
+            skills.forEach(skill => this.skillCache.set(skill.id, skill));
+            const filtered = category
+              ? skills.filter(skill => skill.category === category)
+              : skills;
+            return filtered;
+          }
+        }
+      } catch (error) {
+        console.warn('[SkillRegistry] GitHub fetch failed, using fallback:', error);
+      }
+
+      // Fallback to mock data if GitHub fetch fails
       const mockSkills: SkillMetadata[] = [
         {
           id: 'resume-fixer',
