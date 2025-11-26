@@ -46,7 +46,7 @@ jobs:
       - name: Run TypeScript check
         continue-on-error: false
         run: |
-          set -e  # Exit on any error
+          # Don't use set -e - we want to capture full error output
 
           echo "=== TypeScript Type Check ==="
           echo "Current directory: $(pwd)"
@@ -130,7 +130,7 @@ jobs:
 
       - name: Build application
         run: |
-          set -e  # Exit on any error
+          # Don't use set -e - we want to capture full error output
 
           echo "=== CI Build Environment Setup ==="
           echo "Node version: $(node --version)"
