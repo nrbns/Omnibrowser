@@ -331,9 +331,15 @@ async fn capture_screen(app: AppHandle) -> Result<String, String> {
         .get_webview_window("main")
         .ok_or_else(|| "Main window not found".to_string())?;
 
-    // Use Tauri's screenshot API (if available) or fallback to webview capture
-    // For now, return placeholder - in production, use actual screenshot
-    Ok("screenshot://placeholder".to_string())
+    // Try to capture screenshot using browser module
+    match browser::capture_screenshot("about:blank").await {
+        Ok(screenshot) => Ok(screenshot),
+        Err(_) => {
+            // Fallback: Use Tauri's screenshot if available
+            // For now, return placeholder - in production, use actual screenshot API
+            Ok("screenshot://placeholder".to_string())
+        }
+    }
 }
 
 /// Process vision with Ollama (llava model)
@@ -388,6 +394,7 @@ pub fn run() {
             ensure_ollama_ready,
             wispr_command,
             launch_browser,
+            regen_launch,
             regen_session,
             capture_browser_screenshot,
             correct_text,
@@ -396,12 +403,37 @@ pub fn run() {
             execute_trade_command
         ])
         .setup(|app| {
+            // Fix CORS for Tauri (works Win/mac/Linux)
+            std::env::set_var("OLLAMA_ORIGINS", "*");
+            // Also set for webview
+            std::env::set_var("OLLAMA_HOST", "localhost:11434");
+            
             let window = app.get_webview_window("main").unwrap();
             
-            // TODO: Global hotkeys - requires proper API usage
-            // Ctrl+Shift+Space = Wake WISPR
-            // Ctrl+Shift+T = Open Trade Mode
-            // Note: Global shortcuts work via frontend event listeners for now
+            // Auto-check Ollama installation (non-blocking)
+            let window_ollama = window.clone();
+            tokio::spawn(async move {
+                // Check if Ollama is installed
+                #[cfg(target_os = "windows")]
+                {
+                    let check = Command::new("cmd")
+                        .args(["/C", "ollama", "--version"])
+                        .output();
+                    if check.is_err() {
+                        // Ollama not installed - show notification but don't block
+                        let _ = window_ollama.emit("ollama-missing", ());
+                    }
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    let check = Command::new("ollama")
+                        .arg("--version")
+                        .output();
+                    if check.is_err() {
+                        let _ = window_ollama.emit("ollama-missing", ());
+                    }
+                }
+            });
             
             // Inject grammar watcher into all webviews
             let grammar_js = r#"

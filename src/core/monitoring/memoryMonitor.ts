@@ -4,6 +4,8 @@
  */
 
 const MEMORY_THRESHOLD = 0.8; // 80% of available memory
+const MEMORY_CRITICAL = 0.9; // 90% - aggressive cleanup
+const MEMORY_MAX_GB = 3.0; // Max 3GB for 4GB devices
 const CHECK_INTERVAL = 5000; // Check every 5 seconds
 
 let memoryCheckInterval: ReturnType<typeof setInterval> | null = null;
@@ -71,13 +73,20 @@ export function startMemoryMonitoring(onLowMemory?: () => void, onCritical?: () 
     const stats = getMemoryUsage();
     if (!stats) return;
 
-    if (stats.percentage >= 0.9) {
-      // Critical: >90% memory
-      console.warn('[MemoryMonitor] Critical memory usage:', stats.percentage);
+    // Check absolute memory (RSS) for 4GB devices
+    const rssGB = stats.rss / (1024 * 1024 * 1024);
+
+    if (rssGB > MEMORY_MAX_GB || stats.percentage >= MEMORY_CRITICAL) {
+      // Critical: >3GB RSS or >90% memory
+      console.warn(
+        `[MemoryMonitor] Critical memory: ${rssGB.toFixed(2)}GB (${(stats.percentage * 100).toFixed(1)}%)`
+      );
       onCritical?.();
     } else if (stats.percentage >= MEMORY_THRESHOLD) {
       // Low: >80% memory
-      console.warn('[MemoryMonitor] Low memory detected:', stats.percentage);
+      console.warn(
+        `[MemoryMonitor] Low memory: ${rssGB.toFixed(2)}GB (${(stats.percentage * 100).toFixed(1)}%)`
+      );
       onLowMemory?.();
     }
   }, CHECK_INTERVAL);

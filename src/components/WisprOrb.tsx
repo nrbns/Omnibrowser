@@ -127,21 +127,30 @@ export function WisprOrb() {
         if (isElectronRuntime()) {
           try {
             const { ipc } = await import('../lib/ipc-typed');
-            const screenshot = await (ipc as any).invoke('capture_screen');
-            const visionPrompt = `User said: "${commandText || text}"\nDescribe what you see and suggest action.`;
-            const visionResponse = await (ipc as any).invoke('ollama_vision', {
-              prompt: visionPrompt,
-              screenshot: screenshot,
-            });
+
+            // Capture screen
+            const screenshot = await ipc.vision.captureScreen();
+
+            // Analyze with vision
+            const visionPrompt = `User said: "${commandText || text}"\nDescribe what you see on screen and suggest the best action.`;
+            const visionResponse = await ipc.vision.analyze(visionPrompt, screenshot);
 
             // Speak response
             if ('speechSynthesis' in window) {
               const speech = new SpeechSynthesisUtterance(visionResponse || 'Command processed');
               speech.lang = 'en-IN'; // Indian English
+              speech.rate = 1.0;
+              speech.pitch = 1.0;
               window.speechSynthesis.speak(speech);
+
+              // Show vision response in transcript
+              setTranscript(
+                `Jarvis: ${visionResponse.substring(0, 100)}${visionResponse.length > 100 ? '...' : ''}`
+              );
             }
           } catch (error) {
             console.warn('[WISPR] Vision processing failed:', error);
+            toast.warning('Vision analysis unavailable. Using text-only mode.');
           }
         }
 

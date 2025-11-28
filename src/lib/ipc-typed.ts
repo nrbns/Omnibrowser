@@ -1871,6 +1871,8 @@ export const ipc = {
         { url: string; headless?: boolean },
         { success: boolean; title?: string; url?: string; screenshot?: string; error?: string }
       >('launch_browser', { url, headless }),
+    regenLaunch: (url: string, mode: string) =>
+      ipcCall<{ url: string; mode: string }, string>('regen_launch', { url, mode }),
     regenSession: (urls: string[]) =>
       ipcCall<
         { urls: string[] },

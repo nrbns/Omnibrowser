@@ -319,6 +319,13 @@ try {
         toast.success('AI brain ready! Press Ctrl+Space for WISPR.');
       });
     });
+
+    // Listen for Ollama missing notification
+    window.addEventListener('ollama-missing', () => {
+      import('./utils/toast').then(({ toast }) => {
+        toast.warning('Ollama not detected. Install from ollama.com for offline AI features.');
+      });
+    });
   }
 
   // Defer ALL heavy service initialization until after first paint

@@ -1668,13 +1668,28 @@ export function AppShell() {
                     const targetMode = modeMap[mode] || 'Browse';
                     const currentMode = useAppStore.getState().mode;
                     if (targetMode !== currentMode) {
-                      // Initialize mode in backend
+                      // Initialize mode in backend and launch browser if needed
                       try {
                         const { ipc } = await import('../../lib/ipc-typed');
+
+                        // Initialize mode
                         await (ipc as any).invoke('wispr_command', {
                           input: `Init ${targetMode} mode`,
                           mode: mode.toLowerCase(),
                         });
+
+                        // Launch browser for mode-specific URLs
+                        if (targetMode === 'Trade') {
+                          await (ipc as any).invoke('regen_launch', {
+                            url: 'https://www.tradingview.com/chart/?symbol=BINANCE:BTCUSDT',
+                            mode: 'trade',
+                          });
+                        } else if (targetMode === 'Research') {
+                          await (ipc as any).invoke('regen_launch', {
+                            url: 'https://www.google.com',
+                            mode: 'research',
+                          });
+                        }
                       } catch (error) {
                         console.warn('[AppShell] Mode init failed:', error);
                       }
