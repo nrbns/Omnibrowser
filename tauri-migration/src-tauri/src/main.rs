@@ -381,37 +381,7 @@ async fn execute_trade_command(query: String) -> Result<String, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_shortcuts(vec![
-                    (
-                        tauri_plugin_global_shortcut::Shortcut::new(
-                            Some(tauri_plugin_global_shortcut::Modifiers::CONTROL | tauri_plugin_global_shortcut::Modifiers::SHIFT),
-                            tauri_plugin_global_shortcut::Code::Space,
-                        ),
-                        |app: AppHandle| {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.emit("wake-wispr", ());
-                                let _ = window.unminimize();
-                                let _ = window.set_focus();
-                            }
-                        },
-                    ),
-                    (
-                        tauri_plugin_global_shortcut::Shortcut::new(
-                            Some(tauri_plugin_global_shortcut::Modifiers::CONTROL | tauri_plugin_global_shortcut::Modifiers::SHIFT),
-                            tauri_plugin_global_shortcut::Code::KeyT,
-                        ),
-                        |app: AppHandle| {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.emit("open-trade-mode", ());
-                            }
-                        },
-                    ),
-                ])
-                .unwrap()
-                .build(),
-        )
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             run_agent_task,
             trigger_haptic,
