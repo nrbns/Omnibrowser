@@ -182,8 +182,21 @@ Tauri + React + TypeScript + Vite multi-mode desktop browser with:
 git clone https://github.com/nrbns/Regenbrowser.git
 cd Regenbrowser
 
-# Install
+# Install dependencies
 npm install
+
+# Setup environment (optional - for online AI features)
+cp example.env .env
+# Edit .env and add your API keys (or skip for offline mode)
+
+# Install Ollama (required for offline AI)
+# Windows: Download from https://ollama.com/download
+# Linux: curl -fsSL https://ollama.com/install.sh | sh
+# macOS: brew install ollama
+
+# Pull AI models (one-time, ~2GB)
+ollama pull phi3:mini
+ollama pull llava:7b
 
 # Dev mode
 npm run dev
@@ -191,6 +204,17 @@ npm run dev
 # Build installer
 npm run build:installer
 ```
+
+### Environment Variables
+
+Copy `example.env` to `.env` and configure:
+
+- **Offline Mode (Recommended)**: No API keys needed! Just install Ollama and pull models.
+- **Online Mode**: Add OpenAI/Anthropic/Groq keys for advanced features.
+- **Trading**: Add Zerodha API keys for auto trade execution.
+- **Analytics**: Add Sentry/PostHog keys for error tracking.
+
+See `example.env` for all available options.
 
 ## 📊 System Requirements
 
