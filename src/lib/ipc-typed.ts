@@ -1865,6 +1865,29 @@ export const ipc = {
         options ?? {}
       ),
   },
+  browser: {
+    launch: (url: string, headless?: boolean) =>
+      ipcCall<
+        { url: string; headless?: boolean },
+        { success: boolean; title?: string; url?: string; screenshot?: string; error?: string }
+      >('launch_browser', { url, headless }),
+    regenSession: (urls: string[]) =>
+      ipcCall<
+        { urls: string[] },
+        Array<{
+          success: boolean;
+          title?: string;
+          url?: string;
+          screenshot?: string;
+          error?: string;
+        }>
+      >('regen_session', { urls }),
+    captureScreenshot: (url: string) =>
+      ipcCall<{ url: string }, { success: boolean; screenshot?: string; error?: string }>(
+        'capture_browser_screenshot',
+        { url }
+      ),
+  },
   trust: {
     list: () => ipcCall<unknown, { records: TrustSummary[] }>('trust:list', {}),
     get: (domain: string) =>
