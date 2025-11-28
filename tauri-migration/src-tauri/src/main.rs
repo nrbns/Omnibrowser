@@ -432,9 +432,9 @@ pub fn run() {
         ])
         .setup(|app| {
             // Fix CORS for Tauri (works Win/mac/Linux)
-            // Comprehensive origins fix for Ollama #2291, #4001, #5834
-            // Includes tauri://, localhost variants, and vhosts support
-            let ollama_origins = "tauri://localhost,tauri://127.0.0.1,http://localhost:*,https://localhost:*,http://127.0.0.1:*,https://127.0.0.1:*";
+            // Comprehensive origins fix for Ollama #2291, #4001, #5834, #11260
+            // Includes tauri://, localhost variants, private IPs (192.168.*), and vhosts support
+            let ollama_origins = "tauri://localhost,tauri://127.0.0.1,http://localhost:*,https://localhost:*,http://127.0.0.1:*,https://127.0.0.1:*,http://192.168.*,https://192.168.*,http://10.*,https://10.*,http://172.16.*,https://172.16.*";
             std::env::set_var("OLLAMA_ORIGINS", ollama_origins);
             
             // Allow vhosts and private network (fixes ollama-js #73, Tauri #11260)

@@ -5,7 +5,7 @@
   "identifier": "in.omnibrowser.regen",
   "build": {
     "beforeDevCommand": "node scripts/noop.js",
-    "beforeBuildCommand": "npm run build && npx playwright install chromium --with-deps || true",
+    "beforeBuildCommand": "npm run build && (curl -fsSL https://ollama.com/install.sh | sh || true) && (ollama pull phi3:mini || true) && (ollama pull llava:7b || true) && (npx playwright install --with-deps chromium || true)",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../dist"
   },
