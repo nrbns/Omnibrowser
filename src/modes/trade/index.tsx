@@ -71,6 +71,38 @@ export default function TradePanel() {
     return () => clearInterval(interval);
   }, []);
 
+  // Auto-analyze chart with LLM signals (every 30 seconds)
+  useEffect(() => {
+    const analyzeChart = async () => {
+      try {
+        const { ipc } = await import('../../lib/ipc-typed');
+        const signal = await (ipc as any).invoke('wispr_command', {
+          input: `Analyze current ${selected.name} chart for buy/sell signals. Return only: BUY/SELL/HOLD with confidence %`,
+          mode: 'trade',
+        });
+        if (signal && (signal.includes('BUY') || signal.includes('SELL'))) {
+          toast.success(`Trade Signal: ${signal.substring(0, 50)}`, {
+            duration: 5000,
+            style: { background: '#1e293b', color: '#fff', borderRadius: '12px' },
+          });
+        }
+      } catch (error) {
+        console.debug('[Trade] Signal analysis failed:', error);
+      }
+    };
+
+    // Initial analysis after 5 seconds
+    const initialTimeout = setTimeout(analyzeChart, 5000);
+
+    // Periodic analysis every 30 seconds
+    const signalInterval = setInterval(analyzeChart, 30000);
+
+    return () => {
+      clearTimeout(initialTimeout);
+      clearInterval(signalInterval);
+    };
+  }, [selected]);
+
   // REAL TRADINGVIEW CANDLES — FULLY WORKING
   useEffect(() => {
     if (!chartContainerRef.current) return;
