@@ -6,7 +6,7 @@ import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import './styles/globals.css';
 import './styles/mode-themes.css';
 import './lib/battery';
-import { isDevEnv } from './lib/env';
+import { isDevEnv, isElectronRuntime } from './lib/env';
 import { setupClipperHandlers } from './lib/research/clipper-handler';
 import { syncRendererTelemetry } from './lib/monitoring/sentry-client';
 import { syncAnalyticsOptIn, trackPageView } from './lib/monitoring/analytics-client';
@@ -319,6 +319,39 @@ try {
         toast.success('AI brain ready! Press Ctrl+Space for WISPR.');
       });
     });
+
+    // Listen for backend-ready event
+    window.addEventListener('backend-ready', () => {
+      if (isDevEnv()) {
+        console.log('[Backend] All services ready!');
+      }
+      import('./utils/toast').then(({ toast }) => {
+        toast.success('Backend ready! Ollama, MeiliSearch, and n8n are running.');
+      });
+    });
+
+    window.addEventListener('ollama-ready', () => {
+      if (isDevEnv()) {
+        console.log('[Ollama] Ready!');
+      }
+    });
+
+    // Listen for iframe-call events (fixes #6204)
+    window.addEventListener('iframe-call', ((e: CustomEvent<string>) => {
+      try {
+        const payload = typeof e.detail === 'string' ? JSON.parse(e.detail) : e.detail;
+        const fnName = payload.fn;
+        const args = payload.args || {};
+        // Execute in main context (bypasses iframe sandbox)
+        if (ipc && typeof (ipc as any)[fnName] === 'function') {
+          (ipc as any)[fnName](args).catch((err: Error) => {
+            console.warn('[Iframe] Invoke failed:', err);
+          });
+        }
+      } catch (err) {
+        console.warn('[Iframe] Invalid iframe-call payload:', err);
+      }
+    }) as EventListener);
 
     // Listen for Ollama missing notification
     window.addEventListener('ollama-missing', () => {

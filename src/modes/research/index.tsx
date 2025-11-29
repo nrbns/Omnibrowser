@@ -43,6 +43,7 @@ import { runDeepScan, type DeepScanStep, type DeepScanSource } from '../../servi
 import { CursorChat } from '../../components/cursor/CursorChat';
 import { OmniAgentInput } from '../../components/OmniAgentInput';
 import ResearchModePanel from '../../components/research/ResearchModePanel';
+import { researchApi } from '../../lib/api-client';
 
 type UploadedDocument = {
   id: string;
@@ -828,53 +829,99 @@ export default function ResearchPanel() {
           steps: deepScanResult.steps,
         };
       } else {
+        // Try backend API first (real-time, streaming support)
+        let backendResult: any = null;
         try {
-          const multiSourceResults = await multiSourceSearch(searchQuery, { limit: 20 });
-          if (multiSourceResults.length > 0) {
-            aggregatedSources = multiSourceResults.map((hit, idx) =>
-              mapMultiSourceResultToSource(hit, idx)
-            );
-            aggregatedProviderNames = Array.from(
-              new Set(
-                multiSourceResults.map(hit =>
-                  typeof hit.source === 'string' ? hit.source.toLowerCase() : 'web'
-                )
-              )
-            );
-            context.multi_source_results = multiSourceResults.slice(0, 8).map(hit => ({
-              title: hit.title,
-              url: hit.url,
-              snippet: hit.snippet.slice(0, 300),
-              provider: hit.source,
-              score: hit.score,
-            }));
+          backendResult = await researchApi.queryEnhanced({
+            query: searchQuery,
+            maxSources: 12,
+            includeCounterpoints,
+            recencyWeight,
+            authorityWeight,
+            language: language !== 'auto' ? language : undefined,
+          });
 
-            const urlsToScrape = aggregatedSources
-              .filter(source => Boolean(source.url))
-              .slice(0, 4)
-              .map(source => source.url as string);
-            if (urlsToScrape.length > 0) {
-              scrapedSnapshots = await scrapeResearchSources(urlsToScrape, {
-                max_chars: 12000,
-                allow_render: true,
-              });
-              if (scrapedSnapshots.length > 0) {
-                aggregatedSources = mergeScrapedSnapshots(aggregatedSources, scrapedSnapshots);
-                context.scraped_sources = scrapedSnapshots.slice(0, 3).map(snapshot => ({
-                  url: snapshot.finalUrl ?? snapshot.url,
-                  title: snapshot.title,
-                  excerpt: snapshot.excerpt?.slice(0, 400),
-                  word_count: snapshot.wordCount,
-                  rendered: snapshot.rendered,
-                }));
-              }
+          if (backendResult && backendResult.sources && backendResult.sources.length > 0) {
+            aggregatedSources = backendResult.sources.map((source: any, idx: number) => ({
+              id: `backend-${idx}`,
+              title: source.title || 'Untitled',
+              url: source.url || '',
+              domain: source.domain || '',
+              snippet: source.snippet || '',
+              text: source.snippet || '',
+              type: source.sourceType || 'other',
+              sourceType: source.sourceType || 'other',
+              relevanceScore: Math.round((source.relevanceScore || 0.5) * 100),
+              timestamp: source.timestamp || Date.now(),
+              metadata: {
+                provider: 'backend-api',
+              },
+            }));
+            aggregatedProviderNames = ['backend-api'];
+
+            // Use backend summary if available
+            if (backendResult.summary) {
+              context.backend_summary = backendResult.summary;
             }
+
+            console.log(
+              `[Research] Backend API returned ${aggregatedSources.length} results with summary`
+            );
           }
-        } catch (multiSourceError) {
-          console.warn('[Research] Multi-source search failed:', multiSourceError);
+        } catch (backendError) {
+          console.warn('[Research] Backend API failed, trying multi-source search:', backendError);
         }
 
-        // Fallback to live web search if multiSourceSearch returned no results
+        // Fallback to multi-source search if backend API failed or returned no results
+        if (aggregatedSources.length === 0) {
+          try {
+            const multiSourceResults = await multiSourceSearch(searchQuery, { limit: 20 });
+            if (multiSourceResults.length > 0) {
+              aggregatedSources = multiSourceResults.map((hit, idx) =>
+                mapMultiSourceResultToSource(hit, idx)
+              );
+              aggregatedProviderNames = Array.from(
+                new Set(
+                  multiSourceResults.map(hit =>
+                    typeof hit.source === 'string' ? hit.source.toLowerCase() : 'web'
+                  )
+                )
+              );
+              context.multi_source_results = multiSourceResults.slice(0, 8).map(hit => ({
+                title: hit.title,
+                url: hit.url,
+                snippet: hit.snippet.slice(0, 300),
+                provider: hit.source,
+                score: hit.score,
+              }));
+
+              const urlsToScrape = aggregatedSources
+                .filter(source => Boolean(source.url))
+                .slice(0, 4)
+                .map(source => source.url as string);
+              if (urlsToScrape.length > 0) {
+                scrapedSnapshots = await scrapeResearchSources(urlsToScrape, {
+                  max_chars: 12000,
+                  allow_render: true,
+                });
+                if (scrapedSnapshots.length > 0) {
+                  aggregatedSources = mergeScrapedSnapshots(aggregatedSources, scrapedSnapshots);
+                  context.scraped_sources = scrapedSnapshots.slice(0, 3).map(snapshot => ({
+                    url: snapshot.finalUrl ?? snapshot.url,
+                    title: snapshot.title,
+                    excerpt: snapshot.excerpt?.slice(0, 400),
+                    word_count: snapshot.wordCount,
+                    rendered: snapshot.rendered,
+                  }));
+                }
+              }
+            }
+          } catch (multiSourceError) {
+            console.warn('[Research] Multi-source search failed:', multiSourceError);
+          }
+        }
+
+        // Final fallback to live web search if all else fails
         if (aggregatedSources.length === 0) {
           try {
             const liveResults = await performLiveWebSearch(searchQuery, {
@@ -907,6 +954,33 @@ export default function ResearchPanel() {
           } catch (liveSearchError) {
             console.warn('[Research] Live web search failed:', liveSearchError);
           }
+        }
+
+        // If we got a backend result with summary, use it directly
+        if (backendResult && backendResult.summary && aggregatedSources.length > 0) {
+          const dedupedSources = dedupeResearchSources(aggregatedSources);
+          setResult({
+            query: searchQuery,
+            summary: backendResult.summary,
+            sources: dedupedSources.slice(0, 16),
+            citations: backendResult.citations || [],
+            inlineEvidence: [],
+            contradictions: backendResult.contradictions || [],
+            verification: backendResult.verification || {
+              verified: false,
+              claimDensity: aggregatedSources.length,
+              citationCoverage: backendResult.verification?.citationCoverage || 0,
+              ungroundedClaims: [],
+              hallucinationRisk: backendResult.verification?.hallucinationRisk || 0.5,
+              suggestions: [],
+            },
+            confidence: backendResult.confidence || 0.7,
+            language: backendResult.language,
+            languageLabel: backendResult.languageLabel,
+            languageConfidence: backendResult.languageConfidence,
+          });
+          setLoading(false);
+          return;
         }
       }
 

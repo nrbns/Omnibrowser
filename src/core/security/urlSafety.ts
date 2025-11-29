@@ -5,7 +5,7 @@
 
 import { log } from '../../utils/logger';
 
-// Blocked hosts (internal/metadata endpoints)
+// Blocked hosts (internal/metadata endpoints) - Tier 1: Enhanced security
 const BLOCKED_HOSTS = [
   '169.254.169.254', // AWS metadata
   'metadata.google.internal', // GCP metadata
@@ -14,6 +14,10 @@ const BLOCKED_HOSTS = [
   '127.0.0.1',
   '::1',
   '0.0.0.0',
+  'metadata.azure.com', // Azure metadata
+  '169.254.169.254', // EC2 metadata
+  'fd00::', // IPv6 private
+  'fe80::', // IPv6 link-local
 ];
 
 // Allowed protocols

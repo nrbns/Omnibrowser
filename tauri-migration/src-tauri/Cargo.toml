@@ -18,7 +18,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 thiserror = "1"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
+futures-util = "0.3"
+urlencoding = "2.1"
 tauri-plugin-global-shortcut = "2.0"
 sysinfo = "0.31"  # For process management and memory monitoring
 # playwright = { version = "0.20", features = ["api"] }  # Commented out - requires Node.js runtime

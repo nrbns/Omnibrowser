@@ -1901,10 +1901,6 @@ export const ipc = {
         screenshot,
       }),
   },
-  trade: {
-    execute: (query: string) =>
-      ipcCall<{ query: string }, string>('execute_trade_command', { query }),
-  },
   trust: {
     list: () => ipcCall<unknown, { records: TrustSummary[] }>('trust:list', {}),
     get: (domain: string) =>
@@ -2550,6 +2546,8 @@ export const ipc = {
       ipcCall<typeof payload, { success: boolean; path: string }>('reader:export', payload),
   },
   trade: {
+    execute: (query: string) =>
+      ipcCall<{ query: string }, string>('execute_trade_command', { query }),
     placeOrder: (order: {
       symbol: string;
       side: 'buy' | 'sell';

@@ -267,7 +267,7 @@ export default function ResearchModePanel({
                 {((result as any).languageLabel || (result as any).language) && (
                   <span className="text-sm text-gray-400">
                     {(result as any).languageLabel || (result as any).language}
-                    {(result as any).languageConfidence && (
+                    {(result as any).languageConfidence != null && (
                       <span className="ml-2 text-gray-500">
                         ({((result as any).languageConfidence * 100).toFixed(0)}% confidence)
                       </span>
@@ -299,10 +299,17 @@ export default function ResearchModePanel({
                     </span>
                   </div>
                   <div className="text-sm text-gray-400 space-y-1">
-                    <div>Citation Coverage: {result.verification.citationCoverage.toFixed(1)}%</div>
                     <div>
-                      Hallucination Risk: {(result.verification.hallucinationRisk * 100).toFixed(1)}
-                      %
+                      Citation Coverage:{' '}
+                      {result.verification.citationCoverage != null
+                        ? `${result.verification.citationCoverage.toFixed(1)}%`
+                        : 'N/A'}
+                    </div>
+                    <div>
+                      Hallucination Risk:{' '}
+                      {result.verification.hallucinationRisk != null
+                        ? `${(result.verification.hallucinationRisk * 100).toFixed(1)}%`
+                        : 'N/A'}
                     </div>
                   </div>
                 </div>

@@ -1,3 +1,6 @@
+import { validateUrlForAgent } from '../core/security/urlSafety';
+import { log } from '../utils/logger';
+
 const API_BASE =
   (typeof window !== 'undefined' ? window.__OB_API_BASE__ : '') ||
   import.meta.env.VITE_APP_API_URL ||
@@ -59,6 +62,39 @@ export async function scrapeResearchSources(
     return [];
   }
 
+  // Tier 1: Security guardrails - validate all URLs before scraping
+  const safeUrls: string[] = [];
+  const blockedUrls: Array<{ url: string; reason: string }> = [];
+
+  for (const url of urls) {
+    const validation = validateUrlForAgent(url);
+    if (validation.safe) {
+      safeUrls.push(url);
+    } else {
+      blockedUrls.push({ url, reason: validation.reason || 'Unsafe URL' });
+      log.warn('[Scraper] Blocked unsafe URL', { url, reason: validation.reason });
+    }
+  }
+
+  // If all URLs are blocked, return empty with error info
+  if (safeUrls.length === 0) {
+    if (blockedUrls.length > 0) {
+      log.error('[Scraper] All URLs blocked by security check', blockedUrls);
+    }
+    return blockedUrls.map(({ url, reason }) => ({
+      url,
+      error: reason || 'URL blocked by security policy',
+    }));
+  }
+
+  // If some URLs are blocked, log warning but continue with safe ones
+  if (blockedUrls.length > 0) {
+    log.warn('[Scraper] Some URLs blocked, proceeding with safe URLs', {
+      blocked: blockedUrls.length,
+      safe: safeUrls.length,
+    });
+  }
+
   try {
     const response = await fetch(`${API_BASE.replace(/\/$/, '')}/api/scrape`, {
       method: 'POST',
@@ -66,7 +102,7 @@ export async function scrapeResearchSources(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        urls,
+        urls: safeUrls, // Only send safe URLs to backend
         allow_render: options.allow_render ?? true,
         use_cache: options.use_cache ?? true,
         selectors: options.selectors,

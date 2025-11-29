@@ -12,6 +12,7 @@ import { useAppStore } from '../state/appStore';
 import { ipc } from '../lib/ipc-typed';
 import { formatDistanceToNow } from 'date-fns';
 import { log } from '../utils/logger';
+import { track } from '../services/analytics';
 
 export default function SessionRestoreModal() {
   const [show, setShow] = useState(false);
@@ -97,6 +98,13 @@ export default function SessionRestoreModal() {
       }
 
       log.info('Session restored successfully');
+
+      // Tier 1: Track session restore
+      track('auth_session_restored', {
+        tabCount: session.tabs.length,
+        mode: session.mode,
+      });
+
       setShow(false);
     } catch (error) {
       log.error('Failed to restore session', error);
@@ -109,6 +117,12 @@ export default function SessionRestoreModal() {
     clearSession();
     setShow(false);
     log.info('Session restore dismissed');
+
+    // Tier 1: Track dismissal
+    track('auth_session_restored', {
+      action: 'dismissed',
+      tabCount: sessionSummary?.tabCount || 0,
+    });
   };
 
   if (!show || !sessionSummary) return null;

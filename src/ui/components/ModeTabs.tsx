@@ -21,11 +21,12 @@ const MODE_CONFIG: Array<{
   label: string;
   icon: React.ComponentType<any>;
   shortcut?: string;
+  comingSoon?: boolean;
 }> = [
   { id: 'browse', label: 'Browse', icon: Globe, shortcut: '1' },
   { id: 'research', label: 'Research', icon: Search, shortcut: '2' },
   { id: 'trade', label: 'Trade', icon: TrendingUp, shortcut: '3' },
-  { id: 'dev', label: 'Dev', icon: Code, shortcut: '4' },
+  { id: 'dev', label: 'Dev', icon: Code, shortcut: '4', comingSoon: true }, // Tier 1: Hide unfinished
 ];
 
 export function ModeTabs({ className, compact, onModeChange }: ModeTabsProps) {
@@ -105,6 +106,12 @@ export function ModeTabs({ className, compact, onModeChange }: ModeTabsProps) {
         const Icon = mode.icon;
         const isActive = currentModeId === mode.id;
         const isHovered = hoveredMode === mode.id;
+        const isComingSoon = mode.comingSoon;
+
+        // Tier 1: Hide unfinished modes (only show Browse and Research)
+        if (isComingSoon && !isActive) {
+          return null;
+        }
 
         return (
           <button
@@ -118,6 +125,12 @@ export function ModeTabs({ className, compact, onModeChange }: ModeTabsProps) {
               if ((e.nativeEvent as any)?.stopImmediatePropagation) {
                 (e.nativeEvent as any).stopImmediatePropagation();
               }
+              if (isComingSoon) {
+                // Show "Coming Soon" toast instead of switching
+                const { toast } = await import('../../utils/toast');
+                toast.info(`${mode.label} mode is coming soon!`);
+                return;
+              }
               await handleModeClick(mode.id);
             }}
             onMouseDown={e => {
@@ -129,7 +142,7 @@ export function ModeTabs({ className, compact, onModeChange }: ModeTabsProps) {
             onMouseLeave={() => {
               setHoveredMode(null);
             }}
-            disabled={isShifting}
+            disabled={isShifting || isComingSoon}
             className={`
               relative flex items-center gap-2 px-3 py-2 rounded-lg
               transition-all duration-200
@@ -139,7 +152,7 @@ export function ModeTabs({ className, compact, onModeChange }: ModeTabsProps) {
                   ? 'bg-[var(--color-primary-600)] text-white shadow-md'
                   : 'bg-[var(--surface-elevated)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]'
               }
-              ${isShifting ? 'opacity-50 cursor-wait' : 'cursor-pointer'}
+              ${isShifting ? 'opacity-50 cursor-wait' : isComingSoon ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}
               ${compact ? 'px-2 py-1.5' : ''}
             `}
             style={{
@@ -148,13 +161,20 @@ export function ModeTabs({ className, compact, onModeChange }: ModeTabsProps) {
             role="tab"
             aria-selected={isActive}
             aria-controls={`mode-${mode.id}`}
-            title={`${mode.label} (Alt+${mode.shortcut})`}
+            title={
+              isComingSoon ? `${mode.label} (Coming Soon)` : `${mode.label} (Alt+${mode.shortcut})`
+            }
           >
             <Icon
               size={compact ? 16 : 18}
               className={isActive ? 'text-white' : 'text-[var(--text-muted)]'}
             />
-            {!compact && <span className="font-medium">{mode.label}</span>}
+            {!compact && (
+              <span className="font-medium">
+                {mode.label}
+                {isComingSoon && <span className="ml-1 text-xs opacity-70">(Soon)</span>}
+              </span>
+            )}
             {isActive && (
               <motion.div
                 layoutId="mode-indicator"

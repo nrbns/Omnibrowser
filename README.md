@@ -177,8 +177,17 @@ Tauri + React + TypeScript + Vite multi-mode desktop browser with:
 
 ## 🚀 Quick Start
 
+### For Users (Recommended)
+
+1. **Download**: Get the installer from [Releases](https://github.com/nrbns/Regenbrowser/releases)
+2. **Install**: Run the installer (auto-downloads Ollama + AI models)
+3. **Launch**: Open RegenBrowser → Press `Ctrl+Space` for WISPR
+4. **Use**: Try Research Mode → "Summarize this page" or "Research quantum computing"
+
+### For Developers
+
 ```bash
-# Clone
+# Clone repository
 git clone https://github.com/nrbns/Regenbrowser.git
 cd Regenbrowser
 
@@ -198,12 +207,20 @@ cp example.env .env
 ollama pull phi3:mini
 ollama pull llava:7b
 
-# Dev mode
+# Start development server
 npm run dev
 
 # Build installer
 npm run build:installer
 ```
+
+### Architecture Overview
+
+- **Frontend**: React + TypeScript + Vite (port 5173)
+- **Backend**: Fastify server (port 4000)
+- **Desktop**: Tauri shell (port 5183)
+- **Queue**: BullMQ + Redis for scraping jobs
+- **State**: Zustand for centralized tab/session management
 
 ### Environment Variables
 
@@ -254,14 +271,39 @@ See `example.env` for all available options.
 
 ## 📈 Roadmap
 
-- [x] WISPR voice agent
-- [x] One-click installer
-- [x] Chrome extension
-- [x] Offline AI (Ollama)
+### Tier 1 (Completed ✅)
+
+- [x] Centralized tab state (Zustand)
+- [x] Session save & restore
+- [x] Unified `/api/summarize` facade (no polling)
+- [x] Back/forward history navigation
+- [x] Loading/error/empty states
+- [x] Hide unfinished modes (Research Mode only)
+- [x] Analytics & logging
+- [x] Security guardrails (blocked hosts, protocols)
+
+### Tier 2 (In Progress 🚧)
+
+- [ ] Bookmarks & workspaces
+- [ ] Settings UI
+- [ ] Simple agents
+- [ ] User feedback system
+- [ ] Enhanced error recovery
+
+### Tier 3 (Planned 📋)
+
 - [ ] Zerodha integration
 - [ ] Multi-tab split view
 - [ ] Mobile app (PWA)
 - [ ] API for B2B
+- [ ] Advanced agent workflows
+
+### Legacy Features (Complete ✅)
+
+- [x] WISPR voice agent
+- [x] One-click installer
+- [x] Chrome extension
+- [x] Offline AI (Ollama)
 
 ## 🤝 Contributing
 

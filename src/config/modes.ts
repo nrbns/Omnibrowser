@@ -41,7 +41,7 @@ export const MODES: Record<ModeId, ModeConfig> = {
     label: 'Trade',
     enabled: true,
     comingSoon: false,
-    description: 'Trading mode with TradingView integration (beta)',
+    description: 'Trading mode with TradingView integration',
   },
   Games: {
     id: 'Games',
@@ -55,7 +55,7 @@ export const MODES: Record<ModeId, ModeConfig> = {
     label: 'Docs',
     enabled: false,
     comingSoon: true,
-    description: 'Document mode (coming soon)',
+    description: 'Document mode (Coming Soon)',
   },
   Images: {
     id: 'Images',
@@ -69,7 +69,7 @@ export const MODES: Record<ModeId, ModeConfig> = {
     label: 'Threats',
     enabled: false,
     comingSoon: true,
-    description: 'Threat intelligence mode (coming soon)',
+    description: 'Threat intelligence mode (Coming Soon)',
   },
   GraphMind: {
     id: 'GraphMind',

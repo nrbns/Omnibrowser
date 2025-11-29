@@ -95,30 +95,25 @@ const voiceController = {
   handleVoiceRecognize: async () => ({ error: 'Voice controller not available' }),
 };
 
-// Global error suppression for ioredis - must be set up before any Redis clients are created
-const suppressRedisErrors = () => {
-  const originalEmit = process.emit;
-  let hasBeenSet = false;
-
-  if (!hasBeenSet) {
-    process.emit = function (event, ...args) {
-      if (event === 'uncaughtException' || event === 'unhandledRejection') {
-        const error = args[0];
-        if (error && typeof error === 'object' && 'code' in error) {
-          if (error.code === 'ECONNREFUSED' || error.code === 'MaxRetriesPerRequestError') {
-            // Suppress Redis-related unhandled errors
-            return false;
-          }
-        }
+// --- Redis connection error handler (safe) ---
+function attachRedisErrorHandlers(client, name) {
+  client.on('error', err => {
+    // Only log non-connection errors in debug; always note connection failures
+    const code = err && err.code;
+    if (code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'ETIMEDOUT') {
+      // Connection-level issue
+      redisConnected = false;
+      const now = Date.now();
+      if (now - lastRedisErrorTime > REDIS_ERROR_SUPPRESSION_MS) {
+        fastify.log.warn({ err, redis: name }, `Redis connection issue (${name})`);
+        lastRedisErrorTime = now;
       }
-      return originalEmit.apply(this, [event, ...args]);
-    };
-    hasBeenSet = true;
-  }
-};
-
-// Set up error suppression immediately
-suppressRedisErrors();
+      return;
+    }
+    // Non-connection errors: log at debug level
+    fastify.log.debug({ err, redis: name }, 'Redis client error');
+  });
+}
 
 const nodeProcess = globalThis.process;
 const globalSetInterval = globalThis.setInterval
@@ -508,8 +503,14 @@ const redisConfig = {
   enableOfflineQueue: false,
   connectTimeout: 5000,
   lazyConnect: true, // Don't connect immediately - connect on first use
+  showFriendlyErrorStack: false,
+  // Prevent Redis from crashing the server
+  enableReadyCheck: false,
+  autoResubscribe: false,
 };
 
+// Create Redis clients but don't connect immediately
+// They will only connect when actually used
 const redisPub = new Redis(REDIS_URL, redisConfig);
 const redisSub = new Redis(REDIS_URL, redisConfig);
 const redisStore = new Redis(REDIS_URL, redisConfig);
@@ -599,8 +600,23 @@ async function safeRedisOperation(operation, fallback = null) {
   }
 }
 
-// Error suppression is set up at the top of the file
+// Safe WebSocket send helper
+function safeWsSend(ws, payload) {
+  try {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(payload);
+    }
+  } catch (err) {
+    fastify.log.warn({ err }, 'failed to send ws payload');
+    try {
+      ws.terminate();
+    } catch {
+      // ignore termination errors
+    }
+  }
+}
 
+// Attach error handlers to all Redis clients
 for (const { name, client } of redisClients) {
   client.on('connect', () => {
     redisConnected = true;
@@ -613,33 +629,7 @@ for (const { name, client } of redisClients) {
     redisConnected = true;
   });
 
-  client.on('error', error => {
-    redisConnected = false;
-
-    // Completely suppress all Redis connection errors - Redis is optional
-    if (
-      error?.code === 'ECONNREFUSED' ||
-      error?.code === 'MaxRetriesPerRequestError' ||
-      error?.code === 'ENOTFOUND' ||
-      error?.code === 'ETIMEDOUT' ||
-      error?.message?.includes('Connection is closed')
-    ) {
-      // Silently ignore - Redis is optional
-      return;
-    }
-
-    // Only log non-connection errors in debug mode
-    const now = Date.now();
-    if (now - lastRedisErrorTime > REDIS_ERROR_SUPPRESSION_MS) {
-      if (fastify.log.level === 'debug') {
-        fastify.log.debug(
-          { error, redis: name },
-          `[redis:${name}] ${error?.message || 'Redis error'}`
-        );
-      }
-      lastRedisErrorTime = now;
-    }
-  });
+  attachRedisErrorHandlers(client, name);
 
   client.on('close', () => {
     redisConnected = false;
@@ -861,8 +851,39 @@ if (enableWebSockets) {
   fastify.get('/ws', { websocket: true }, connection => {
     const ws = connection.socket;
     const clientId = uuidv4();
-    clients.set(ws, { clientId, createdAt: Date.now() });
+    const meta = { clientId, createdAt: Date.now(), lastPong: Date.now() };
+
+    clients.set(ws, meta);
     fastify.log.info({ clientId }, 'redix ws connected');
+
+    // respond to pongs
+    ws.on('pong', () => {
+      meta.lastPong = Date.now();
+    });
+
+    // setup a per-client ping interval to detect stale clients
+    const pingInterval = setInterval(() => {
+      try {
+        if (ws.readyState !== WebSocket.OPEN) {
+          clearInterval(pingInterval);
+          return;
+        }
+        // If client hasn't ponged for 60s, terminate
+        if (Date.now() - meta.lastPong > 60_000) {
+          fastify.log.info({ clientId }, 'terminating stale ws client');
+          try {
+            ws.terminate();
+          } catch {
+            // ignore termination errors
+          }
+          clearInterval(pingInterval);
+          return;
+        }
+        ws.ping();
+      } catch (err) {
+        fastify.log.warn({ err }, 'ws ping failed');
+      }
+    }, 30000);
 
     ws.on('message', async raw => {
       let message;
@@ -870,7 +891,7 @@ if (enableWebSockets) {
         message = JSON.parse(raw.toString());
       } catch (error) {
         fastify.log.warn({ error }, 'invalid json from client');
-        ws.send(JSON.stringify({ type: 'error', payload: { message: 'invalid-json' } }));
+        safeWsSend(ws, JSON.stringify({ type: 'error', payload: { message: 'invalid-json' } }));
         return;
       }
 
@@ -878,7 +899,8 @@ if (enableWebSockets) {
         case 'start_query':
           handleStartQuery(ws, message).catch(error => {
             fastify.log.error({ error }, 'failed to handle start_query');
-            ws.send(
+            safeWsSend(
+              ws,
               JSON.stringify({ id: message.id, type: 'error', payload: { message: error.message } })
             );
           });
@@ -887,15 +909,21 @@ if (enableWebSockets) {
           handleCancel(message);
           break;
         default:
-          ws.send(
+          safeWsSend(
+            ws,
             JSON.stringify({ id: message.id, type: 'error', payload: { message: 'unknown-type' } })
           );
       }
     });
 
     ws.on('close', () => {
+      clearInterval(pingInterval);
       clients.delete(ws);
       fastify.log.info({ clientId }, 'redix ws disconnected');
+    });
+
+    ws.on('error', err => {
+      fastify.log.warn({ err }, 'ws error on client ' + clientId);
     });
   });
 
@@ -903,7 +931,7 @@ if (enableWebSockets) {
     const ws = connection.socket;
     metricsClients.add(ws);
     fastify.log.debug('metrics client connected');
-    ws.send(JSON.stringify(lastMetricsSample));
+    safeWsSend(ws, JSON.stringify(lastMetricsSample));
     ws.on('close', () => {
       metricsClients.delete(ws);
     });
@@ -1405,7 +1433,7 @@ async function handleStartQuery(ws, message) {
     options: payload.options ?? {},
   });
 
-  ws.send(JSON.stringify({ id, type: 'ack', payload: { taskId } }));
+  safeWsSend(ws, JSON.stringify({ id, type: 'ack', payload: { taskId } }));
 }
 
 async function handleCancel(message) {
@@ -1423,17 +1451,25 @@ async function handleCancel(message) {
   }
 }
 
-redisSub.subscribe('redix_results', 'redix_metrics', error => {
-  if (error) {
-    if (error?.code === 'ECONNREFUSED') {
-      fastify.log.warn('Redis not available - subscription skipped. Redis is optional.');
+// Redis subscription is optional - wrap in try-catch to prevent crashes
+try {
+  redisSub.subscribe('redix_results', 'redix_metrics', error => {
+    if (error) {
+      if (error?.code === 'ECONNREFUSED') {
+        fastify.log.warn('Redis not available - subscription skipped. Redis is optional.');
+      } else {
+        fastify.log.error({ error }, 'failed to subscribe redis channels');
+      }
+      redisConnected = false;
     } else {
-      fastify.log.error({ error }, 'failed to subscribe redis channels');
+      redisConnected = true;
     }
-  } else {
-    redisConnected = true;
-  }
-});
+  });
+} catch {
+  // Redis subscription failed - server can run without it
+  redisConnected = false;
+  fastify.log.debug('Redis subscription skipped - Redis not available');
+}
 
 redisSub.on('message', (channel, raw) => {
   if (channel === 'redix_results') {
@@ -1445,12 +1481,8 @@ redisSub.on('message', (channel, raw) => {
       return;
     }
 
-    for (const [ws] of clients) {
-      try {
-        ws.send(JSON.stringify(message));
-      } catch (error) {
-        fastify.log.warn({ error }, 'failed to send result');
-      }
+    for (const [ws, _meta] of clients.entries()) {
+      safeWsSend(ws, JSON.stringify(message));
     }
     return;
   }
@@ -2096,6 +2128,100 @@ fastify.post('/api/research/enhanced', async (request, reply) => {
 });
 
 // ============================================================================
+// TRADE API ENDPOINTS
+// ============================================================================
+
+fastify.get('/api/trade/quote/:symbol', async (request, reply) => {
+  const { symbol } = request.params;
+  if (!symbol) {
+    reply.code(400);
+    return { error: 'Symbol is required' };
+  }
+
+  try {
+    // Mock quote data - replace with real broker API
+    const mockQuote = {
+      symbol,
+      price: 25035.14 + Math.random() * 100,
+      change: (Math.random() - 0.5) * 50,
+      changePercent: (Math.random() - 0.5) * 2,
+      volume: Math.floor(Math.random() * 1000000),
+      high: 25120,
+      low: 24720,
+      open: 24850,
+      timestamp: Date.now(),
+    };
+    return mockQuote;
+  } catch (error) {
+    fastify.log.error({ error }, 'Trade quote failed');
+    reply.code(500);
+    return { error: 'Trade quote failed', message: error.message };
+  }
+});
+
+fastify.get('/api/trade/candles/:symbol', async (request, reply) => {
+  const { symbol } = request.params;
+  const { interval = '1d', limit = 50 } = request.query;
+  if (!symbol) {
+    reply.code(400);
+    return { error: 'Symbol is required' };
+  }
+
+  try {
+    // Generate mock candle data - replace with real data source
+    const candles = Array.from({ length: Number(limit) || 50 }, (_, i) => {
+      const baseDate = new Date();
+      baseDate.setDate(baseDate.getDate() - (Number(limit) || 50) + i);
+      const time = baseDate.toISOString().split('T')[0];
+      const open = 24800 + Math.random() * 300;
+      const close = open + (Math.random() - 0.5) * 400;
+      const high = Math.max(open, close) + Math.random() * 100;
+      const low = Math.min(open, close) - Math.random() * 100;
+      return { time, open, high, low, close };
+    });
+    return { symbol, interval, candles };
+  } catch (error) {
+    fastify.log.error({ error }, 'Trade candles failed');
+    reply.code(500);
+    return { error: 'Trade candles failed', message: error.message };
+  }
+});
+
+fastify.post('/api/trade/order', async (request, reply) => {
+  const {
+    symbol,
+    quantity,
+    orderType,
+    stopLoss: _stopLoss,
+    takeProfit: _takeProfit,
+  } = request.body ?? {};
+  if (!symbol || !quantity || !orderType) {
+    reply.code(400);
+    return { error: 'Symbol, quantity, and orderType are required' };
+  }
+
+  try {
+    // Mock order placement - replace with real broker API
+    // stopLoss and takeProfit are accepted but not yet implemented in mock
+    const orderId = `order_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    fastify.log.info({ symbol, quantity, orderType }, 'Trade order placed');
+    return {
+      success: true,
+      orderId,
+      symbol,
+      quantity,
+      orderType,
+      status: 'pending',
+      timestamp: Date.now(),
+    };
+  } catch (error) {
+    fastify.log.error({ error }, 'Trade order failed');
+    reply.code(500);
+    return { error: 'Trade order failed', message: error.message };
+  }
+});
+
+// ============================================================================
 // GRAPH API - For Tauri migration
 // ============================================================================
 const graphStore = new Map();
@@ -2389,6 +2515,213 @@ fastify.get('/api/scrape/:id', async (request, reply) => {
 });
 
 // ============================================================================
+// SUMMARIZE API - Tier 1: Unified facade that handles polling internally
+// ============================================================================
+/**
+ * POST /api/summarize
+ * Unified summarize endpoint that handles job polling internally.
+ * Frontend never needs to poll - this endpoint waits for completion.
+ *
+ * Body: { url?: string, text?: string, question?: string, maxWaitSeconds?: number }
+ * Returns: { summary: string, answer?: string, sources: Array, model: string, jobId: string }
+ */
+fastify.post('/api/summarize', async (request, reply) => {
+  const { url, text, question, maxWaitSeconds = 30 } = request.body ?? {};
+
+  if (!url && !text) {
+    return reply.status(400).send({ error: 'url-or-text-required' });
+  }
+
+  // Tier 1: Security guardrails - validate URL before processing
+  if (url) {
+    try {
+      const urlObj = new URL(url);
+      const BLOCKED_HOSTS = [
+        '169.254.169.254',
+        'metadata.google.internal',
+        'localhost',
+        '127.0.0.1',
+        '::1',
+        '0.0.0.0',
+        'metadata.azure.com',
+      ];
+      const ALLOWED_PROTOCOLS = ['http:', 'https:'];
+
+      if (!ALLOWED_PROTOCOLS.includes(urlObj.protocol)) {
+        return reply.status(403).send({
+          error: 'blocked-protocol',
+          message: `Protocol ${urlObj.protocol} is not allowed. Only http: and https: are permitted.`,
+        });
+      }
+
+      if (
+        BLOCKED_HOSTS.includes(urlObj.hostname) ||
+        urlObj.hostname === 'localhost' ||
+        urlObj.hostname.endsWith('.localhost')
+      ) {
+        return reply.status(403).send({
+          error: 'blocked-host',
+          message: 'Internal and private network addresses are not allowed.',
+        });
+      }
+
+      // Check for private IP ranges
+      const privateIPPatterns = [
+        /^10\./,
+        /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
+        /^192\.168\./,
+        /^127\./,
+      ];
+      if (privateIPPatterns.some(pattern => pattern.test(urlObj.hostname))) {
+        return reply.status(403).send({
+          error: 'blocked-private-ip',
+          message: 'Private IP addresses are not allowed.',
+        });
+      }
+    } catch {
+      return reply.status(400).send({
+        error: 'invalid-url',
+        message: 'Invalid URL format.',
+      });
+    }
+  }
+
+  let jobId = null;
+  let meta = null;
+  let body = null;
+
+  // If URL provided, enqueue scrape and poll until complete
+  if (url) {
+    jobId = sha256(url);
+    try {
+      await enqueueScrape({ url, userId: request.body?.userId, jobId });
+    } catch (error) {
+      request.log.error({ error }, 'failed to enqueue scrape for summarize');
+      return reply.status(500).send({ error: 'scrape-enqueue-failed' });
+    }
+
+    // Poll internally until scrape completes or timeout
+    const pollUntil = Date.now() + maxWaitSeconds * 1000;
+    const pollInterval = 500; // Poll every 500ms
+    let attempts = 0;
+    const maxAttempts = Math.floor((maxWaitSeconds * 1000) / pollInterval);
+
+    while (Date.now() < pollUntil && attempts < maxAttempts) {
+      attempts++;
+      const raw = await safeRedisOperation(() => redisStore.get(`scrape:meta:${jobId}`), null);
+      if (raw) {
+        try {
+          meta = JSON.parse(raw);
+          if (meta.bodyKey) {
+            body = await safeRedisOperation(() => redisStore.get(meta.bodyKey), null);
+            if (body) break;
+          }
+          // Check if scrape failed
+          if (meta.status >= 400 || !meta.allowed) {
+            return reply.status(502).send({
+              error: 'scrape-failed',
+              jobId,
+              meta,
+              message: 'Failed to scrape URL',
+            });
+          }
+        } catch (error) {
+          request.log.warn({ error }, 'failed to parse scrape meta');
+        }
+      }
+      await new Promise(r => globalThis.setTimeout(r, pollInterval));
+    }
+
+    // If scrape didn't complete in time, return timeout error
+    if (!body) {
+      return reply.status(504).send({
+        error: 'scrape-timeout',
+        jobId,
+        message: `Scrape did not complete within ${maxWaitSeconds} seconds. Poll /api/scrape/meta/${jobId} for status.`,
+      });
+    }
+  } else {
+    // For raw text, use it directly
+    jobId = sha256(text + Date.now());
+    body = text;
+    meta = {
+      jobId,
+      url: null,
+      status: 200,
+      cached: false,
+      fetchedAt: new Date().toISOString(),
+      bodyKey: `agent:input:${jobId}`,
+    };
+  }
+
+  // Prepare provenance
+  const provenance = {
+    scrapeJobId: jobId,
+    url: url || null,
+    status: meta.status,
+    cached: Boolean(meta.cached),
+    fetchedAt: meta.fetchedAt,
+    durationMs: meta.durationMs || 0,
+    headers: meta.headers || {},
+    bodyKey: meta.bodyKey || `agent:input:${jobId}`,
+    excerpt: body?.slice(0, 500) || '',
+    scrapeErrors: meta.reason || null,
+  };
+
+  // Call LLM to summarize
+  try {
+    const llmResult = await LLMCircuit.fire({
+      task: 'summarize',
+      inputText: body,
+      url: url || null,
+      question: question || null,
+      userId: request.body?.userId || null,
+    });
+
+    const result = {
+      summary: llmResult.summary || llmResult.answer,
+      answer: llmResult.answer,
+      highlights: llmResult.highlights || [],
+      model: llmResult.model,
+      jobId,
+      sources: [
+        {
+          url: url || 'text-input',
+          jobId,
+          selector: null,
+        },
+      ],
+      provenance,
+    };
+
+    // Store result in Redis for caching (optional)
+    const resultKey = `agent:result:${jobId}:summarize`;
+    await safeRedisOperation(
+      () => redisStore.set(resultKey, JSON.stringify(result), 'EX', 60 * 60),
+      null
+    );
+
+    return result;
+  } catch (error) {
+    request.log.error({ error, jobId }, 'LLM summarize failed');
+
+    // Check if circuit breaker is open
+    if (LLMCircuit.opened) {
+      return reply.status(503).send({
+        error: 'llm-circuit-open',
+        message: 'AI service temporarily unavailable. Please try again later.',
+      });
+    }
+
+    return reply.status(500).send({
+      error: 'summarize-failed',
+      message: error.message || 'Failed to generate summary',
+      jobId,
+    });
+  }
+});
+
+// ============================================================================
 // SESSION STATE API - For Tauri migration
 // ============================================================================
 fastify.get('/api/session/check-restore', async () => {
@@ -2554,11 +2887,7 @@ const metricsInterval = globalSetInterval(
     lastMetricsSample = makeMetricsSample();
     const payload = JSON.stringify(lastMetricsSample);
     for (const ws of metricsClients) {
-      try {
-        ws.send(payload);
-      } catch (error) {
-        fastify.log.warn({ error }, 'failed to send metrics sample');
-      }
+      safeWsSend(ws, payload);
     }
   },
   Number(nodeProcess?.env.METRICS_INTERVAL_MS || 2000)

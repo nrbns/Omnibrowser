@@ -207,6 +207,26 @@ export const graphApi = {
   all: () => apiRequest<{ nodes: any[]; edges: any[] }>('/api/graph'),
 };
 
+// Trade API
+export const tradeApi = {
+  getQuote: (symbol: string) => apiRequest<any>(`/api/trade/quote/${symbol}`),
+  getCandles: (symbol: string, interval = '1d', limit = 50) =>
+    apiRequest<{ symbol: string; interval: string; candles: any[] }>(
+      `/api/trade/candles/${symbol}?interval=${interval}&limit=${limit}`
+    ),
+  placeOrder: (order: {
+    symbol: string;
+    quantity: number;
+    orderType: 'buy' | 'sell';
+    stopLoss?: number;
+    takeProfit?: number;
+  }) =>
+    apiRequest<{ success: boolean; orderId: string }>('/api/trade/order', {
+      method: 'POST',
+      body: order,
+    }),
+};
+
 // Ledger API
 export const ledgerApi = {
   add: (payload: { url: string; passage: string }) =>
@@ -267,6 +287,25 @@ export const scrapeApi = {
   get: (id: string) => apiRequest<any>(`/api/scrape/${id}`),
 };
 
+// Summarize API - Tier 1: Unified facade (no polling needed)
+export const summarizeApi = {
+  summarize: (payload: {
+    url?: string;
+    text?: string;
+    question?: string;
+    maxWaitSeconds?: number;
+  }) =>
+    apiRequest<{
+      summary: string;
+      answer?: string;
+      highlights?: string[];
+      model: string;
+      jobId: string;
+      sources: Array<{ url: string; jobId: string; selector: string | null }>;
+      provenance: any;
+    }>('/api/summarize', { method: 'POST', body: payload }),
+};
+
 // Session State API
 export const sessionStateApi = {
   checkRestore: () =>
@@ -315,5 +354,6 @@ export default {
   video: videoApi,
   ui: uiApi,
   scrape: scrapeApi,
+  summarize: summarizeApi,
   session: sessionStateApi,
 };

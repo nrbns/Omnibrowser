@@ -74,7 +74,70 @@ const fetchCircuit = createCircuit(
   }
 );
 
+// Tier 1: Security guardrails - blocked hosts and protocols
+const BLOCKED_HOSTS = [
+  '169.254.169.254', // AWS/GCP/Azure metadata
+  'metadata.google.internal',
+  'localhost',
+  '127.0.0.1',
+  '::1',
+  '0.0.0.0',
+  'metadata.azure.com',
+  'fd00::',
+  'fe80::',
+];
+
+const ALLOWED_PROTOCOLS = ['http:', 'https:'];
+
+function isPrivateIP(hostname) {
+  const privatePatterns = [
+    /^10\./,
+    /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
+    /^192\.168\./,
+    /^127\./,
+    /^::1$/,
+  ];
+  return privatePatterns.some(pattern => pattern.test(hostname));
+}
+
+function isUrlSafe(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+
+    // Check protocol
+    if (!ALLOWED_PROTOCOLS.includes(url.protocol)) {
+      return { safe: false, reason: `Blocked protocol: ${url.protocol}` };
+    }
+
+    // Check blocked hosts
+    if (BLOCKED_HOSTS.includes(url.hostname)) {
+      return { safe: false, reason: `Blocked host: ${url.hostname}` };
+    }
+
+    // Check for localhost variants
+    if (url.hostname === 'localhost' || url.hostname.endsWith('.localhost')) {
+      return { safe: false, reason: `Blocked localhost variant: ${url.hostname}` };
+    }
+
+    // Check for private IP ranges
+    if (isPrivateIP(url.hostname)) {
+      return { safe: false, reason: `Blocked private IP: ${url.hostname}` };
+    }
+
+    return { safe: true };
+  } catch (error) {
+    return { safe: false, reason: `Invalid URL: ${error.message}` };
+  }
+}
+
 export async function fetchWithSafety(rawUrl) {
+  // Tier 1: Security check before processing
+  const safetyCheck = isUrlSafe(rawUrl);
+  if (!safetyCheck.safe) {
+    console.warn('[scraper] Blocked unsafe URL', rawUrl, safetyCheck.reason);
+    return { allowed: false, status: 403, reason: safetyCheck.reason };
+  }
+
   const url = new URL(rawUrl);
   const domain = url.hostname;
 

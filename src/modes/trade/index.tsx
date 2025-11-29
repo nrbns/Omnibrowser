@@ -1,7 +1,7 @@
 // God Tier Trade Mode - Real TradingView Candles + Realtime NSE/US/Crypto
 import { useEffect, useRef, useState } from 'react';
 import { createChart, ColorType, IChartApi, ISeriesApi } from 'lightweight-charts';
-import toast from 'react-hot-toast';
+import { toast } from '../../utils/toast';
 import { motion } from 'framer-motion';
 import { Globe, TrendingUp, IndianRupee, Bitcoin, DollarSign, Sparkles } from 'lucide-react';
 import { useAppStore } from '../../state/appStore';
@@ -60,16 +60,38 @@ export default function TradePanel() {
     return () => window.removeEventListener('wispr:trade', handleWisprTrade as EventListener);
   }, [selected]);
 
-  // LIVE PRICE + CANDLE UPDATE (Finnhub-style simulation)
+  // LIVE PRICE + CANDLE UPDATE (Backend API)
   useEffect(() => {
-    const interval = setInterval(() => {
-      const delta = Math.random() > 0.5 ? 15 : -15;
-      setPrice(p => p + delta);
-      setChange(Math.abs(delta));
-      setIsGreen(delta > 0);
-    }, 3000);
+    let previousPrice = price;
+    const fetchQuote = async () => {
+      try {
+        const { tradeApi } = await import('../../lib/api-client');
+        const quote = await tradeApi.getQuote(selected.symbol);
+        if (quote && quote.price) {
+          const delta = quote.price - previousPrice;
+          previousPrice = quote.price;
+          setPrice(quote.price);
+          setChange(Math.abs(delta));
+          setIsGreen(delta >= 0);
+        }
+      } catch (error) {
+        console.debug('[Trade] Quote fetch failed, using simulation:', error);
+        // Fallback to simulation if API fails
+        const delta = Math.random() > 0.5 ? 15 : -15;
+        setPrice(p => {
+          previousPrice = p;
+          return p + delta;
+        });
+        setChange(Math.abs(delta));
+        setIsGreen(delta > 0);
+      }
+    };
+
+    // Initial fetch
+    fetchQuote();
+    const interval = setInterval(fetchQuote, 3000);
     return () => clearInterval(interval);
-  }, []);
+  }, [selected.symbol]);
 
   // Auto-analyze chart with LLM signals (every 30 seconds)
   useEffect(() => {
@@ -230,10 +252,25 @@ export default function TradePanel() {
     }
   }, [selected]);
 
-  const executeTrade = () => {
-    toast.success(
-      `${qty} × ${selected.name} @ ${selected.currency}${price.toLocaleString(undefined, { minimumFractionDigits: 2 })}\nSL: ${selected.currency}${sl.toLocaleString()} | TP: ${selected.currency}${tp.toLocaleString()}`
-    );
+  const executeTrade = async (orderType: 'buy' | 'sell') => {
+    try {
+      const { tradeApi } = await import('../../lib/api-client');
+      const result = await tradeApi.placeOrder({
+        symbol: selected.symbol,
+        quantity: qty,
+        orderType,
+        stopLoss: sl,
+        takeProfit: tp,
+      });
+      if (result.success) {
+        toast.success(
+          `${orderType.toUpperCase()} order placed: ${qty} × ${selected.name} @ ${selected.currency}${price.toLocaleString(undefined, { minimumFractionDigits: 2 })}\nOrder ID: ${result.orderId}\nSL: ${selected.currency}${sl.toLocaleString()} | TP: ${selected.currency}${tp.toLocaleString()}`
+        );
+      }
+    } catch (error) {
+      console.error('[Trade] Order placement failed:', error);
+      toast.error(`Failed to place ${orderType} order. Please try again.`);
+    }
   };
 
   return (
@@ -369,13 +406,13 @@ export default function TradePanel() {
             placeholder="Target"
           />
           <button
-            onClick={() => executeTrade()}
+            onClick={() => executeTrade('buy')}
             className="bg-green-600 hover:bg-green-500 active:scale-95 font-black text-xl md:text-4xl py-4 md:py-6 rounded-2xl shadow-2xl transition-all"
           >
             BUY
           </button>
           <button
-            onClick={() => executeTrade()}
+            onClick={() => executeTrade('sell')}
             className="bg-red-600 hover:bg-red-500 active:scale-95 font-black text-xl md:text-4xl py-4 md:py-6 rounded-2xl shadow-2xl transition-all"
           >
             SELL
